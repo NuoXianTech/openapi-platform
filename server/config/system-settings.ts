@@ -206,6 +206,14 @@ export const SYSTEM_SETTING_DEFINITIONS = {
     secret: false,
     description: '公安备案号'
   },
+  policeBeianCode: {
+    key: 'legal.police_code',
+    schema: text(100),
+    default: SITE_SETTINGS_DEFAULTS.policeBeianCode,
+    public: true,
+    secret: false,
+    description: '联网备案号码'
+  },
   termsUrl: {
     key: 'legal.terms_url',
     schema: text(1000),

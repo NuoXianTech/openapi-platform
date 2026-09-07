@@ -24,6 +24,7 @@ const FALLBACK_SETTINGS: PublicSiteSettings = {
   uptimeDays: null,
   icpBeian: null,
   policeBeian: null,
+  policeBeianCode: null,
   termsUrl: null,
   privacyUrl: null,
   registrationMode: 'open',

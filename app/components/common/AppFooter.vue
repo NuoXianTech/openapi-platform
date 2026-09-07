@@ -14,6 +14,11 @@ const yearLabel = computed(() =>
 
 const icpBeian = computed(() => settings.value.icpBeian || '')
 const policeBeian = computed(() => settings.value.policeBeian || '')
+const policeBeianUrl = computed(() => {
+  const url = 'https://beian.mps.gov.cn/#/query/webSearch'
+  const code = settings.value.policeBeianCode?.trim()
+  return code ? `${url}?code=${encodeURIComponent(code)}` : url
+})
 const hasBeian = computed(() => Boolean(icpBeian.value || policeBeian.value))
 </script>
 
@@ -40,7 +45,7 @@ const hasBeian = computed(() => Boolean(icpBeian.value || policeBeian.value))
           </a>
           <a
             v-if="policeBeian"
-            href="https://beian.mps.gov.cn/#/query/webSearch"
+            :href="policeBeianUrl"
             target="_blank"
             rel="noopener noreferrer"
           >

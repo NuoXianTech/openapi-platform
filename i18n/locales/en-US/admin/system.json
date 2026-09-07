@@ -47,6 +47,11 @@
             "label": "Public security filing number",
             "description": "Leave empty to hide it from the footer.",
             "placeholder": "Public security filing number"
+          },
+          "policeBeianCode": {
+            "label": "Online filing number",
+            "description": "Used by the public security filing link in the footer. Leave empty to open the search page, or enter a number to look up that filing.",
+            "placeholder": "00000000000000"
           }
         },
         "checkin": {

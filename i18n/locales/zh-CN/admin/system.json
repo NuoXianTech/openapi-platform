@@ -47,6 +47,11 @@
             "label": "公安备案号",
             "description": "留空则页脚不展示。填写后展示在页脚，点击跳转公安备案系统。",
             "placeholder": "京公网安备00000000000000号"
+          },
+          "policeBeianCode": {
+            "label": "联网备案号码",
+            "description": "用于页脚公安备案号的查询链接。留空打开查询页，填写后查询对应号码。",
+            "placeholder": "00000000000000"
           }
         },
         "checkin": {

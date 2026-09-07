@@ -14,7 +14,8 @@ const basicInformationKeys = [
   'termsUrl',
   'privacyUrl',
   'icpBeian',
-  'policeBeian'
+  'policeBeian',
+  'policeBeianCode'
 ] as const satisfies readonly AdminSettingsKey[]
 
 const checkinKeys = [
@@ -177,6 +178,21 @@ const fixedTimeInvalid = computed(() => {
         <UInput
           v-model="form.policeBeian"
           :placeholder="t('admin.system.site.basic.policeBeian.placeholder')"
+          autocomplete="off"
+        />
+      </UFormField>
+      <USeparator />
+      <UFormField
+        name="policeBeianCode"
+        :label="t('admin.system.site.basic.policeBeianCode.label')"
+        :description="t('admin.system.site.basic.policeBeianCode.description')"
+        class="flex max-sm:flex-col justify-between items-start gap-4"
+      >
+        <UInput
+          v-model="form.policeBeianCode"
+          :placeholder="t('admin.system.site.basic.policeBeianCode.placeholder')"
+          inputmode="numeric"
+          :maxlength="100"
           autocomplete="off"
         />
       </UFormField>

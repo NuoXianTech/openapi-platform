@@ -243,6 +243,7 @@ export const systemSettingsService = {
       uptimeDays: calculateUptimeDays(settings.startTime),
       icpBeian: settings.icpBeian || null,
       policeBeian: settings.policeBeian || null,
+      policeBeianCode: settings.policeBeianCode || null,
       termsUrl: settings.termsUrl || null,
       privacyUrl: settings.privacyUrl || null,
       registrationMode: settings.registrationMode,

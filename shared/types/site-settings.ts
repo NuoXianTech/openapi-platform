@@ -21,6 +21,7 @@ export interface SystemSettings {
   passwordResetEnabled: boolean
   icpBeian: string
   policeBeian: string
+  policeBeianCode: string
   termsUrl: string
   privacyUrl: string
   clientIpSource: ClientIpSource
@@ -85,6 +86,7 @@ export interface PublicSiteSettings {
   uptimeDays: number | null
   icpBeian: string | null
   policeBeian: string | null
+  policeBeianCode: string | null
   termsUrl: string | null
   privacyUrl: string | null
   registrationMode: SystemSettings['registrationMode']

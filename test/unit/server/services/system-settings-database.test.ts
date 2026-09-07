@@ -92,6 +92,8 @@ describe('system settings database service', () => {
 
     const updated = await systemSettingsService.update({
       siteName: 'Updated OpenAPI',
+      policeBeian: '京公网安备00123456789012号',
+      policeBeianCode: ' 00123456789012 ',
       registrationMode: 'invite',
       registrationInviteCode: 'site-invite-2026',
       smtpPort: 2525,
@@ -105,6 +107,7 @@ describe('system settings database service', () => {
     })
     expect(updated).toMatchObject({
       siteName: 'Updated OpenAPI',
+      policeBeianCode: '00123456789012',
       registrationMode: 'invite',
       registrationInviteCode: 'site-invite-2026',
       smtpPort: 2525,
@@ -178,12 +181,16 @@ describe('system settings database service', () => {
 
     const publicSettings = await systemSettingsService.getPublicSettings()
     expect(publicSettings.siteName).toBe('Updated by another process')
+    expect(publicSettings.policeBeian).toBe('京公网安备00123456789012号')
+    expect(publicSettings.policeBeianCode).toBe('00123456789012')
     expect(publicSettings.turnstile).toMatchObject({
       enabled: true,
       siteKey: 'turnstile-site-key',
       login: true
     })
     expect('internal.unregistered' in publicSettings).toBe(false)
+    await systemSettingsService.update({ policeBeianCode: '' })
+    expect((await systemSettingsService.getPublicSettings()).policeBeianCode).toBeNull()
 
     expect(systemSettingsService.registeredKeys()).toEqual(
       SYSTEM_SETTING_NAMES.map(name => SYSTEM_SETTING_DEFINITIONS[name].key)
