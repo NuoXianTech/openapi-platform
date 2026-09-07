@@ -19,16 +19,14 @@ interface DriftConnectionState {
 
 /**
  * Compares the stored Targets of one Upstream against the Targets the active
- * Routing Revision actually serves. Only Service-managed Upstreams can drift:
- * manual Upstreams publish every change immediately.
+ * Routing Revision actually serves.
  */
 export function findTargetRuntimeDrift(input: {
-  serviceManaged: boolean
   targets: readonly DriftTargetState[]
   connection: DriftConnectionState | null
   runtimeUpstream: RoutingRevisionUpstream | null
 }): TargetRuntimeDrift[] {
-  if (!input.serviceManaged || !input.runtimeUpstream) return []
+  if (!input.runtimeUpstream) return []
 
   const runtimeTargets = new Map(
     input.runtimeUpstream.targets.map(target => [target.id, target])

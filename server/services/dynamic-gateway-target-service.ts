@@ -463,10 +463,7 @@ export function createGatewayProxyFetch(input: {
         if (retryableStatus) markTargetUnavailable(input.match, target)
         else markTargetResponsive(input.match, target)
 
-        if (
-          input.match.upstream.serviceManaged
-          && isServiceTokenRejection(response)
-        ) {
+        if (isServiceTokenRejection(response)) {
           await response.body?.cancel().catch(() => undefined)
           throw new GatewayExecutionError(
             502,

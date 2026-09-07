@@ -62,8 +62,7 @@ export const adminCreateUpstreamSchema = z.object({
   name: nameSchema,
   serviceToken: z.string().trim()
     .min(UPSTREAM_CONSTRAINTS.SERVICE_TOKEN_MIN_LENGTH)
-    .max(UPSTREAM_CONSTRAINTS.SERVICE_TOKEN_MAX_LENGTH)
-    .optional(),
+    .max(UPSTREAM_CONSTRAINTS.SERVICE_TOKEN_MAX_LENGTH),
   loadBalancing: z.enum(['round_robin', 'weighted']).default('round_robin'),
   targets: z.array(z.object({
     baseUrl: targetBaseUrlSchema,
@@ -89,39 +88,6 @@ export const adminUpdateTargetSchema = z.object({
   weight: targetWeightSchema.optional(),
   enabled: z.boolean().optional()
 }).refine(value => Object.keys(value).length > 0, 'at least one field is required')
-
-export const adminRouteSchema = z.object({
-  apiVersionId: z.uuid(),
-  name: nameSchema,
-  hosts: z.array(hostSchema).max(ROUTE_CONSTRAINTS.HOST_MAX_COUNT).default([]),
-  method: httpMethodSchema,
-  pathPattern: pathSchema,
-  upstreamServiceId: z.uuid(),
-  upstreamPathTemplate: pathSchema,
-  isApiKey: z.boolean().default(false),
-  isStatistics: z.boolean().default(true),
-  creditsCost: routeCreditsCostSchema.default(0),
-  rateLimitPerSecond: routeRateLimitPerSecondSchema.default(0),
-  rateLimitPerMinute: routeRateLimitPerMinuteSchema.default(0),
-  rateLimitPerHour: routeRateLimitPerHourSchema.default(0),
-  rateLimitPerDay: routeRateLimitPerDaySchema.default(0),
-  timeoutMs: routeTimeoutSchema.default(10_000),
-  maxRequestBytes: routeRequestBytesSchema.default(1024 * 1024),
-  maxResponseBytes: routeResponseBytesSchema.default(10 * 1024 * 1024),
-  catalogStatus: z.enum(['automatic', 'maintenance']).default('automatic'),
-  sensitiveQueryParameters: z.array(
-    z.string().trim().min(1).max(ROUTE_CONSTRAINTS.SENSITIVE_PARAM_MAX_LENGTH)
-  ).max(ROUTE_CONSTRAINTS.SENSITIVE_PARAMS_MAX_COUNT).default([]),
-  state: z.enum(['draft', 'active', 'disabled']).default('active')
-}).superRefine((value, context) => {
-  if (value.creditsCost > 0 && (!value.isApiKey || !value.isStatistics)) {
-    context.addIssue({
-      code: 'custom',
-      path: ['creditsCost'],
-      message: '付费 Route 必须启用 API Key 和调用统计'
-    })
-  }
-})
 
 export const adminPublishServiceEndpointSchema = z.object({
   upstreamServiceId: z.uuid(),

@@ -1,6 +1,6 @@
 # 对外接口（/v{N}/*）落地规范
 
-Platform v1 的公开 API 全部来自动态 Route。`openapi-platform` 仓库不包含 `/v1/*` 业务 Handler，具体实现位于 Service-managed API Service 或任意手动管理的 HTTP Upstream。
+Platform v1 的公开 API 全部来自 Service 发现生成的动态 Route。`openapi-platform` 仓库不包含 `/v1/*` 业务 Handler，具体实现位于符合 Service 协议的 API Service。
 
 ## 1. 公开路径
 
@@ -45,7 +45,7 @@ upstream: /v1/player/assets/{path.asset}
 
 HTML、图片、音频、视频、文件和流式响应按真实媒体类型返回，不套 JSON 壳。`/healthz`、`/readyz`、`/openapi.json` 和 `/.well-known/*` 是运行协议文档，也保持原始结构。
 
-Platform Gateway 对 Service-managed Service 默认字节保真转发，因此 Service 必须在返回前生成规范响应壳；Gateway 自己产生的鉴权、限流、计费和上游错误也使用同一结构。手动管理的 HTTP Upstream 不会被强制包装。
+Platform Gateway 默认字节保真转发，因此 Service 必须在返回前生成规范响应壳；Gateway 自己产生的鉴权、限流、计费和上游错误也使用同一结构。
 
 ## 4. 错误
 
@@ -56,7 +56,7 @@ Platform Gateway 对 Service-managed Service 默认字节保真转发，因此 S
 
 ## 5. OpenAPI
 
-- Service-managed Service 使用 Zod/OpenAPI 作为请求、响应和 OpenAPI 3.1 的单一来源。
+- Service 使用 Zod/OpenAPI 作为请求、响应和 OpenAPI 3.1 的单一来源。
 - Platform 发现并保存 Endpoint 摘要，发现动作本身不会公开 Endpoint。
 - 管理员在接口目录明确保存发布变更后，Platform 自动创建或复用 Route；点击“应用全部变更”时才激活 Routing Revision。
 - OpenAPI 指纹变化、配置 Schema 变化和公开 Route 变化是三件独立的事。
@@ -68,10 +68,10 @@ Platform Gateway 对 Service-managed Service 默认字节保真转发，因此 S
 - Service 通过通用 Schema 声明字段，Platform 自动生成表单并加密保存 Secret。
 - Platform 不得增加接口专用业务字段或运行时业务模块注册机制。
 
-## 7. Service-managed Upstream 安全
+## 7. Upstream 安全
 
 - Platform 清除调用方 `Authorization`、Cookie、API Key 和伪造的 `x-openapi-*` 身份头。
-- Platform 按 Service-managed Upstream 注入自己的 `Authorization: Service <token>`。
+- Platform 按 Upstream 注入自己的 `Authorization: Service <token>`。
 - Query 中用于 Platform 鉴权的 `apikey` 在转发前删除。
 - API Service 默认只在私网暴露；跨不可信网络使用 TLS/mTLS。
 - 同一 Upstream 的多个 Target 必须暴露相同 Service 契约。

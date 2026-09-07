@@ -1,5 +1,5 @@
 {
-  "id": "bbd0c9bd-23b2-4c66-82ed-954830f186f2",
+  "id": "cc47fd85-410e-4f72-a18c-f34d410dfd7e",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "version": "7",
   "dialect": "postgresql",
@@ -2684,13 +2684,6 @@
           "notNull": true,
           "default": "'[]'::jsonb"
         },
-        "managed_by": {
-          "name": "managed_by",
-          "type": "varchar(20)",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'manual'"
-        },
         "is_support_route": {
           "name": "is_support_route",
           "type": "boolean",
@@ -2806,15 +2799,15 @@
           "onDelete": "cascade",
           "onUpdate": "no action"
         },
-        "api_routes_upstream_service_id_upstream_services_id_fk": {
-          "name": "api_routes_upstream_service_id_upstream_services_id_fk",
+        "api_routes_service_connection_fk": {
+          "name": "api_routes_service_connection_fk",
           "tableFrom": "api_routes",
-          "tableTo": "upstream_services",
+          "tableTo": "upstream_service_connections",
           "columnsFrom": [
             "upstream_service_id"
           ],
           "columnsTo": [
-            "id"
+            "upstream_service_id"
           ],
           "onDelete": "restrict",
           "onUpdate": "no action"
@@ -2855,14 +2848,6 @@
         "api_routes_catalog_status_chk": {
           "name": "api_routes_catalog_status_chk",
           "value": "\"api_routes\".\"catalog_status\" in ('automatic', 'maintenance')"
-        },
-        "api_routes_managed_by_chk": {
-          "name": "api_routes_managed_by_chk",
-          "value": "\"api_routes\".\"managed_by\" in ('manual', 'service')"
-        },
-        "api_routes_support_management_chk": {
-          "name": "api_routes_support_management_chk",
-          "value": "\"api_routes\".\"is_support_route\" = false or \"api_routes\".\"managed_by\" = 'service'"
         },
         "api_routes_state_chk": {
           "name": "api_routes_state_chk",

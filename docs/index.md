@@ -51,7 +51,7 @@ OpenAPI Platform 是自托管 API 管理平台，负责动态路由、访问治�
 7. 在接口目录或高级设置中配置 API Key、Scope、限流、积分和调用日志；接口目录的变更保存后统一应用当前环境，高级设置按原有保存流程应用。
 8. 验证公开路径、失败语义、积分、日志和回滚。
 
-普通 HTTP API 可以跳过 Service 发现协议，创建不带 Service Token 的 Upstream 后通过“自定义接口”保存 Route。
+所有接口都通过 Service 的 OpenAPI 契约发现；新建 Upstream 必须提供 Service Token，外部 API 的返回结构由 Service 适配。
 
 ## 核心规则
 

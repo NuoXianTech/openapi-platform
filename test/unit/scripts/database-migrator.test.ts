@@ -124,6 +124,14 @@ describe('database migration runner', () => {
     await expect(client.query('select target_name from api_calls limit 0')).rejects.toThrow()
     await expect(client.query('select published_at from routing_revisions limit 0')).resolves.toBeTruthy()
     await expect(client.query('select status from routing_revisions limit 0')).rejects.toThrow()
+    await expect(client.query('select managed_by from api_routes limit 0')).rejects.toThrow()
+    const routeConnections = await client.query<{ conname: string }>(`
+      select conname from pg_constraint
+      where conrelid = 'api_routes'::regclass
+        and confrelid = 'upstream_service_connections'::regclass
+        and contype = 'f'
+    `)
+    expect(routeConnections.rows).toEqual([{ conname: 'api_routes_service_connection_fk' }])
     await client.close()
   }, 20_000)
 

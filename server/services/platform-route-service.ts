@@ -17,12 +17,9 @@ import {
 } from '~~/server/utils/route-pattern'
 import { firstRow } from '~~/server/utils/row'
 import { routingReferenceService } from '~~/server/services/routing-reference-service'
-import { applyPlatformMutation } from '~~/server/services/platform-endpoint-publication-service'
 import type { RouteBinding, RouteMutationInput } from '~~/server/types/platform-publication'
 
 interface RouteMutationOptions {
-  allowServiceManaged?: boolean
-  managedBy?: 'manual' | 'service'
   isSupportRoute?: boolean
   transaction?: DatabaseTransaction
 }
@@ -64,6 +61,7 @@ async function normalizeRouteMutation(
   }).from(apiVersions)
     .innerJoin(apiProducts, eq(apiProducts.id, apiVersions.productId))
     .innerJoin(upstreamServices, eq(upstreamServices.id, input.upstreamServiceId))
+    .innerJoin(upstreamServiceConnections, eq(upstreamServiceConnections.upstreamServiceId, upstreamServices.id))
     .where(and(eq(apiVersions.id, input.apiVersionId), isNull(apiProducts.deletedAt)))
     .limit(1))
 
@@ -131,19 +129,6 @@ async function normalizeRouteMutation(
   }
 }
 
-function assertMutableRoute(
-  route: typeof apiRoutes.$inferSelect,
-  options: RouteMutationOptions
-): void {
-  if (route.managedBy === 'service' && !options.allowServiceManaged) {
-    throw createApplicationError({
-      statusCode: 409,
-      message: 'Service routes must be changed through the endpoint catalog',
-      data: { code: 'SERVICE_ROUTE_MANAGED', isSupportRoute: route.isSupportRoute }
-    })
-  }
-}
-
 export const platformRouteService = {
   async list(
     options: { transaction?: DatabaseTransaction } = {}
@@ -153,13 +138,12 @@ export const platformRouteService = {
       route: apiRoutes,
       version: apiVersions,
       product: apiProducts,
-      upstream: upstreamServices,
-      serviceManaged: upstreamServiceConnections.upstreamServiceId
+      upstream: upstreamServices
     }).from(apiRoutes)
       .innerJoin(apiVersions, eq(apiVersions.id, apiRoutes.apiVersionId))
       .innerJoin(apiProducts, eq(apiProducts.id, apiVersions.productId))
       .innerJoin(upstreamServices, eq(upstreamServices.id, apiRoutes.upstreamServiceId))
-      .leftJoin(upstreamServiceConnections, eq(
+      .innerJoin(upstreamServiceConnections, eq(
         upstreamServiceConnections.upstreamServiceId,
         upstreamServices.id
       ))
@@ -169,10 +153,7 @@ export const platformRouteService = {
         isNull(upstreamServices.deletedAt)
       ))
       .orderBy(asc(apiProducts.name), asc(apiVersions.version), asc(apiRoutes.pathPattern), asc(apiRoutes.method))
-    return rows.map(row => ({
-      ...row,
-      upstream: { ...row.upstream, serviceManaged: Boolean(row.serviceManaged) }
-    }))
+    return rows
   },
 
   async create(input: RouteMutationInput, options: RouteMutationOptions = {}) {
@@ -181,7 +162,6 @@ export const platformRouteService = {
     try {
       return firstRow(await executor.insert(apiRoutes).values({
         ...values,
-        managedBy: options.managedBy ?? 'manual',
         isSupportRoute: options.isSupportRoute ?? false
       }).returning())
     } catch (error) {
@@ -201,13 +181,12 @@ export const platformRouteService = {
       route: apiRoutes,
       version: apiVersions,
       product: apiProducts,
-      upstream: upstreamServices,
-      serviceManaged: upstreamServiceConnections.upstreamServiceId
+      upstream: upstreamServices
     }).from(apiRoutes)
       .innerJoin(apiVersions, eq(apiVersions.id, apiRoutes.apiVersionId))
       .innerJoin(apiProducts, eq(apiProducts.id, apiVersions.productId))
       .innerJoin(upstreamServices, eq(upstreamServices.id, apiRoutes.upstreamServiceId))
-      .leftJoin(upstreamServiceConnections, eq(
+      .innerJoin(upstreamServiceConnections, eq(
         upstreamServiceConnections.upstreamServiceId,
         upstreamServices.id
       ))
@@ -225,10 +204,7 @@ export const platformRouteService = {
         data: { code: 'ROUTE_NOT_FOUND' }
       })
     }
-    return {
-      ...binding,
-      upstream: { ...binding.upstream, serviceManaged: Boolean(binding.serviceManaged) }
-    }
+    return binding
   },
 
   async update(id: string, input: RouteMutationInput, options: RouteMutationOptions = {}) {
@@ -239,7 +215,6 @@ export const platformRouteService = {
     if (!existing) {
       throw createApplicationError({ statusCode: 404, message: 'route not found', data: { code: 'ROUTE_NOT_FOUND' } })
     }
-    assertMutableRoute(existing, options)
     const values = await normalizeRouteMutation(
       input,
       options.transaction,
@@ -270,7 +245,6 @@ export const platformRouteService = {
     if (!existing) {
       throw createApplicationError({ statusCode: 404, message: 'route not found', data: { code: 'ROUTE_NOT_FOUND' } })
     }
-    assertMutableRoute(existing, options)
     if (await routingReferenceService.hasRoute(id, options.transaction)) {
       throw createApplicationError({
         statusCode: 409,
@@ -287,40 +261,5 @@ export const platformRouteService = {
       throw createApplicationError({ statusCode: 404, message: 'route not found', data: { code: 'ROUTE_NOT_FOUND' } })
     }
     return removed
-  },
-
-  async createAndPublish(
-    input: RouteMutationInput,
-    createdBy: number | null
-  ) {
-    const committed = await applyPlatformMutation(createdBy, async (tx) => {
-      const route = await platformRouteService.create(input, {
-        transaction: tx
-      })
-      if (!route) throw new Error('route insert returned no row')
-      return { value: route }
-    })
-    const { value: route, ...publication } = committed
-    return { route, ...publication }
-  },
-
-  async updateAndPublish(
-    id: string,
-    input: RouteMutationInput,
-    createdBy: number | null
-  ) {
-    const committed = await applyPlatformMutation(createdBy, async tx => ({
-      value: await platformRouteService.update(id, input, { transaction: tx })
-    }))
-    const { value: route, ...publication } = committed
-    return { route, ...publication }
-  },
-
-  async removeAndPublish(id: string, createdBy: number | null) {
-    const committed = await applyPlatformMutation(createdBy, async tx => ({
-      value: await platformRouteService.remove(id, { transaction: tx })
-    }))
-    const { value: route, ...publication } = committed
-    return { route, ...publication }
   }
 }

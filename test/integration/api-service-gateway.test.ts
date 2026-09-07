@@ -829,7 +829,7 @@ describe('Platform to Node API Service acceptance', () => {
     }
   })
 
-  it('publishes a Service-managed Route, replaces caller auth, and exposes only the first migrated APIs', async () => {
+  it('publishes a Route, replaces caller auth, and exposes only the first migrated APIs', async () => {
     const requestId = randomUUID()
     const response = await fetch(
       `${gatewayBaseURL}/v1/api-service-contract`,

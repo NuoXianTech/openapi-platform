@@ -37,7 +37,7 @@ function loadBalancingLabel(upstream: PlatformUpstream): string {
 }
 
 function upstreamStateColor(upstream: PlatformUpstream) {
-  if (upstream.status !== 'active' || !upstream.serviceManaged) {
+  if (upstream.status !== 'active') {
     return platformStatusColor(upstream.status)
   }
   if (!upstream.connection?.discovered) return 'warning' as const
@@ -47,9 +47,6 @@ function upstreamStateColor(upstream: PlatformUpstream) {
 function upstreamStateLabel(upstream: PlatformUpstream): string {
   if (upstream.status !== 'active') {
     return t(`admin.apis.routing.serviceStatuses.${upstream.status}`)
-  }
-  if (!upstream.serviceManaged) {
-    return t('admin.apis.routing.serviceControl.enabled')
   }
   if (!upstream.connection?.discovered) {
     return t('admin.apis.routing.serviceControl.notDiscovered')
@@ -332,7 +329,6 @@ function targetItems(upstream: PlatformUpstream, target: PlatformUpstreamTarget)
         <template #actions-cell="{ row }">
           <div class="flex justify-end gap-1">
             <UButton
-              v-if="row.original.serviceManaged"
               :to="{
                 path: `/admin/apis/upstreams/${row.original.id}`,
                 query: route.query

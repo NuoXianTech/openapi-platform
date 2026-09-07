@@ -26,7 +26,6 @@ function readyTarget(overrides: Partial<{
 function runtimeUpstream(targets: Array<{ id: string, baseUrl: string }>) {
   return {
     id: 'upstream-1',
-    serviceManaged: true,
     loadBalancing: 'round_robin' as const,
     targets: targets.map(target => ({ ...target, weight: 1 }))
   }
@@ -35,7 +34,6 @@ function runtimeUpstream(targets: Array<{ id: string, baseUrl: string }>) {
 describe('findTargetRuntimeDrift', () => {
   it('reports the runtime address when a Service Target address changed', () => {
     const drift = findTargetRuntimeDrift({
-      serviceManaged: true,
       // The address was repointed, so discovery reset the verification state.
       targets: [readyTarget({
         baseUrl: 'https://new.example.com/'
@@ -56,7 +54,6 @@ describe('findTargetRuntimeDrift', () => {
 
   it('reports a verified Target that has not reached the runtime', () => {
     const drift = findTargetRuntimeDrift({
-      serviceManaged: true,
       targets: [
         readyTarget(),
         readyTarget({ id: 'target-2', baseUrl: 'https://two.example.com/' })
@@ -77,7 +74,6 @@ describe('findTargetRuntimeDrift', () => {
 
   it('reports a runtime Target that no longer exists', () => {
     const drift = findTargetRuntimeDrift({
-      serviceManaged: true,
       targets: [readyTarget()],
       connection,
       runtimeUpstream: runtimeUpstream([
@@ -96,7 +92,6 @@ describe('findTargetRuntimeDrift', () => {
 
   it('stays silent when the runtime matches the stored Targets', () => {
     expect(findTargetRuntimeDrift({
-      serviceManaged: true,
       targets: [readyTarget()],
       connection,
       runtimeUpstream: runtimeUpstream([
@@ -109,7 +104,6 @@ describe('findTargetRuntimeDrift', () => {
     // An unverified Target is intentionally withheld from the runtime, so its
     // absence is expected rather than drift.
     expect(findTargetRuntimeDrift({
-      serviceManaged: true,
       targets: [
         readyTarget(),
         {
@@ -129,20 +123,8 @@ describe('findTargetRuntimeDrift', () => {
     })).toEqual([])
   })
 
-  it('ignores manual Upstreams, which publish every change immediately', () => {
-    expect(findTargetRuntimeDrift({
-      serviceManaged: false,
-      targets: [readyTarget({ baseUrl: 'https://new.example.com/' })],
-      connection: null,
-      runtimeUpstream: runtimeUpstream([
-        { id: 'target-1', baseUrl: 'https://old.example.com/' }
-      ])
-    })).toEqual([])
-  })
-
   it('ignores an Upstream that is not in the runtime at all', () => {
     expect(findTargetRuntimeDrift({
-      serviceManaged: true,
       targets: [readyTarget()],
       connection,
       runtimeUpstream: null

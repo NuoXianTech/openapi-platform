@@ -24,7 +24,7 @@ interface CreateUpstreamInput {
   slug: string
   name: string
   loadBalancing: 'round_robin' | 'weighted'
-  serviceToken?: string
+  serviceToken: string
   targets: Array<{
     baseUrl: string
     weight: number
@@ -55,7 +55,7 @@ function normalizeServiceToken(value: string | undefined): string {
   if (token.length < 32 || token.length > 4096) {
     throw createApplicationError({
       statusCode: 400,
-      message: 'Service-managed upstreams require a Service Token with 32 to 4096 characters',
+      message: 'upstreams require a Service Token with 32 to 4096 characters',
       data: { code: 'SERVICE_TOKEN_REQUIRED' }
     })
   }
@@ -71,6 +71,7 @@ async function findTargetBindingForUpdate(
     service: upstreamServices
   }).from(upstreamTargets)
     .innerJoin(upstreamServices, eq(upstreamServices.id, upstreamTargets.upstreamServiceId))
+    .innerJoin(upstreamServiceConnections, eq(upstreamServiceConnections.upstreamServiceId, upstreamServices.id))
     .where(and(eq(upstreamTargets.id, id), isNull(upstreamServices.deletedAt)))
     .limit(1)
     .for('update'))
@@ -102,7 +103,6 @@ async function assertCanDisableLastTarget(
     .where(eq(upstreamServiceConnections.upstreamServiceId, serviceId))
     .limit(1)) ?? null
   if (connection && enabledTargets.some(target => isServiceTargetReady(target, connection))) return
-  if (!connection && enabledTargets.length > 0) return
 
   throw createApplicationError({
     statusCode: 409,
@@ -112,16 +112,6 @@ async function assertCanDisableLastTarget(
 }
 
 export const platformUpstreamService = {
-  async hasServiceConnection(
-    id: string,
-    options: { transaction?: DatabaseTransaction } = {}
-  ): Promise<boolean> {
-    const executor = options.transaction ?? db
-    return Boolean(firstRow(await executor.select({ id: upstreamServiceConnections.upstreamServiceId })
-      .from(upstreamServiceConnections)
-      .where(eq(upstreamServiceConnections.upstreamServiceId, id))
-      .limit(1)))
-  },
   async list(
     options: { checkAvailability?: boolean, ids?: string[] } = {}
   ): Promise<UpstreamView[]> {
@@ -139,7 +129,7 @@ export const platformUpstreamService = {
     })
       .from(upstreamServices)
       .leftJoin(upstreamTargets, eq(upstreamTargets.upstreamServiceId, upstreamServices.id))
-      .leftJoin(upstreamServiceConnections, eq(
+      .innerJoin(upstreamServiceConnections, eq(
         upstreamServiceConnections.upstreamServiceId,
         upstreamServices.id
       ))
@@ -147,14 +137,12 @@ export const platformUpstreamService = {
       .orderBy(asc(upstreamServices.name), asc(upstreamTargets.createdAt))
 
     const result = new Map<string, typeof upstreamServices.$inferSelect & {
-      serviceManaged: boolean
       targets: Array<typeof upstreamTargets.$inferSelect>
-      connectionRecord: typeof upstreamServiceConnections.$inferSelect | null
+      connectionRecord: typeof upstreamServiceConnections.$inferSelect
     }>()
     for (const row of rows) {
       const item = result.get(row.service.id) ?? {
         ...row.service,
-        serviceManaged: Boolean(row.connection),
         targets: [],
         connectionRecord: row.connection
       }
@@ -167,17 +155,13 @@ export const platformUpstreamService = {
         || upstream.status !== 'active'
         ? 'unknown'
         : (await resolveServiceAvailability(
-            connectionRecord?.serviceDescription ?? null,
+            connectionRecord.serviceDescription,
             upstream.targets,
-            connectionRecord
-              ? await upstreamServiceTokenService.getForControl(upstream.id)
-              : null
+            await upstreamServiceTokenService.getForControl(upstream.id)
           )).overall
       return {
         ...upstream,
-        connection: connectionRecord
-          ? toServiceConnectionView(connectionRecord, availability)
-          : null
+        connection: toServiceConnectionView(connectionRecord, availability)
       }
     }))
   },
@@ -186,11 +170,13 @@ export const platformUpstreamService = {
     const [rows, totalRow] = await Promise.all([
       db.select({ id: upstreamServices.id })
         .from(upstreamServices)
+        .innerJoin(upstreamServiceConnections, eq(upstreamServiceConnections.upstreamServiceId, upstreamServices.id))
         .where(isNull(upstreamServices.deletedAt))
         .orderBy(asc(upstreamServices.name), asc(upstreamServices.id))
         .limit(options.limit)
         .offset(options.offset),
       db.select({ value: count() }).from(upstreamServices)
+        .innerJoin(upstreamServiceConnections, eq(upstreamServiceConnections.upstreamServiceId, upstreamServices.id))
         .where(isNull(upstreamServices.deletedAt))
     ])
     const ids = rows.map(row => row.id)
@@ -211,9 +197,7 @@ export const platformUpstreamService = {
   },
 
   async create(input: CreateUpstreamInput) {
-    const serviceToken = input.serviceToken
-      ? normalizeServiceToken(input.serviceToken)
-      : null
+    const serviceToken = normalizeServiceToken(input.serviceToken)
     const normalizedTargets = input.targets.map(target => ({
       ...target,
       url: normalizeUpstreamTargetUrl(target.baseUrl)
@@ -232,22 +216,15 @@ export const platformUpstreamService = {
           baseUrl: target.url.toString(),
           weight: target.weight
         }))).returning()
-        const connection = serviceToken
-          ? firstRow(await tx.insert(upstreamServiceConnections).values({
-              upstreamServiceId: service.id,
-              serviceTokenCiphertext: encryptStoredSecret(
-                serviceToken!,
-                'service-token'
-              )
-            }).returning())
-          : null
+        const connection = firstRow(await tx.insert(upstreamServiceConnections).values({
+          upstreamServiceId: service.id,
+          serviceTokenCiphertext: encryptStoredSecret(serviceToken, 'service-token')
+        }).returning())
+        if (!connection) throw new Error('Service connection insert returned no row')
         return {
           ...service,
-          serviceManaged: Boolean(connection),
           targets,
-          connection: connection
-            ? toServiceConnectionView(connection)
-            : null
+          connection: toServiceConnectionView(connection)
         }
       })
     } catch (error) {
@@ -263,9 +240,11 @@ export const platformUpstreamService = {
     options: { transaction?: DatabaseTransaction } = {}
   ) {
     const executor = options.transaction ?? db
-    return firstRow(await executor.select().from(upstreamServices)
+    const row = firstRow(await executor.select({ service: upstreamServices }).from(upstreamServices)
+      .innerJoin(upstreamServiceConnections, eq(upstreamServiceConnections.upstreamServiceId, upstreamServices.id))
       .where(eq(upstreamServices.id, id))
       .limit(1))
+    return row?.service
   },
 
   async update(
@@ -282,13 +261,7 @@ export const platformUpstreamService = {
       if (!updated) {
         throw createApplicationError({ statusCode: 404, message: 'upstream not found', data: { code: 'UPSTREAM_NOT_FOUND' } })
       }
-      return {
-        ...updated,
-        serviceManaged: await platformUpstreamService.hasServiceConnection(
-          id,
-          { transaction: options.transaction }
-        )
-      }
+      return updated
     } catch (error) {
       if (getSqlState(error) === '23505') {
         throw createApplicationError({ statusCode: 409, message: 'upstream slug already exists', data: { code: 'UPSTREAM_CONFLICT' } })
@@ -349,10 +322,6 @@ export const platformUpstreamService = {
     }
     const url = normalizeUpstreamTargetUrl(input.baseUrl)
     try {
-      const serviceManaged = await platformUpstreamService.hasServiceConnection(
-        upstreamServiceId,
-        { transaction: options.transaction }
-      )
       const target = firstRow(await executor.insert(upstreamTargets).values({
         upstreamServiceId,
         baseUrl: url.toString(),
@@ -362,7 +331,7 @@ export const platformUpstreamService = {
       if (!target) throw new Error('target insert returned no row')
       return {
         target,
-        publishRouting: !serviceManaged && target.enabled
+        publishRouting: false
       }
     } catch (error) {
       if (getSqlState(error) === '23505') {
@@ -393,15 +362,8 @@ export const platformUpstreamService = {
         const baseUrl = input.baseUrl === undefined
           ? binding.target.baseUrl
           : normalizeUpstreamTargetUrl(input.baseUrl).toString()
-        const serviceManaged = await platformUpstreamService.hasServiceConnection(
-          binding.service.id,
-          { transaction: tx }
-        )
-        const resetServiceState = serviceManaged
-          && (
-            baseUrl !== binding.target.baseUrl
-            || (!binding.target.enabled && input.enabled === true)
-          )
+        const resetServiceState = baseUrl !== binding.target.baseUrl
+          || (!binding.target.enabled && input.enabled === true)
         const target = firstRow(await tx.update(upstreamTargets).set({
           ...input,
           baseUrl,
@@ -426,8 +388,7 @@ export const platformUpstreamService = {
           && input.weight !== binding.target.weight
         return {
           target,
-          publishRouting: !serviceManaged
-            || disablingPublishedTarget
+          publishRouting: disablingPublishedTarget
             || updatingPublishedTarget
         }
       }
@@ -506,24 +467,15 @@ export const platformUpstreamService = {
       normalizedToken,
       'service-token'
     )
-    const updated = firstRow(await db.insert(upstreamServiceConnections)
-      .values({
-        upstreamServiceId: id,
-        serviceTokenCiphertext,
+    const updated = firstRow(await db.update(upstreamServiceConnections)
+      .set({
+        // Control-plane requests verify the pending token before Gateway
+        // traffic switches away from the active credential.
         pendingServiceTokenCiphertext: serviceTokenCiphertext,
-        lastDiscoveryError: 'Service Token changed; run discovery to verify the connection'
+        lastDiscoveryError: 'Service Token changed; run discovery to verify the connection',
+        updatedAt: new Date()
       })
-      .onConflictDoUpdate({
-        target: upstreamServiceConnections.upstreamServiceId,
-        set: {
-          // Keep the last verified credential active until discovery proves
-          // the replacement works.  Control-plane requests use the pending
-          // value; Gateway traffic continues with the active value.
-          pendingServiceTokenCiphertext: serviceTokenCiphertext,
-          lastDiscoveryError: 'Service Token changed; run discovery to verify the connection',
-          updatedAt: new Date()
-        }
-      })
+      .where(eq(upstreamServiceConnections.upstreamServiceId, id))
       .returning())
     if (!updated) {
       throw createApplicationError({

@@ -6,7 +6,7 @@
 
 - **产品架构线**：v1 表示 Platform + Service 的双应用架构，不等同于 Git Tag 或容器标签。
 - **软件版本**：`openapi-platform` 与 `openapi-service` 独立遵循语义化版本；首个公开基线均从 `0.1.0` 开始。
-- **控制协议**：`openapi-service/v1` 表示 Platform 与 Service-managed Service 的 HTTP 控制协议版本，不等同于任一应用的软件版本，也不等同于业务 Endpoint 的 `/v1`。
+- **控制协议**：`openapi-service/v1` 表示 Platform 与 Service 的 HTTP 控制协议版本，不等同于任一应用的软件版本，也不等同于业务 Endpoint 的 `/v1`。
 - **开发版本**：`main` 分支构建的 `latest` 用于持续集成和开发验证；正式版本使用不可变 Git Tag、Release 与镜像 digest。
 
 ## 2. 产品边界
@@ -18,16 +18,16 @@ OpenAPI 由两个独立应用组成：
 
 Platform 不运行具体业务 Handler。Service 不管理 Platform 用户、公开 API Key、积分、公开路径或 Routing Revision。两者只通过文档化 HTTP 协议协作，不共享数据库，也不要求同步发布。
 
-标准 HTTP 服务可以作为不带 Service Token 的手动管理 Upstream 接入；它们不需要实现 Service 发现与业务配置协议，但必须满足 Platform 的网络和 SSRF 安全约束。
+所有 Upstream 必须提供 Service Token，并实现受支持的 Service 发现、OpenAPI 和业务配置协议。外部 API 的输入输出适配由 Service 承担。
 
 ## 3. 受支持的管理能力
 
 正式支持范围包括：
 
-- Product、Version、Route、Upstream 与 Target 的管理生命周期。
+- Product、Version、Upstream 与 Target 的管理生命周期，以及由 Service 契约生成的 Route 治理。
 - Service Endpoint 接口目录，以及显式确认后的自动 Route 创建和 Revision 发布。
 - 不可变 Routing Revision、发布校验、环境激活与历史版本回滚。
-- Service-managed 与手动管理的 Upstream，以及同一 Upstream 内的轮询和加权 Target。
+- Service Upstream，以及同一 Upstream 内的轮询和加权 Target。
 - Service 身份、OpenAPI、配置 Schema 与脱敏配置状态发现。
 - 通用业务配置表单、Secret 加密保存、完整快照同步、乐观锁与 Target 漂移状态。
 - API Key、Scope、IP、有效期、配额、限流、积分预留与结算。
@@ -50,7 +50,7 @@ Platform 不运行具体业务 Handler。Service 不管理 Platform 用户、公
 
 ## 5. 兼容性规则
 
-- 同一 Service-managed Upstream 的全部 Target 必须返回相同 Service ID、Service 名称、OpenAPI 指纹、配置 Schema 指纹和控制协议版本。
+- 同一 Upstream 的全部 Target 必须返回相同 Service ID、Service 名称、OpenAPI 指纹、配置 Schema 指纹和控制协议版本。
 - 控制协议可以增加可选字段；破坏性协议变化必须发布新的协议版本。
 - Platform 与 Service 的软件版本号不参与兼容判断；发现阶段只接受 Platform 明确支持的 `serviceProtocol`，目标组合还必须通过集成测试。
 - 业务 Endpoint 可以同时提供 `/v1` 与 `/v2`。Platform 按 OpenAPI 中的实际路径创建对应 Product Version，不要求控制协议或两个应用同步升级。

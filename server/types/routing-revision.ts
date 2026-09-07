@@ -6,7 +6,6 @@ interface RoutingRevisionTarget {
 
 export interface RoutingRevisionUpstream {
   id: string
-  serviceManaged: boolean
   loadBalancing: 'round_robin' | 'weighted'
   targets: RoutingRevisionTarget[]
 }

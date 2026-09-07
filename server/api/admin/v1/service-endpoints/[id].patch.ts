@@ -1,6 +1,5 @@
 import { adminUpdateEndpointPublicationSchema } from '~~/server/schemas/admin'
 import { platformEndpointCatalogService } from '~~/server/services/platform-endpoint-catalog-service'
-import { platformRouteService } from '~~/server/services/platform-route-service'
 import { addRequestOperationLog } from '~~/server/utils/request-operation-log'
 import { defineAdminEventHandler } from '~~/server/utils/auth'
 import { readUuidRouterParam } from '~~/server/utils/router-param'
@@ -13,12 +12,11 @@ export default defineAdminEventHandler(async (event, admin) => {
     event,
     adminUpdateEndpointPublicationSchema
   )
-  const binding = await platformRouteService.get(routeId)
   const result = await platformEndpointCatalogService.update(
     routeId,
     body,
     admin.id,
-    { publishRouting: binding.route.managedBy !== 'service' }
+    { publishRouting: false }
   )
   await addRequestOperationLog(event, {
     userId: admin.id,

@@ -309,7 +309,6 @@ CREATE TABLE "api_routes" (
 	"max_response_bytes" integer DEFAULT 10485760 NOT NULL,
 	"catalog_status" varchar(20) DEFAULT 'automatic' NOT NULL,
 	"sensitive_query_parameters" jsonb DEFAULT '[]'::jsonb NOT NULL,
-	"managed_by" varchar(20) DEFAULT 'manual' NOT NULL,
 	"is_support_route" boolean DEFAULT false NOT NULL,
 	"state" varchar(20) DEFAULT 'active' NOT NULL,
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
@@ -323,8 +322,6 @@ CREATE TABLE "api_routes" (
 	CONSTRAINT "api_routes_request_bytes_chk" CHECK ("api_routes"."max_request_bytes" between 0 and 1073741824),
 	CONSTRAINT "api_routes_response_bytes_chk" CHECK ("api_routes"."max_response_bytes" between 0 and 2147483647),
 	CONSTRAINT "api_routes_catalog_status_chk" CHECK ("api_routes"."catalog_status" in ('automatic', 'maintenance')),
-	CONSTRAINT "api_routes_managed_by_chk" CHECK ("api_routes"."managed_by" in ('manual', 'service')),
-	CONSTRAINT "api_routes_support_management_chk" CHECK ("api_routes"."is_support_route" = false or "api_routes"."managed_by" = 'service'),
 	CONSTRAINT "api_routes_state_chk" CHECK ("api_routes"."state" in ('draft', 'active', 'disabled'))
 );
 --> statement-breakpoint
@@ -442,7 +439,7 @@ ALTER TABLE "notification_deliveries" ADD CONSTRAINT "notification_deliveries_re
 ALTER TABLE "api_categories" ADD CONSTRAINT "api_categories_parent_id_api_categories_id_fk" FOREIGN KEY ("parent_id") REFERENCES "public"."api_categories"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "api_products" ADD CONSTRAINT "api_products_category_id_api_categories_id_fk" FOREIGN KEY ("category_id") REFERENCES "public"."api_categories"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "api_routes" ADD CONSTRAINT "api_routes_api_version_id_api_versions_id_fk" FOREIGN KEY ("api_version_id") REFERENCES "public"."api_versions"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "api_routes" ADD CONSTRAINT "api_routes_upstream_service_id_upstream_services_id_fk" FOREIGN KEY ("upstream_service_id") REFERENCES "public"."upstream_services"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "api_routes" ADD CONSTRAINT "api_routes_service_connection_fk" FOREIGN KEY ("upstream_service_id") REFERENCES "public"."upstream_service_connections"("upstream_service_id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "api_versions" ADD CONSTRAINT "api_versions_product_id_api_products_id_fk" FOREIGN KEY ("product_id") REFERENCES "public"."api_products"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "api_versions" ADD CONSTRAINT "api_versions_openapi_document_id_openapi_documents_id_fk" FOREIGN KEY ("openapi_document_id") REFERENCES "public"."openapi_documents"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "openapi_documents" ADD CONSTRAINT "openapi_documents_upstream_service_id_upstream_services_id_fk" FOREIGN KEY ("upstream_service_id") REFERENCES "public"."upstream_services"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint

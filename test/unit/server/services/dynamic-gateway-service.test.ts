@@ -93,7 +93,6 @@ const match: ResolvedDynamicRoute = {
   },
   upstream: {
     id: '00000000-0000-4000-8000-000000000006',
-    serviceManaged: true,
     loadBalancing: 'round_robin',
     targets: [{
       id: '00000000-0000-4000-8000-000000000007',
@@ -147,6 +146,11 @@ beforeEach(() => {
 })
 
 describe('dynamic gateway streaming billing', () => {
+  it('requires Service authentication for every upstream request', () => {
+    expect(() => createUpstreamHeaders(createEvent(), match, ''))
+      .toThrow('上游服务凭证尚未配置')
+  })
+
   it('owns forwarding metadata instead of relaying caller supplied values', () => {
     const event = createEvent()
     event.node.req.headers = {

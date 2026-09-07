@@ -56,7 +56,7 @@ curl.exe -i http://127.0.0.1:3000/api/ready
 
 登录 `/admin/apis`，完成：
 
-1. 创建 Service-managed Upstream：
+1. 创建 Upstream：
    - Service Token 与 Service 的 `API_SERVICE_TOKEN` 相同。
    - 本机 Target 使用 `http://127.0.0.1:8080`。
    - Compose Target 使用 `http://openapi-service:8080`。

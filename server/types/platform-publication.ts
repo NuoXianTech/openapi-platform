@@ -36,15 +36,12 @@ export interface RouteBinding {
   route: typeof apiRoutes.$inferSelect
   version: typeof apiVersions.$inferSelect
   product: typeof apiProducts.$inferSelect
-  upstream: typeof upstreamServices.$inferSelect & {
-    serviceManaged: boolean
-  }
+  upstream: typeof upstreamServices.$inferSelect
 }
 
 export type UpstreamView = typeof upstreamServices.$inferSelect & {
   targets: Array<typeof upstreamTargets.$inferSelect>
-  connection: ServiceConnectionView | null
-  serviceManaged: boolean
+  connection: ServiceConnectionView
 }
 
 export type PublicationStatus
@@ -55,7 +52,7 @@ export type PublicationStatus
     | 'disabled'
 
 /**
- * A Service-managed Target only reaches the runtime after discovery verifies it,
+ * A Target only reaches the runtime after discovery verifies it,
  * so the stored address can legitimately differ from the published one. Surfacing
  * the difference keeps a silently stale runtime from looking healthy.
  */

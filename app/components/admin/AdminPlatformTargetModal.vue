@@ -30,12 +30,11 @@ const state = reactive<TargetFormState>({
 })
 
 /**
- * A Service-managed Target must pass discovery before it reaches the runtime,
+ * A Target must pass discovery before it reaches the runtime,
  * so changing the address leaves the gateway on the previous one until then.
  */
 const warnsAboutDeferredAddress = computed(() => (
   isEditing.value
-  && props.upstream.serviceManaged
   && state.baseUrl.trim() !== ''
   && state.baseUrl.trim() !== props.target?.baseUrl
 ))

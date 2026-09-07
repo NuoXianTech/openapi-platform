@@ -2,7 +2,7 @@
 
 ## 1. 协议范围
 
-Platform 与 Service-managed API Service 只通过 HTTP 协作。协议包含：
+Platform 与 API Service 只通过 HTTP 协作。协议包含：
 
 - 公开业务请求代理。
 - Service 身份与 OpenAPI 发现。
@@ -56,9 +56,9 @@ Authorization: Service <token>
 }
 ```
 
-同一 Service-managed Upstream 的全部 Target 必须返回相同 `serviceId`、Service 名称、`serviceProtocol`、OpenAPI 指纹、配置 Schema 指纹和控制端点。
+同一 Upstream 的全部 Target 必须返回相同 `serviceId`、Service 名称、`serviceProtocol`、OpenAPI 指纹、配置 Schema 指纹和控制端点。
 
-Service-managed Target 只有在发现校验通过后才有资格进入新的 Routing Revision。Platform 已保存期望业务配置时，Target 还必须确认相同的配置 Revision 和哈希；未验证、漂移或同步失败的 Target 不接收新增流量。
+Target 只有在发现校验通过后才有资格进入新的 Routing Revision。Platform 已保存期望业务配置时，Target 还必须确认相同的配置 Revision 和哈希；未验证、漂移或同步失败的 Target 不接收新增流量。
 
 ## 4. OpenAPI 发现
 
@@ -69,7 +69,7 @@ ETag: "<document-sha256>"
 X-OpenAPI-SHA256: <document-sha256>
 ```
 
-Platform 重新计算内容哈希并与 Service 描述和响应头比对。发现成功后保存文档和 Endpoint 摘要，并将业务 Endpoint 展示在接口目录；发现动作本身不会创建公开 Route，但会重新应用管理员此前已经明确发布、因 Service-managed Target 尚未验证而等待的运行配置。
+Platform 重新计算内容哈希并与 Service 描述和响应头比对。发现成功后保存文档和 Endpoint 摘要，并将业务 Endpoint 展示在接口目录；发现动作本身不会创建公开 Route，但会重新应用管理员此前已经明确发布、因 Target 尚未验证而等待的运行配置。
 
 OpenAPI `info.version` 表示业务 API 契约版本，不使用 Service 镜像或软件发布版本。软件版本继续由 Service Description 的 `version` 字段报告，因此未改变契约的兼容版本可以同时存在于同一 Upstream 中完成滚动更新。
 
@@ -149,7 +149,7 @@ Platform 向同一 Upstream 的全部启用 Target 下发相同 Revision 和快�
 
 ## 6. 公开请求转发
 
-Platform 发送给 Service-managed Service 的请求保留业务 Method、Query、Body 和安全 Header，同时添加：
+Platform 发送给 Service 的请求保留业务 Method、Query、Body 和安全 Header，同时添加：
 
 ```http
 Authorization: Service <token>
@@ -173,7 +173,7 @@ Platform 仅在直连代理命中受信 CIDR 且代理客户端信息有效时�
 
 ## 7. 响应语义
 
-Upstream 响应默认保持原状态码、Content-Type 和响应体。Service-managed Service 的业务 JSON 必须使用 `code/message/data/timestamp` 四字段响应壳；Platform 产生的治理错误使用相同结构和稳定平台错误码。手动管理的 HTTP Upstream 不会被 Gateway 隐式包装。
+Service 响应默认保持原状态码、Content-Type 和响应体。业务 JSON 必须使用 `code/message/data/timestamp` 四字段响应壳；Platform 产生的治理错误使用相同结构和稳定平台错误码。外部来源的响应适配在 Service 内完成。
 
 Service 的标准错误响应同时携带：
 
@@ -181,7 +181,7 @@ Service 的标准错误响应同时携带：
 X-OpenAPI-Error-Code: <stable-error-code>
 ```
 
-Platform 只使用该受信响应 Header 关联调用日志，不以它替代 HTTP 状态码或 JSON 响应体。调用方不能伪造该值，因为进入 Service-managed Service 前所有 `x-openapi-*` 请求 Header 都会被清除。
+Platform 只使用该受信响应 Header 关联调用日志，不以它替代 HTTP 状态码或 JSON 响应体。调用方不能伪造该值，因为进入 Service 前所有 `x-openapi-*` 请求 Header 都会被清除。
 
 计费结果按状态分类：
 
@@ -197,7 +197,7 @@ Platform 只使用该受信响应 Header 关联调用日志，不以它替代 HT
 
 动态 Route 的 `OPTIONS` 预检在 API Key、积分和 Upstream 调用前处理。成功预检返回 `204`，不写业务调用明细，也不消耗积分。
 
-公开 Gateway 统一为成功、错误、重定向、未发布 Route 和不存在 Route 的响应设置 `Access-Control-Allow-Origin: *`，不支持携带 Cookie 的跨域请求，也不设置 `Access-Control-Allow-Credentials`。预检允许 `content-type`、`x-api-key` 和 `x-request-id`，缓存 600 秒；浏览器可以读取 `Location`、`ETag`、`X-Request-Id`、`X-OpenAPI-Error-Code`、限流 Header 和 `Retry-After`。Service-managed Service 和手动管理的 HTTP Upstream 返回的 `Access-Control-*` Header 会被移除，不能覆盖 Gateway 策略。
+公开 Gateway 统一为成功、错误、重定向、未发布 Route 和不存在 Route 的响应设置 `Access-Control-Allow-Origin: *`，不支持携带 Cookie 的跨域请求，也不设置 `Access-Control-Allow-Credentials`。预检允许 `content-type`、`x-api-key` 和 `x-request-id`，缓存 600 秒；浏览器可以读取 `Location`、`ETag`、`X-Request-Id`、`X-OpenAPI-Error-Code`、限流 Header 和 `Retry-After`。Service 返回的 `Access-Control-*` Header 会被移除，不能覆盖 Gateway 策略。
 
 声明为支撑 Operation 的播放器资产等浏览器子资源由 Platform 自动保持匿名、
 零积分且不记录业务统计。

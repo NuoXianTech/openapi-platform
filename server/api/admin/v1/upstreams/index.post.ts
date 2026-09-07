@@ -16,7 +16,6 @@ export default defineAdminEventHandler(async (event, admin) => {
     resourceId: created.id,
     detail: {
       slug: created.slug,
-      serviceManaged: Boolean(created.connection),
       targetCount: created.targets.length
     }
   })

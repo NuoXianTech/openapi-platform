@@ -163,7 +163,7 @@ NODE_ENV=production npm start
 - `/api/ready`
 - 登录和管理后台。
 - 活动 Routing Revision。
-- Service-managed 与手动管理的 HTTP Route。
+- Service 发现、接口治理与统一应用。
 - API Key、积分、调用明细。
 - Service 发现和配置状态。
 

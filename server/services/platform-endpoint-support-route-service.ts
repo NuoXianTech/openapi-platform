@@ -93,7 +93,6 @@ export async function synchronizeEndpointSupportRoutes(input: {
             state: 'disabled'
           }),
           {
-            allowServiceManaged: true,
             transaction: input.transaction
           }
         )))
@@ -114,7 +113,6 @@ export async function synchronizeEndpointSupportRoutes(input: {
         binding.route.id,
         routeMutationFromBinding(binding, { state: 'disabled' }),
         {
-          allowServiceManaged: true,
           transaction: input.transaction
         }
       )))
@@ -142,7 +140,6 @@ export async function synchronizeEndpointSupportRoutes(input: {
           state: 'active'
         }),
         {
-          allowServiceManaged: true,
           transaction: input.transaction
         }
       )
@@ -168,7 +165,6 @@ export async function synchronizeEndpointSupportRoutes(input: {
       maxResponseBytes: 10 * 1024 * 1024,
       state: 'active'
     }, {
-      managedBy: 'service',
       isSupportRoute: true,
       transaction: input.transaction
     })
@@ -185,7 +181,6 @@ export async function synchronizeEndpointSupportRoutes(input: {
       binding.route.id,
       routeMutationFromBinding(binding, { state: 'disabled' }),
       {
-        allowServiceManaged: true,
         transaction: input.transaction
       }
     )))

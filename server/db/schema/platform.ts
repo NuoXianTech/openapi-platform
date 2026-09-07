@@ -186,7 +186,7 @@ export const apiRoutes = pgTable('api_routes', {
   method: varchar('method', { length: 10 }).notNull(),
   pathPattern: varchar('path_pattern', { length: 1000 }).notNull(),
   normalizedShape: varchar('normalized_shape', { length: 1000 }).notNull(),
-  upstreamServiceId: uuid('upstream_service_id').notNull().references(() => upstreamServices.id, { onDelete: 'restrict' }),
+  upstreamServiceId: uuid('upstream_service_id').notNull(),
   upstreamPathTemplate: varchar('upstream_path_template', { length: 1000 }).notNull(),
   isApiKey: boolean('is_api_key').notNull().default(false),
   isStatistics: boolean('is_statistics').notNull().default(true),
@@ -200,7 +200,6 @@ export const apiRoutes = pgTable('api_routes', {
   maxResponseBytes: integer('max_response_bytes').notNull().default(10485760),
   catalogStatus: varchar('catalog_status', { length: 20 }).notNull().default('automatic'),
   sensitiveQueryParameters: jsonb('sensitive_query_parameters').$type<string[]>().notNull().default([]),
-  managedBy: varchar('managed_by', { length: 20 }).notNull().default('manual'),
   isSupportRoute: boolean('is_support_route').notNull().default(false),
   state: varchar('state', { length: 20 }).notNull().default('active'),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
@@ -212,6 +211,11 @@ export const apiRoutes = pgTable('api_routes', {
     .where(sql`${table.deletedAt} IS NULL`),
   index('api_routes_version_state_idx').on(table.apiVersionId, table.state),
   index('api_routes_upstream_idx').on(table.upstreamServiceId),
+  foreignKey({
+    name: 'api_routes_service_connection_fk',
+    columns: [table.upstreamServiceId],
+    foreignColumns: [upstreamServiceConnections.upstreamServiceId]
+  }).onDelete('restrict'),
   check('api_routes_method_chk', sql`${table.method} in ('GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE')`),
   check('api_routes_credits_cost_chk', sql`${table.creditsCost} >= 0`),
   check('api_routes_rate_limits_chk', sql`${table.rateLimitPerSecond} >= 0 and ${table.rateLimitPerMinute} >= 0 and ${table.rateLimitPerHour} >= 0 and ${table.rateLimitPerDay} >= 0`),
@@ -220,8 +224,6 @@ export const apiRoutes = pgTable('api_routes', {
   check('api_routes_request_bytes_chk', sql`${table.maxRequestBytes} between 0 and 1073741824`),
   check('api_routes_response_bytes_chk', sql`${table.maxResponseBytes} between 0 and 2147483647`),
   check('api_routes_catalog_status_chk', sql`${table.catalogStatus} in ('automatic', 'maintenance')`),
-  check('api_routes_managed_by_chk', sql`${table.managedBy} in ('manual', 'service')`),
-  check('api_routes_support_management_chk', sql`${table.isSupportRoute} = false or ${table.managedBy} = 'service'`),
   check('api_routes_state_chk', sql`${table.state} in ('draft', 'active', 'disabled')`)
 ])
 

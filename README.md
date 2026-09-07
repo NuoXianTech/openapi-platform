@@ -24,7 +24,7 @@ OpenAPI Platform is a self-hosted platform for API publishing, access control, u
 
 ## Core features
 
-- **API management model**: Products, Versions, Routes, Upstreams, Targets, and rollback-capable Routing Revisions.
+- **API management model**: Service-discovered endpoints with Products, Versions, governance rules, Targets, and rollback-capable Routing Revisions.
 - **Service control plane**: tokens encrypted separately for each Internal Upstream, OpenAPI and generic configuration schema discovery, round-robin and weighted Targets, configuration synchronization, and drift detection.
 - **Gateway governance**: API keys, scopes, IP allowlists, expiration, revocation, per-key quotas, per-API daily quotas, and per-second, minute, hour, and day rate limits.
 - **Credit billing**: per-HTTP-method pricing, auditable balance transactions, idempotent charging, and retryable failed charges.

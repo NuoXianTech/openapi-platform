@@ -22,8 +22,6 @@ const props = defineProps<{
 const emit = defineEmits<{
   discover: [upstreamId: string]
   edit: [item: PlatformEndpointCatalogItem]
-  manual: [upstreamId: string]
-  remove: [item: PlatformEndpointCatalogItem]
   select: [keys: string[], selected: boolean]
   primary: [
     service: PlatformEndpointCatalogService,
@@ -53,7 +51,7 @@ function serviceName() {
 
 function serviceStateColor() {
   const upstream = props.service.upstream
-  if (upstream.status !== 'active' || !upstream.serviceManaged) {
+  if (upstream.status !== 'active') {
     return platformStatusColor(upstream.status)
   }
   if (!upstream.connection?.discovered) return 'warning' as const
@@ -64,9 +62,6 @@ function serviceStateLabel() {
   const upstream = props.service.upstream
   if (upstream.status !== 'active') {
     return t(`admin.apis.routing.serviceStatuses.${upstream.status}`)
-  }
-  if (!upstream.serviceManaged) {
-    return t('admin.apis.routing.serviceControl.enabled')
   }
   if (!upstream.connection?.discovered) {
     return t('admin.apis.routing.serviceControl.notDiscovered')
@@ -101,10 +96,6 @@ function publicPath(item: PlatformEndpointCatalogItem) {
 function itemSummary(item: PlatformEndpointCatalogItem) {
   if (item.sourceKind === 'missing') {
     return t('admin.apis.routing.catalog.contractMissing')
-  }
-  if (item.sourceKind === 'manual') {
-    return item.route?.route.name
-      ?? t('admin.apis.routing.catalog.manualRoute')
   }
   return item.endpoint?.summary
     ?? item.endpoint?.operationId
@@ -187,7 +178,7 @@ function toggleApiKey(item: PlatformEndpointCatalogItem) {
       <div class="flex min-w-0 items-center gap-3">
         <div class="flex size-9 shrink-0 items-center justify-center rounded-md bg-muted text-muted">
           <UIcon
-            :name="service.upstream.serviceManaged ? 'i-lucide-server' : 'i-lucide-globe-2'"
+            name="i-lucide-server"
             class="size-5"
           />
         </div>
@@ -213,7 +204,6 @@ function toggleApiKey(item: PlatformEndpointCatalogItem) {
           {{ serviceStateLabel() }}
         </UBadge>
         <UButton
-          v-if="service.upstream.serviceManaged"
           :to="{ path: `/admin/apis/upstreams/${service.upstream.id}`, query: route.query }"
           color="neutral"
           variant="ghost"
@@ -223,7 +213,6 @@ function toggleApiKey(item: PlatformEndpointCatalogItem) {
           {{ $t('admin.apis.routing.catalog.actions.serviceSettings') }}
         </UButton>
         <UButton
-          v-if="service.upstream.serviceManaged"
           color="neutral"
           variant="ghost"
           size="sm"
@@ -360,26 +349,6 @@ function toggleApiKey(item: PlatformEndpointCatalogItem) {
 
             <div class="endpoint-actions flex items-center justify-end gap-1">
               <UTooltip
-                v-if="item.route?.route.managedBy === 'manual'"
-                :text="item.status === 'disabled'
-                  ? $t('admin.apis.routing.actions.deleteRoute')
-                  : $t('admin.apis.routing.actions.deleteRouteUnavailable')"
-                :content="{ side: 'top', sideOffset: 8 }"
-                :disable-hoverable-content="true"
-                :ui="{ content: 'pointer-events-none' }"
-              >
-                <UButton
-                  color="error"
-                  variant="ghost"
-                  size="sm"
-                  icon="i-lucide-trash-2"
-                  :disabled="item.status !== 'disabled' || endpointBusy(item)"
-                  class="size-8 justify-center"
-                  :aria-label="$t('admin.apis.routing.actions.deleteRoute')"
-                  @click="emit('remove', item)"
-                />
-              </UTooltip>
-              <UTooltip
                 :text="$t('admin.apis.routing.catalog.actions.advancedSettings')"
                 :content="{ side: 'top', sideOffset: 8 }"
                 :disable-hoverable-content="true"
@@ -398,12 +367,12 @@ function toggleApiKey(item: PlatformEndpointCatalogItem) {
               </UTooltip>
               <UButton
                 size="sm"
-              class="h-8 w-32 shrink-0 justify-center"
+                class="h-8 w-32 shrink-0 justify-center"
                 :color="primaryActionColor(item)"
                 :variant="item.status === 'live' ? 'outline' : 'solid'"
                 :icon="primaryActionIcon(item)"
-              :loading="isBusy(`endpoint:${item.key}`)"
-              :disabled="!item.publishable || item.status === 'pending' || item.status === 'retiring' || endpointBusy(item)"
+                :loading="isBusy(`endpoint:${item.key}`)"
+                :disabled="!item.publishable || item.status === 'pending' || item.status === 'retiring' || endpointBusy(item)"
                 @click="emit('primary', service, item)"
               >
                 {{ primaryActionLabel(item) }}
@@ -416,17 +385,12 @@ function toggleApiKey(item: PlatformEndpointCatalogItem) {
 
     <div v-else class="px-5 py-8">
       <UEmpty
-        :icon="service.upstream.serviceManaged ? 'i-lucide-file-search' : 'i-lucide-route-off'"
-        :title="service.upstream.serviceManaged
-          ? $t('admin.apis.routing.catalog.empty.serviceTitle')
-          : $t('admin.apis.routing.catalog.empty.manualTitle')"
-        :description="service.upstream.serviceManaged
-          ? $t('admin.apis.routing.catalog.empty.serviceDescription')
-          : $t('admin.apis.routing.catalog.empty.manualDescription')"
+        icon="i-lucide-file-search"
+        :title="$t('admin.apis.routing.catalog.empty.serviceTitle')"
+        :description="$t('admin.apis.routing.catalog.empty.serviceDescription')"
       >
         <template #actions>
           <UButton
-            v-if="service.upstream.serviceManaged"
             size="sm"
             icon="i-lucide-scan-search"
             :loading="isBusy(`discover:${service.upstream.id}`)"
@@ -434,15 +398,6 @@ function toggleApiKey(item: PlatformEndpointCatalogItem) {
             @click="emit('discover', service.upstream.id)"
           >
             {{ $t('admin.apis.routing.catalog.actions.rediscover') }}
-          </UButton>
-          <UButton
-            v-else
-            size="sm"
-            icon="i-lucide-plus"
-            :disabled="selectionDisabled"
-            @click="emit('manual', service.upstream.id)"
-          >
-            {{ $t('admin.apis.routing.catalog.actions.manualRoute') }}
           </UButton>
         </template>
       </UEmpty>

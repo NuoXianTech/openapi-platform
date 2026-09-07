@@ -51,7 +51,7 @@ docker compose exec -T openapi-service node -e "fetch('http://127.0.0.1:8080/rea
 | --- | --- |
 | 服务无法启动 | PM2 日志、`DATABASE_URL`、端口占用 |
 | readiness 返回 503 | PostgreSQL 连接；配置 Redis 时同时检查 `NUXT_REDIS_URL`、认证和网络 |
-| 只有官方具体 API 返回 502/503 | 检查 `openapi-service` 容器、`/readyz`、Service Token、Service-managed Target 和来源级错误；Platform 与手动管理的 HTTP Route 不应一并停止 |
+| 只有某个 Service 的 API 返回 502/503 | 检查该 Service 容器、`/readyz`、Service Token、Target 和来源级错误；Platform 与其他 Service 的接口应保持可用 |
 | 面板提示 package.json 无 scripts | 将工作目录设为 `.output` 或 GitHub Release 解压根目录并执行 `npm start`；不要把 `server` 当作工作目录 |
 | SSR 提示缺少 `entities/decode` | 检查是否完整部署 `server/node_modules/.nitro`；改用 Linux CI/Docker 构建 |
 | 扣费扫描持续跳过 | Redis lease 可用性、`NUXT_REDIS_URL` 和 `[credit-reservations]` 日志 |
@@ -129,7 +129,7 @@ pm2 restart openapi-platform --update-env
 
 ## 异常处置
 
-1. 先确认影响范围：首页、统一登录页、管理后台、用户后台、手动管理的 HTTP Route、官方 API Service Route、数据库、邮件、第三方 OAuth。
+1. 先确认影响范围：首页、统一登录页、管理后台、用户后台、各 Service 的公开接口、数据库、邮件、第三方 OAuth。
 2. 冻结变更：暂停发布、停止批量任务、保留日志。
 3. 读取 PM2 日志和数据库关键表，定位最近一次配置或代码变更。
 4. 如果影响公开 API 收费，检查 `api_credit_reservations` 和 `credit_transactions`。`pending` 可等待后台重试；`dead_letter` 在“积分 → 计费预留”中先核对请求、上游结果和流水，再选择重试、确认扣费或释放。不要直接删除数据库行。

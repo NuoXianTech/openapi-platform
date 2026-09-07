@@ -57,7 +57,6 @@ export interface PlatformUpstreamSummary {
   id: string
   slug: string
   name: string
-  serviceManaged: boolean
   loadBalancing: 'round_robin' | 'weighted'
   status: 'active' | 'disabled'
   createdAt: string
@@ -66,7 +65,7 @@ export interface PlatformUpstreamSummary {
 
 export interface PlatformUpstream extends PlatformUpstreamSummary {
   targets: PlatformUpstreamTarget[]
-  connection: ServiceConnectionView | null
+  connection: ServiceConnectionView
 }
 
 export interface PlatformRoute {
@@ -91,7 +90,6 @@ export interface PlatformRoute {
   maxResponseBytes: number
   catalogStatus: 'automatic' | 'maintenance'
   sensitiveQueryParameters: string[]
-  managedBy: 'manual' | 'service'
   isSupportRoute: boolean
   state: 'draft' | 'active' | 'disabled'
   createdAt: string
@@ -114,7 +112,7 @@ export type PlatformEndpointPublicationStatus
 
 export interface PlatformEndpointCatalogItem {
   key: string
-  sourceKind: 'discovered' | 'manual' | 'missing'
+  sourceKind: 'discovered' | 'missing'
   endpoint: ServiceEndpointSummary | null
   route: PlatformRouteBinding | null
   status: PlatformEndpointPublicationStatus

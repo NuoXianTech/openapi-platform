@@ -138,22 +138,20 @@ describe('Platform upstream target state', () => {
       .resolves.toBe('replacement-service-token-with-at-least-32-characters')
   })
 
-  it('publishes manual Target changes immediately', async () => {
-    const upstream = await platformUpstreamService.create({
-      slug: 'manual-target-publication',
-      name: 'Manual Target Publication',
+  it('rejects an absent Service Token before writing upstream records', async () => {
+    await expect(platformUpstreamService.create({
+      slug: 'missing-token',
+      name: 'Missing Token',
+      serviceToken: '',
       loadBalancing: 'round_robin',
-      targets: [{ baseUrl: 'https://one.example.com', weight: 1 }]
-    })
-    const updated = await platformUpstreamService.updateTarget(
-      upstream.targets[0]!.id,
-      { baseUrl: 'https://two.example.com' }
-    )
-
-    expect(updated.publishRouting).toBe(true)
+      targets: [{ baseUrl: 'https://service.example.com', weight: 1 }]
+    })).rejects.toMatchObject({ data: { code: 'SERVICE_TOKEN_REQUIRED' } })
+    expect(await database.select().from(schema.upstreamServices)).toHaveLength(0)
+    expect(await database.select().from(schema.upstreamTargets)).toHaveLength(0)
+    expect(await database.select().from(schema.upstreamServiceConnections)).toHaveLength(0)
   })
 
-  it('keeps unverified Service-managed Target changes out of runtime', async () => {
+  it('keeps unverified Target changes out of runtime', async () => {
     const upstream = await platformUpstreamService.create({
       slug: 'service-target-publication',
       name: 'Service Target Publication',
@@ -236,12 +234,26 @@ describe('Platform upstream target state', () => {
     const upstream = await platformUpstreamService.create({
       slug: 'concurrent-target-disable',
       name: 'Concurrent Target Disable',
+      serviceToken: 'openapi-test-service-token-with-at-least-32-characters',
       loadBalancing: 'round_robin',
       targets: [
         { baseUrl: 'https://one.example.com', weight: 1 },
         { baseUrl: 'https://two.example.com', weight: 1 }
       ]
     })
+    await database.update(schema.upstreamTargets).set({
+      configurationRevision: 0,
+      configurationHash: 'a'.repeat(64),
+      configurationState: {
+        schemaVersion: 1,
+        serviceId: 'concurrent-target-disable',
+        schemaSha256: 'b'.repeat(64),
+        revision: 0,
+        configurationSha256: 'a'.repeat(64),
+        values: {},
+        updatedAt: null
+      }
+    }).where(eq(schema.upstreamTargets.upstreamServiceId, upstream.id))
     await createActiveRoute(upstream.id)
 
     const results = await Promise.allSettled(upstream.targets.map(target => (

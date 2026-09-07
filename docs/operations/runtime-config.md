@@ -68,9 +68,9 @@ Redis 当前用于公开 API 限流、登录/注册/密码重置/OAuth 身份防
 
 `openapi-service` 的地址不是全局环境变量，而是 Platform 数据库中的 Upstream Target，例如共享 Docker 私网中的 `http://openapi-service:8080`。同一 Upstream 可保存多个 Target，并使用轮询或权重分流。
 
-Platform 不读取全局 API Service Token。每个 Service-managed Upstream 在数据库中独立加密保存 Token，Gateway 按匹配到的 Upstream 解密并注入 `Authorization: Service <token>`。
+Platform 不读取全局 API Service Token。每个 Upstream 在数据库中独立加密保存 Token，Gateway 按匹配到的 Upstream 解密并注入 `Authorization: Service <token>`。
 
-Platform 仓库的 `.env` 和 Compose 都不包含全局 Service Token，也不负责启动任何 Service。管理员在创建 Service-managed Upstream 时填写目标 Service 自己的 `API_SERVICE_TOKEN`；之后 Platform 只使用数据库密文。多个 Upstream 可以使用不同 Token。
+Platform 仓库的 `.env` 和 Compose 都不包含全局 Service Token，也不负责启动任何 Service。管理员在创建 Upstream 时填写目标 Service 自己的 `API_SERVICE_TOKEN`；之后 Platform 只使用数据库密文。多个 Upstream 可以使用不同 Token。
 
 Node API Service 的部署配置包含 `API_SERVICE_TOKEN`、独立的 `SERVICE_CONFIG_KEY`、稳定的 `SERVICE_ID` / `SERVICE_NAME`，以及可选的 `LISTEN_ADDR` 和统一 `SERVICE_DATA_DIR`。`SERVICE_CONFIG_KEY` 只加密该实例的本地配置快照，不能与 Token 复用；Token 只负责请求认证。某个业务模块需要的来源地址、Cookie、数据库授权密钥或算法开关必须由该模块的 Service Schema 声明；不能提交仓库的数据文件固定由 Service 从 `SERVICE_DATA_DIR/assets/<module-id>` 读取。它们都不进入 Platform 的 `.env.example`。API Service 不使用 `NUXT_*` 业务变量，也不读取 Platform 数据库。
 
@@ -98,7 +98,7 @@ Node API Service 的部署配置包含 `API_SERVICE_TOKEN`、独立的 `SERVICE_
 node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
 ```
 
-`NUXT_AUTH_SECRET` 和 `NUXT_API_KEY_SECRET` 使用独立的 32 bytes 随机值；每个 Service-managed Upstream 的 Service Token 也必须单独生成，至少 32 个随机字符，不与前两者复用。每个 Service 实例还必须生成独立的 32-byte `SERVICE_CONFIG_KEY`，并与对应运行快照一起备份。Service Token 只在 Service 部署环境和对应 Platform Upstream 中分别配置。Platform 修改 Token 时先保留待验证版本，发现成功后才提升为活动凭证；验证失败时已发布流量继续使用上一个已验证版本。`NUXT_AUTH_SECRET` 泄露后应在维护窗口轮换，并预期现有登录态、验证链接与 OAuth state 失效。
+`NUXT_AUTH_SECRET` 和 `NUXT_API_KEY_SECRET` 使用独立的 32 bytes 随机值；每个 Upstream 的 Service Token 也必须单独生成，至少 32 个随机字符，不与前两者复用。每个 Service 实例还必须生成独立的 32-byte `SERVICE_CONFIG_KEY`，并与对应运行快照一起备份。Service Token 只在 Service 部署环境和对应 Platform Upstream 中分别配置。Platform 修改 Token 时先保留待验证版本，发现成功后才提升为活动凭证；验证失败时已发布流量继续使用上一个已验证版本。`NUXT_AUTH_SECRET` 泄露后应在维护窗口轮换，并预期现有登录态、验证链接与 OAuth state 失效。
 
 Service Token 更新会持久化为待验证版本；Platform 先用该版本执行发现，成功后原子提升为活动凭证，失败时保留旧凭证服务已发布流量。在线更换时保持 `SERVICE_CONFIG_KEY` 不变，在 Service 的 `API_SERVICE_PREVIOUS_TOKEN` 中短暂保留旧值，再把新 Token 写入 Service 与 Platform；提升完成后立即删除旧值。配置快照不使用 Token 加密，因此 Token 轮换不会使已有快照失效。Token 不匹配时连接状态不会显示为在线，公开调用中的明确 Service 鉴权失败会由 Gateway 转换为 `502 UPSTREAM_AUTH_FAILED`。
 
@@ -108,7 +108,7 @@ API Key 与兑换码可恢复且可重复查看是明确的产品要求，不是
 
 ### `NUXT_API_KEY_SECRET` 轮换边界
 
-`NUXT_API_KEY_SECRET` 是 Platform 长期数据加密根，不是应定期在线轮换的短期 Token。它必须与数据库备份一起纳入备份、恢复演练和访问控制。`0.1.0` 不提供 Keyring、双主密钥读取或在线重加密流程，因此不能在已有数据库上直接替换该值；直接替换会让 API Key/兑换码密文、Service-managed Upstream Token 和 Service 业务 Secret 无法解密，并使现有 API Key 摘要无法匹配。
+`NUXT_API_KEY_SECRET` 是 Platform 长期数据加密根，不是应定期在线轮换的短期 Token。它必须与数据库备份一起纳入备份、恢复演练和访问控制。`0.1.0` 不提供 Keyring、双主密钥读取或在线重加密流程，因此不能在已有数据库上直接替换该值；直接替换会让 API Key/兑换码密文、Upstream Token 和 Service 业务 Secret 无法解密，并使现有 API Key 摘要无法匹配。
 
 系统设置使用独立数据密钥格式 `enc:system-setting:v2:`；升级时不兼容旧密文，必须在迁移前备份并重新保存敏感配置。
 
@@ -151,7 +151,7 @@ pm2 start server/index.mjs --name openapi-platform --update-env
 | 构建机 `.env` 泄露到产物 | 不在 runtimeConfig 默认值读取异名 `process.env` |
 | 多环境共用密钥 | 每个环境独立生成并独立轮换 |
 | 直接替换 `NUXT_API_KEY_SECRET` | `0.1.0` 不支持在线轮换；保持原值，或在停写、备份和专用重加密迁移下更换 |
-| Service-managed Upstream Token 泄露 | 按 Service 文档进入维护窗口，保持 `SERVICE_CONFIG_KEY` 不变，替换 Service Token，再在对应 Upstream 更新加密 Token 并重新发现、同步配置 |
+| Upstream Token 泄露 | 按 Service 文档进入维护窗口，保持 `SERVICE_CONFIG_KEY` 不变，替换 Service Token，再在对应 Upstream 更新加密 Token 并重新发现、同步配置 |
 | 生产监听公网端口 | `NITRO_HOST=127.0.0.1`，由 Nginx 代理公网流量 |
 | 数据库迁移误连 | PostgreSQL 发布前确认 `DATABASE_URL` 的主机、库名和用户；PGlite 发布前确认当前工作目录下的固定 `.data/pglite` |
 | 自动迁移误执行 | 维护窗口可临时设置 `DB_AUTO_MIGRATE=false`，手动确认后再恢复默认 |

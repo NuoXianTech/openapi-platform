@@ -2,6 +2,7 @@
 import type { FormError, FormSubmitEvent } from '@nuxt/ui'
 import type { PlatformUpstreamSummary } from '#shared/types/platform'
 import { validateUpstreamTargetUrl } from '#shared/utils/upstream-target'
+import { UPSTREAM_CONSTRAINTS } from '#shared/schemas/platform-constraints'
 import { adminModalUi } from '~/utils/admin-modal-ui'
 import { parseFetchError } from '~/utils/client-error'
 import { compactFormErrors, integerRangeError, maxLengthError, requiredTextError } from '~/utils/form-validation'
@@ -70,7 +71,11 @@ function validateUpstreamForm(value: Partial<UpstreamFormState>): FormError<stri
     maxLengthError('slug', value.slug, 80, t('admin.apis.routing.validation.slugMaxLength'))
   )
 
-  if (value.serviceToken && value.serviceToken.length < 32) {
+  const serviceToken = value.serviceToken?.trim() ?? ''
+  if ((!isEditing.value || serviceToken) && (
+    serviceToken.length < UPSTREAM_CONSTRAINTS.SERVICE_TOKEN_MIN_LENGTH
+    || serviceToken.length > UPSTREAM_CONSTRAINTS.SERVICE_TOKEN_MAX_LENGTH
+  )) {
     errors.push({
       name: 'serviceToken',
       message: t('admin.apis.routing.validation.serviceTokenInvalid')
@@ -124,7 +129,7 @@ async function onSubmit(event: FormSubmitEvent<UpstreamFormState>) {
           : {
               name: event.data.name.trim(),
               slug: event.data.slug.trim(),
-              serviceToken: event.data.serviceToken || undefined,
+              serviceToken: event.data.serviceToken.trim(),
               loadBalancing: event.data.loadBalancing,
               targets: event.data.targets.map(target => ({
                 baseUrl: target.baseUrl.trim(),
@@ -197,15 +202,11 @@ async function onSubmit(event: FormSubmitEvent<UpstreamFormState>) {
           </UFormField>
         </div>
 
-        <!--
-          The connection copy is create-only: when editing, an empty Token means
-          "keep the current one", not "switch to a manually managed Upstream".
-        -->
         <UFormField
           v-if="isEditing"
           name="serviceToken"
           :label="$t('admin.apis.routing.fields.serviceToken')"
-          :description="$t('admin.apis.routing.upstreamForm.serviceTokenHelp')"
+          :description="$t('admin.apis.routing.upstreamForm.serviceTokenEditHelp')"
         >
           <UInput
             v-model="state.serviceToken"
@@ -240,6 +241,7 @@ async function onSubmit(event: FormSubmitEvent<UpstreamFormState>) {
             name="serviceToken"
             :label="$t('admin.apis.routing.fields.serviceToken')"
             :description="$t('admin.apis.routing.upstreamForm.serviceTokenHelp')"
+            required
           >
             <UInput
               v-model="state.serviceToken"

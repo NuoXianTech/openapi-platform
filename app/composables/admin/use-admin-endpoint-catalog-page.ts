@@ -5,7 +5,6 @@ import type {
   PlatformEndpointCatalogService,
   PlatformEndpointPublicationPatch,
   PlatformEndpointPublicationResult,
-  PlatformProduct,
   PlatformRouteBinding
 } from '#shared/types/platform'
 import { parseFetchError } from '~/utils/client-error'
@@ -13,6 +12,7 @@ import type { ServiceConfigurationView } from '#shared/types/service-control'
 
 export interface EndpointFeedback {
   message: string
+  description?: string
   color: 'success' | 'warning' | 'error'
 }
 
@@ -36,35 +36,29 @@ export function useAdminEndpointCatalogPage() {
   const { t } = useI18n()
   const route = useRoute()
   const router = useRouter()
-  const toast = useToast()
   const confirm = useConfirmDialog()
   const catalogResource = usePrivateResource<PlatformEndpointCatalog>({
     path: '/api/admin/v1/service-endpoints',
     defaultData: emptyCatalog
   })
-  const productsResource = usePrivateResource<PlatformProduct[]>({
-    path: '/api/admin/v1/products',
-    defaultData: () => []
-  })
   const search = ref('')
   const statusFilter = ref('all')
   const busyKeys = ref(new Set<string>())
   const endpointFeedback = ref<Record<string, EndpointFeedback>>({})
+  const catalogFeedback = ref<EndpointFeedback | null>(null)
   const selectedKeys = ref(new Set<string>())
   const bulkFeedback = ref<EndpointFeedback | null>(null)
   const bulkProgress = ref({ completed: 0, total: 0 })
   const operationBusy = computed(() => busyKeys.value.size > 0)
   const routeModalOpen = ref(false)
   const editingRoute = ref<PlatformRouteBinding | null>(null)
-  const createRouteUpstreamId = ref<string | null>(null)
 
   const catalog = computed(() => catalogResource.data.value)
-  const products = computed(() => productsResource.data.value)
   const upstreams = computed(() => catalog.value.services.map(
     service => service.upstream
   ))
   const serviceUpstreams = computed(() => upstreams.value.filter(
-    upstream => upstream.serviceManaged && upstream.status === 'active'
+    upstream => upstream.status === 'active'
   ))
   const driftedServices = computed(() => catalog.value.services.filter(
     service => service.targetDrift.length > 0
@@ -87,14 +81,8 @@ export function useAdminEndpointCatalogPage() {
     !requiresDiscovery.value
     && applyChangeCount.value > 0
   ))
-  const loading = computed(() => (
-    catalogResource.loading.value
-    || productsResource.loading.value
-  ))
-  const resourceError = computed(() => (
-    catalogResource.error.value
-    || productsResource.error.value
-  ))
+  const loading = catalogResource.loading
+  const resourceError = catalogResource.error
   const focusedUpstreamId = computed(() => (
     typeof route.query.upstreamId === 'string' ? route.query.upstreamId : ''
   ))
@@ -176,7 +164,6 @@ export function useAdminEndpointCatalogPage() {
   watch(routeModalOpen, (open) => {
     if (!open) {
       editingRoute.value = null
-      createRouteUpstreamId.value = null
     }
   })
 
@@ -216,14 +203,12 @@ export function useAdminEndpointCatalogPage() {
   }
 
   async function refresh() {
-    await Promise.all([
-      catalogResource.refresh(),
-      productsResource.refresh()
-    ])
+    await catalogResource.refresh()
   }
 
   async function discoverService(upstreamId: string, quiet = false) {
     const key = `discover:${upstreamId}`
+    if (!quiet) catalogFeedback.value = null
     setBusy(key, true)
     try {
       const result = await $fetch<ServiceConfigurationView>(
@@ -231,24 +216,24 @@ export function useAdminEndpointCatalogPage() {
         { method: 'POST' }
       )
       if (!quiet) {
-        toast.add({
-          title: result.connection.lastDiscoveryError
+        catalogFeedback.value = {
+          message: result.connection.lastDiscoveryError
             ? t('admin.apis.routing.serviceControl.discoveryPartial')
             : t('admin.apis.routing.catalog.feedback.serviceDiscovered'),
           color: result.connection.lastDiscoveryError ? 'warning' : 'success'
-        })
+        }
         await refresh()
       }
       return result.connection.lastDiscoveryError ? 'partial' as const : true
     } catch (error: unknown) {
       if (!quiet) {
-        toast.add({
-          title: parseFetchError(
+        catalogFeedback.value = {
+          message: parseFetchError(
             error,
             t('admin.apis.routing.serviceControl.discoveryFailed')
           ),
           color: 'error'
-        })
+        }
         await refresh()
       }
       return false
@@ -259,6 +244,7 @@ export function useAdminEndpointCatalogPage() {
 
   async function discoverAllServices() {
     if (serviceUpstreams.value.length === 0) return
+    catalogFeedback.value = null
     const key = 'discover:all'
     setBusy(key, true)
     try {
@@ -276,14 +262,14 @@ export function useAdminEndpointCatalogPage() {
       const succeeded = results.filter(Boolean).length
       const partial = results.filter(result => result === 'partial').length
       const failed = results.filter(result => result === false).length
-      toast.add({
-        title: t('admin.apis.routing.catalog.feedback.discoveryCompleted', {
+      catalogFeedback.value = {
+        message: t('admin.apis.routing.catalog.feedback.discoveryCompleted', {
           succeeded: succeeded - partial,
           partial,
           failed
         }),
         color: failed > 0 ? 'error' : partial > 0 ? 'warning' : 'success'
-      })
+      }
     } finally {
       setBusy(key, false)
     }
@@ -309,6 +295,7 @@ export function useAdminEndpointCatalogPage() {
   async function applyChanges() {
     if (!canApply.value || operationBusy.value) return
     const previousRevisionId = catalog.value.activeRevisionId
+    catalogFeedback.value = null
     setBusy('apply:runtime', true)
     try {
       // Publication is idempotent: an unchanged payload returns the active
@@ -322,19 +309,18 @@ export function useAdminEndpointCatalogPage() {
         endpointFeedback.value = {}
         bulkFeedback.value = null
       }
-      toast.add({
-        title: t('admin.apis.routing.catalog.feedback.changesApplied'),
+      catalogFeedback.value = {
+        message: t('admin.apis.routing.catalog.feedback.changesApplied'),
         description: t(runtimeUpdated
           ? 'admin.apis.routing.feedback.runtimeUpdated'
           : 'admin.apis.routing.catalog.feedback.runtimeUnchanged'),
-        color: runtimeUpdated ? 'success' : 'warning',
-        icon: runtimeUpdated ? 'i-lucide-circle-check' : 'i-lucide-info'
-      })
+        color: runtimeUpdated ? 'success' : 'warning'
+      }
       await refresh()
     } catch (error: unknown) {
       const blockedBy = blockingUpstreamName(error)
-      toast.add({
-        title: parseFetchError(
+      catalogFeedback.value = {
+        message: parseFetchError(
           error,
           t('admin.apis.routing.catalog.feedback.applyFailed')
         ),
@@ -344,7 +330,7 @@ export function useAdminEndpointCatalogPage() {
             })
           : undefined,
         color: 'error'
-      })
+      }
       await catalogResource.refresh()
     } finally {
       setBusy('apply:runtime', false)
@@ -359,6 +345,7 @@ export function useAdminEndpointCatalogPage() {
     if (!item.endpoint) return false
     const key = `endpoint:${item.key}`
     if (isBusy(key) || isBusy('apply:runtime')) return false
+    catalogFeedback.value = null
     setBusy(key, true)
     Reflect.deleteProperty(endpointFeedback.value, item.key)
     try {
@@ -401,6 +388,7 @@ export function useAdminEndpointCatalogPage() {
     if (!routeId) return false
     const key = `endpoint:${item.key}`
     if (isBusy(key) || isBusy('apply:runtime')) return false
+    catalogFeedback.value = null
     setBusy(key, true)
     Reflect.deleteProperty(endpointFeedback.value, routeId)
     try {
@@ -478,7 +466,7 @@ export function useAdminEndpointCatalogPage() {
 
       let succeeded = 0
       let pending = 0
-      // A manual Route can publish a runtime revision, so apply mutations in order.
+      // Publication changes share a runtime lock, so apply them in order.
       for (const { service, item } of candidates) {
         const success = item.route
           ? await updatePublication(item, { enabled }, enabled
@@ -507,43 +495,18 @@ export function useAdminEndpointCatalogPage() {
     }
   }
 
-  async function removeRoute(item: PlatformEndpointCatalogItem) {
-    const route = item.route?.route
-    if (!route || route.managedBy !== 'manual' || item.status !== 'disabled') return
-    await confirm({
-      title: t('admin.apis.routing.deleteRoute.title', { path: route.pathPattern }),
-      description: t('admin.apis.routing.deleteRoute.description'),
-      confirmColor: 'error',
-      onConfirm: async () => {
-        const key = `endpoint:${item.key}`
-        setBusy(key, true)
-        try {
-          await $fetch(`/api/admin/v1/routes/${route.id}`, { method: 'DELETE' })
-          toast.add({ title: t('admin.apis.routing.feedback.routeDeleted'), color: 'success' })
-          await refresh()
-        } catch (error: unknown) {
-          toast.add({
-            title: parseFetchError(error, t('admin.apis.routing.feedback.deleteFailed')),
-            color: 'error'
-          })
-          throw error
-        } finally {
-          setBusy(key, false)
-        }
-      }
-    })
-  }
-
-  function openCreateRoute(upstreamId?: string) {
-    editingRoute.value = null
-    createRouteUpstreamId.value = upstreamId ?? null
-    routeModalOpen.value = true
-  }
-
   function openEditRoute(item: PlatformEndpointCatalogItem) {
     if (!item.route) return
     editingRoute.value = item.route
     routeModalOpen.value = true
+  }
+
+  async function handleSettingsSaved(result: PlatformEndpointPublicationResult) {
+    catalogFeedback.value = null
+    const item = catalog.value.services.flatMap(service => service.endpoints)
+      .find(item => item.route?.route.id === result.route.id)
+    if (item) showPublicationResult(item, result, 'admin.apis.routing.feedback.routeUpdated')
+    await refresh()
   }
 
   function clearFocusedService() {
@@ -565,23 +528,21 @@ export function useAdminEndpointCatalogPage() {
     bulkSetEnabled,
     canApply,
     catalog,
+    catalogFeedback,
     clearFocusedService,
     discoverAllServices,
     discoverService,
     driftedServices,
     editingRoute,
     endpointFeedback,
-    createRouteUpstreamId,
     focusedUpstreamId,
     handlePrimaryAction,
+    handleSettingsSaved,
     serviceUpstreams,
     isBusy,
     operationBusy,
     loading,
-    openCreateRoute,
     openEditRoute,
-    removeRoute,
-    products,
     refresh,
     requiresDiscovery,
     resetFilters,

@@ -108,12 +108,10 @@ export function createUpstreamHeaders(event: H3Event, match: ResolvedDynamicRout
   headers.set('x-openapi-product-slug', match.route.productSlug)
   headers.set('x-openapi-api-version', match.route.version)
 
-  if (match.upstream.serviceManaged) {
-    if (!serviceToken) {
-      throw new GatewayExecutionError(503, 'UPSTREAM_AUTH_UNAVAILABLE', '上游服务凭证尚未配置')
-    }
-    headers.set('authorization', `Service ${serviceToken}`)
+  if (!serviceToken) {
+    throw new GatewayExecutionError(503, 'UPSTREAM_AUTH_UNAVAILABLE', '上游服务凭证尚未配置')
   }
+  headers.set('authorization', `Service ${serviceToken}`)
   return headers
 }
 
@@ -259,9 +257,7 @@ export const dynamicGatewayService = {
       const access = await dynamicGatewayAccessService.authorize(event, match)
       if (!access.passed) return { matched: true, response: access.response }
 
-      const serviceToken = match.upstream.serviceManaged
-        ? await upstreamServiceTokenService.get(match.upstream.id)
-        : ''
+      const serviceToken = await upstreamServiceTokenService.get(match.upstream.id)
       const targets = await orderedGatewayTargetsAsync(match)
       const target = targets[0]!
       targetId = target.id
@@ -329,9 +325,7 @@ export const dynamicGatewayService = {
             // stripped by the response sanitizer and cannot override it.
             setResponseHeader(event, 'Retry-After', UPSTREAM_RETRY_AFTER_SECONDS)
           }
-          if (match.upstream.serviceManaged) {
-            captureUpstreamFailure(event, upstreamResponse)
-          }
+          captureUpstreamFailure(event, upstreamResponse)
         },
         fetchOptions: {
           method: event.method,

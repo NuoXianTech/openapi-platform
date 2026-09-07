@@ -1,6 +1,6 @@
 # API 计费规则
 
-本文描述动态 Route 的统一计费链路，适用于 Service-managed 与手动管理的 Upstream，以及单实例与按本文约束部署的多实例环境。Platform 不运行具体公共 API handler。
+本文描述 Service 接口的统一计费链路，适用于单实例与按本文约束部署的多实例环境。Platform 不运行具体公共 API handler。
 
 ## 数据模型
 
@@ -14,7 +14,7 @@
 
 1. 动态 Gateway 从活动 Routing Revision 解析 Route、Upstream 和 Target，并读取 Route 的治理字段。
 2. Gateway 检查 Route 状态、API Key、Scope、IP 和限流。付费请求在同一事务内通过用户行锁检查可用余额、预占 API Key 积分配额并创建 `active` 预留。
-3. Gateway 调用 Service-managed 或手动管理的 Upstream；具体业务逻辑不在 Platform 执行。
+3. Gateway 使用 Service Token 调用 Upstream；具体业务逻辑在 Service 执行。
 4. 符合结算条件的上游响应必须先把预留改为 `pending` 才能返回；失败响应则原子恢复 API Key 配额并删除预留。成功结果无法持久化时返回 `503 BILLING_UNAVAILABLE`，避免成功调用逃逸扣费。
 5. `server/plugins/api-call-stats.ts` 在响应发出后记录 `api_calls`、更新 `api_call_stats`，关联调用日志并尝试立即结算。
 6. `creditService.finalizeReservation` 在同一事务内扣减余额、写入 `credit_transactions`、更新 `api_calls.credits_cost` 并删除预留。事务按 `creditReservationId` 幂等；即使进程在调用日志写入前退出，后台任务也能先完成扣费，再安全补挂调用日志。
@@ -23,7 +23,7 @@
 
 ## 可靠性规则
 
-- 不要在 Service 或手动管理的 Upstream 中扣 Platform 积分。上游只表达成功或失败，扣费由 Platform Gateway 和插件统一处理。
+- 不要在 Service 中扣 Platform 积分。Service 只表达成功或失败，扣费由 Platform Gateway 和插件统一处理。
 - 不要直接更新 `users.credits`。所有余额变化必须走 `creditService`，或走等价的单事务实现，并同时写入审计流水。
 - `credit_transactions.creditReservationId` 在非空时保持唯一，避免同一预留产生重复扣费。
 - `api_credit_reservations.status` 仅允许 `active`、`pending` 与 `dead_letter`；只有 `pending` 和人工确认的 `dead_letter` 可进入结算。

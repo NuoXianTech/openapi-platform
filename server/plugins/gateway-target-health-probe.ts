@@ -1,5 +1,5 @@
 /**
- * Proactively checks Service-managed Targets so a cold Gateway instance does
+ * Proactively checks Targets so a cold Gateway instance does
  * not send a burst of traffic to a known-down deployment.  Redis coordinates
  * the probe across Platform instances; without Redis the existing local
  * fallback remains safe for a single-process deployment.

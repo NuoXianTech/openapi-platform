@@ -52,7 +52,7 @@
         "pageTitle": "接口管理",
         "eyebrow": "API 发布与治理",
         "title": "发现、配置并发布接口",
-        "description": "从 Service 获取接口契约；Service-managed 变更统一应用，手动 Route 保存后立即生效。系统仅在运行配置实际变化时保存安全快照。",
+        "description": "从 Service 发现接口，配置治理规则后统一应用变更。运行配置实际变化时，系统会保存新的运行快照。",
         "moreTargets": "另有 {count} 个 Target",
         "fallbackDomain": "任意 Host 兜底",
         "published": "已发布",
@@ -79,12 +79,6 @@
           "weight": "权重",
           "targetEnabled": "参与流量",
           "serviceToken": "Service Token",
-          "productVersion": "Product / Version",
-          "method": "方法",
-          "publicPath": "公开路径",
-          "hosts": "限定 Host",
-          "upstream": "Upstream",
-          "upstreamPath": "上游路径模板",
           "apiKeyRequired": "要求 API Key",
           "statisticsEnabled": "记录调用日志",
           "creditsCost": "每次成功调用积分",
@@ -97,51 +91,24 @@
           "maxResponseKiB": "响应上限（KiB）",
           "catalogStatus": "目录状态",
           "sensitiveQueryParameters": "敏感 Query 参数",
-          "routeState": "Route 状态"
+          "routeState": "接口状态"
         },
         "actions": {
           "createProduct": "新建 Product",
           "createVersion": "新建 Version",
           "createUpstream": "新建 Upstream",
-          "createRoute": "新建 Route",
-          "saveRoute": "保存 Route",
+          "saveRoute": "保存设置",
           "addTarget": "添加 Target",
           "removeTarget": "移除 Target",
           "apiKey": "API Key",
-          "deleteRoute": "删除 Route",
-          "deleteRouteUnavailable": "请先停用并应用 Route",
           "publishRevision": "应用运行配置",
           "activateRevision": "回滚到此快照"
         },
-        "pipeline": {
-          "title": "发布依赖链",
-          "product": "Product",
-          "upstream": "Upstream",
-          "route": "Route",
-          "revision": "运行快照",
-          "notSelected": "尚未选择",
-          "itemCount": "{count} 项",
-          "activeCount": "{count} 条可发布",
-          "productHint": "定义 API 产品和版本",
-          "upstreamHint": "连接受 Service 管理的 API 或手动管理的 HTTP 服务",
-          "routeHint": "绑定公开路径与上游路径",
-          "unpublished": "尚未发布",
-          "revisionSequence": "快照 #{sequence}"
-        },
-        "nextActions": {
-          "product": "下一步：创建 Product",
-          "upstream": "下一步：连接 Upstream",
-          "route": "下一步：创建 Route",
-          "revision": "下一步：应用运行配置",
-          "ready": "运行配置已生效"
-        },
         "sections": {
-          "routesTitle": "动态 Routes",
-          "routesDescription": "定义调用方访问的 Method、Path、Host 以及对应的 Upstream 转发规则。",
           "productsTitle": "API Products",
           "productsDescription": "用 Product 与 Version 组织可对外发布的 API 能力。",
           "upstreamsTitle": "上游服务",
-          "upstreamsDescription": "管理 Gateway 可以访问的请求目标。Target 支持内网地址、容器名、HTTP 与 HTTPS。",
+          "upstreamsDescription": "管理支持 Service 协议的服务与 Target，所有接口通过 OpenAPI 契约发现。",
           "revisionsTitle": "运行快照",
           "revisionsDescription": "公开流量配置实际变化时，Platform 才会保存新的不可变快照；相同配置直接复用当前快照。本页仅用于审计和回滚。"
         },
@@ -166,12 +133,10 @@
           "activeRevision": "运行配置"
         },
         "empty": {
-          "routesTitle": "还没有动态 Route",
-          "routesDescription": "先创建 Product 与 Upstream，再把公开路径绑定到上游服务。",
           "productsTitle": "还没有 Product",
           "productsDescription": "创建第一个 API Product，首个 Version 会立即进入可发布状态。",
           "upstreamsTitle": "还没有 Upstream",
-          "upstreamsDescription": "添加 Upstream，并至少配置一个 Target 作为 Gateway 的请求目的地。",
+          "upstreamsDescription": "填写 Service Token 和 Target 地址，接入第一个 Service。",
           "targetsTitle": "还没有配置 Target",
           "revisionsTitle": "还没有运行快照",
           "revisionsDescription": "前往接口目录保存并应用第一个 Service Endpoint，Platform 会保存首个运行快照。"
@@ -190,11 +155,6 @@
           "published": "已发布",
           "deprecated": "已废弃",
           "retired": "已退役"
-        },
-        "routeStates": {
-          "active": "参与发布",
-          "draft": "草稿",
-          "disabled": "已停用"
         },
         "catalogStatuses": {
           "automatic": "自动检测",
@@ -232,21 +192,22 @@
         },
         "upstreamForm": {
           "title": "新建 Upstream",
-          "description": "定义 Gateway 的实际请求目标。一个 Upstream 可以包含多个 Target。",
+          "description": "接入支持 Service 协议的服务，配置 Service Token 和至少一个 Target。",
           "editTitle": "编辑 Upstream",
           "editDescription": "修改 Upstream 的名称、标识与负载均衡策略。Target 与 Token 分别独立管理。",
           "namePlaceholder": "例如：核心 API Service",
           "loadBalancingHelp": "首版运行时支持轮询与加权轮询；权重仅在加权模式下生效。",
-          "serviceTokenHelp": "Token 会使用 Platform 主密钥加密保存，不进入运行快照、普通响应或日志。",
+          "serviceTokenHelp": "填写与 Service 一致的 Token（32～4096 个字符）。Token 加密保存，不进入运行快照或日志。",
           "serviceTokenPlaceholder": "至少 32 个随机字符",
-          "connectionTitle": "可选的 Service 连接",
-          "connectionDescription": "不填写 Token 时，Upstream 由管理员手动维护；填写 Service Token 后可启用发现、配置同步与 Platform 到 Service 的鉴权。",
+          "connectionTitle": "Service 连接",
+          "connectionDescription": "使用 Service Token 验证服务身份、发现接口并同步业务配置。",
           "targetsTitle": "Targets",
           "targetPlaceholder": "http://openapi-service:8080 或 https://service.example.com",
           "targetsDescription": "Target 支持私网地址、容器名、HTTP 与 HTTPS；公网 HTTP 会被拒绝，加权模式会按照权重分配请求。",
           "targetLabel": "TARGET {number}",
           "multiServiceTitle": "一个 Upstream 可以连接多个 Service 实例",
-          "multiServiceDescription": "Target 可以位于不同服务器。轮询适合等规格实例；加权轮询可按服务器能力分配流量。同一 Upstream 的所有 Target 必须属于同一个逻辑 Service，并保持 OpenAPI 与配置 Schema 一致。"
+          "multiServiceDescription": "Target 可以位于不同服务器。轮询适合等规格实例；加权轮询可按服务器能力分配流量。同一 Upstream 的所有 Target 必须属于同一个逻辑 Service，并保持 OpenAPI 与配置 Schema 一致。",
+          "serviceTokenEditHelp": "留空保留当前 Token；填写新 Token 后，需重新发现 Service 才会用于公开流量。"
         },
         "targetForm": {
           "createTitle": "添加 Target",
@@ -256,34 +217,20 @@
           "deferredAddressDescription": "保存后运行时仍会使用原地址，直到同步 Service 接口成功。请确认新地址已经可以访问。"
         },
         "routeForm": {
-          "createTitle": "新建动态 Route",
-          "createDescription": "把公开 Method 与 Path 绑定到 Upstream。",
-          "editTitle": "编辑动态 Route",
-          "editDescription": "修改 Service-managed Route 的治理配置；保存后进入待应用状态。应用前若校验失败，当前流量继续使用上一版本。",
-          "editManualDescription": "修改手动 Route 的公开路径与治理配置；保存后会立即发布到运行配置。",
+          "editTitle": "接口设置",
+          "editDescription": "接口路径和请求方法来自 Service 契约。保存治理设置后，应用全部变更才会生效。",
           "namePlaceholder": "例如：按城市查询天气",
-          "pathHelp": "支持 {'{'}id{'}'} 单段参数与 {'{'}path+{'}'} 尾部通配参数。",
-          "hostsHelp": "可选。一行或逗号分隔一个域名；置空时使用平台默认域名。",
-          "forwardingTitle": "转发规则",
-          "forwardingDescription": "路径参数在上游模板中使用 {'{'}path.参数名{'}'}，Query 与请求体会原样转发。",
-          "upstreamPathHelp": "例如公开路径中的 {'{'}city{'}'} 可写为 {'{'}path.city{'}'}。",
           "governanceTitle": "访问控制、统计与计费",
           "governanceDescription": "这些规则由 Platform Gateway 在转发前统一执行，API Service 不读取用户 API Key，也不处理积分。0 表示不限流或免费。",
           "creditsCostHelp": "只对 2xx/3xx 成功响应扣费；4xx、5xx、超时和网络失败会释放预留积分。",
           "catalogStatusHelp": "自动检测会根据近期调用结果显示状态；维护中会在公开目录明确标记。",
           "sensitiveQueryHelp": "这些 Query 参数在调用日志和 Referer 中始终脱敏。",
           "sensitiveQueryPlaceholder": "例如 token，然后按回车",
-          "stateHelp": "只有“参与发布”的 Route 会进入应用后的运行快照。",
-          "noVersionsHelp": "还没有可发布的 Product Version。",
-          "noUpstreamsHelp": "还没有可用的 Upstream。"
+          "stateHelp": "启停变更在应用全部变更后生效。"
         },
         "rollback": {
           "title": "回滚到运行快照 #{sequence}",
           "description": "会立即将网关切换到该历史快照。当前快照仍会保留，之后可再次恢复。"
-        },
-        "deleteRoute": {
-          "title": "删除 Route {path}",
-          "description": "Route 与活动运行配置会在同一事务中更新；历史运行快照仍可用于回滚。"
         },
         "toggleRoute": {
           "title": "停用 Route？",
@@ -322,9 +269,7 @@
           "upstreamUpdated": "Upstream 已更新",
           "targetCreated": "Target 已添加",
           "targetUpdated": "Target 已更新",
-          "routeCreated": "Route 已创建",
           "routeUpdated": "Route 已更新",
-          "routeDeleted": "Route 已删除",
           "revisionActivated": "已回滚到运行快照 #{sequence}",
           "runtimeUpdated": "Gateway 已即时加载新配置，无需重启",
           "runtimePending": "Route 已保存；可用 Target 就绪后会进入运行快照",
@@ -349,11 +294,7 @@
           "targetUrlInvalid": "请输入有效的 HTTP 或 HTTPS URL",
           "publicTargetHttpsRequired": "公网 Target 必须使用 HTTPS",
           "weightInvalid": "权重必须是 1 到 10000 之间的整数",
-          "serviceTokenInvalid": "Service Token 至少需要 32 个字符",
-          "pathRequired": "路径不能为空",
-          "pathInvalid": "路径必须以 / 开头",
-          "upstreamRequired": "请选择 Upstream",
-          "upstreamPathRequired": "上游路径模板不能为空",
+          "serviceTokenInvalid": "Service Token 必须为 32～4096 个字符",
           "timeoutInvalid": "超时必须是 100 到 120000 之间的整数",
           "requestSizeInvalid": "请求上限必须是 0 到 1048576 之间的整数",
           "responseSizeInvalid": "响应上限必须是 0 到 2097151 之间的整数",
@@ -442,10 +383,9 @@
         },
         "catalog": {
           "title": "接口列表",
-          "description": "Service-managed 变更可先保存再统一应用；手动 Route 保存后立即生效。只有实际生效的配置发生变化时，才会保存新的运行快照。",
+          "description": "选择 Service 接口，配置并保存变更后统一应用。只有生效配置发生变化时，才会生成新的运行快照。",
           "endpointCount": "{count} 个接口",
           "contractMissing": "Service 契约中已找不到此接口，请确认后下线或调整 Route",
-          "manualRoute": "手动创建的转发接口",
           "credits": "{value} 积分/次",
           "searchPlaceholder": "搜索 Service、路径或接口名称",
           "settingsUnavailable": "发布后可配置",
@@ -497,7 +437,6 @@
             "syncServices": "同步 Service 接口",
             "rediscover": "重新发现",
             "serviceSettings": "业务配置",
-            "manualRoute": "自定义接口",
             "publish": "发布",
             "unpublish": "停用",
             "pendingApply": "待统一应用",
@@ -529,13 +468,11 @@
           },
           "empty": {
             "catalogTitle": "还没有可管理的 Service",
-            "catalogDescription": "查看 Service 管理的接口，或为手动管理的 Upstream 创建自定义 Route。",
+            "catalogDescription": "先接入 Service 并同步 OpenAPI 契约，即可选择接口发布。",
             "filterTitle": "没有符合条件的接口",
             "filterDescription": "调整搜索内容或状态筛选后重试。",
             "serviceTitle": "尚未发现业务接口",
-            "serviceDescription": "重新发现 Service，Platform 会读取最新 OpenAPI 契约。",
-            "manualTitle": "还没有自定义接口",
-            "manualDescription": "为这个手动管理的 Upstream 创建第一条公开 Route。"
+            "serviceDescription": "重新发现 Service，Platform 会读取最新 OpenAPI 契约。"
           },
           "drift": {
             "title": "{count} 个 Target 的运行时地址与配置不一致",

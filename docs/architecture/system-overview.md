@@ -2,9 +2,9 @@
 
 ## 1. 产品定位
 
-OpenAPI Platform 是一个通用、自托管的 API 管理平台。管理员可以从 Service 接口目录直接发布公开 Endpoint，或为标准 HTTP Upstream 创建自定义 Route，并统一应用鉴权、限流、积分、调用日志和运营规则。
+OpenAPI Platform 是一个自托管的 API 管理平台。管理员从 Service 接口目录发现并发布公开 Endpoint，统一应用鉴权、限流、积分、调用日志和运营规则。
 
-具体业务接口不在 Platform 中实现。官方业务能力由独立的 `openapi-service` 提供，第三方 HTTP 服务也可以作为 Upstream 接入。
+具体业务接口由独立的 `openapi-service` 或实现相同 Service 协议的服务提供。外部来源的请求和响应适配在 Service 内完成，Platform 只接入符合统一契约的 Service。
 
 ## 2. 系统拓扑
 
@@ -17,13 +17,13 @@ Administrator / API consumer
 │ Console + Admin API + Nitro Gateway  │
 │ Route / Auth / Limit / Credit / Log  │
 └──────────────────┬───────────────────┘
-                   │ HTTP
-          ┌────────┴────────┐
-          v                 v
-┌───────────────────┐  ┌────────────────────┐
-│ Service-managed   │  │ Manual Upstream    │
-│ Hono business API │  │ Standard HTTP API  │
-└───────────────────┘  └────────────────────┘
+                   │ HTTP + Service Token
+                   v
+┌──────────────────────────────────────┐
+│ API Service                          │
+│ Business API + OpenAPI + Config      │
+│ Source adapters + Unified responses │
+└──────────────────────────────────────┘
 ```
 
 数据库和 Redis 属于 Platform 基础设施。Service 不连接 Platform 数据库，也不读取用户、API Key、积分或 Routing Revision。
@@ -62,7 +62,7 @@ Administrator / API consumer
 - Platform 运行时不包含任何具体公共接口 Handler。
 - 所有公开业务流量必须命中活动 Routing Revision。
 - Service 发现本身不会公开 Endpoint；管理员必须在接口目录明确发布，Platform 随后自动完成 Route 与 Revision。
-- Service-managed Upstream 使用独立 Service Token，调用方凭据不会透传给 Service。
+- Upstream 使用独立 Service Token，调用方凭据不会透传给 Service。
 - Service 模块在源码中显式组合，不支持运行时加载任意代码或远程模块。
 - Platform 与 Service 是两个独立进程、镜像和版本线。
 - 生产服务器只运行预构建产物，不执行依赖安装或构建。

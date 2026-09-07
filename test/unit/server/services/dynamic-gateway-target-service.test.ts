@@ -21,7 +21,6 @@ function match(
     route: { timeoutMs },
     upstream: {
       id,
-      serviceManaged: true,
       loadBalancing,
       targets: weights.map((weight, index) => ({
         id: `${id}-${index}`,

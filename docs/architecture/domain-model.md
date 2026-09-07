@@ -55,17 +55,17 @@ Route 使用稳定 UUID。公开路径或名称变化不会改变其审计身份
 
 ### Upstream
 
-Upstream 表示一个逻辑请求目标集合。它不再区分“内部”或“外部”类型；每个 Target 自己声明 `http`/`https` 地址，地址可以是公网域名、内网 IP、localhost 或容器名。是否启用 Service 发现、配置同步和 Service Token，由是否存在 Service Connection 决定。
+Upstream 表示同一逻辑 Service 的请求目标集合，创建时必须提供 Service Token 并建立 Service Connection。每个 Target 声明 `http`/`https` 地址，可以是公网域名、内网 IP、localhost 或容器名。
 
 Upstream 包含名称、slug、负载均衡策略和状态。
 
 ### Target
 
-Target 表示一个具体 Base URL，包含启用状态、权重、配置同步状态和最近错误。Target 支持内网地址、容器名、HTTP 与 HTTPS；公网 HTTP 不允许。存在 Service Connection 时，Target 还必须暴露相同 Service 身份和契约。
+Target 表示一个具体 Base URL，包含启用状态、权重、配置同步状态和最近错误。公网 HTTP 不允许；同一 Upstream 的 Target 必须暴露相同 Service 身份和契约，并通过发现校验后才能参与发布。
 
 ## 5. Service 连接与配置
 
-Service-managed Upstream 具有独立 Service 连接记录，保存：
+Upstream 具有独立 Service 连接记录，保存：
 
 - 加密 Service Token。
 - Service ID、名称、版本和 Commit。
@@ -79,7 +79,7 @@ Service-managed Upstream 具有独立 Service 连接记录，保存：
 
 ## 6. OpenAPI 文档
 
-Platform 保存发现或导入的 OpenAPI 文档及其内容哈希、来源、规范版本、Endpoint 摘要和抓取时间。
+Platform 保存 Service 发现取得的 OpenAPI 文档及其内容哈希、来源、规范版本、Endpoint 摘要和抓取时间。
 
 OpenAPI 文档是配置与审查资料，不直接决定公开流量。只有 Route 进入活动 Routing Revision 后，Endpoint 才能被调用。
 

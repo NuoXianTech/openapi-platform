@@ -33,12 +33,12 @@ pnpm build
 | --- | --- |
 | 数据库 | PostgreSQL：`DATABASE_URL` 指向生产库，账号权限满足迁移和运行；PGlite：不配置 `DATABASE_URL`，并确认 `.data/pglite` 是持久化目录 |
 | 数据库迁移 | 当前唯一 `0000` 是破坏性重建基线；旧数据库不得原地升级。确认 SQL、snapshot 和 journal 均由 Drizzle 从当前 Schema 生成、没有手工编辑，已完成备份与重建计划，并确认 `.output/server/migrate.mjs` 与对应 SQL 同时进入产物 |
-| 运行时密钥 | `NUXT_AUTH_SECRET`、`NUXT_API_KEY_SECRET` 已独立生成并完成安全备份；每个 Service-managed Upstream 使用独立 Service Token，并确认数据库中只保存密文 |
+| 运行时密钥 | `NUXT_AUTH_SECRET`、`NUXT_API_KEY_SECRET` 已独立生成并完成安全备份；每个 Upstream 使用独立 Service Token，并确认数据库中只保存密文 |
 | Platform 入口 | Console、站内 API 和动态 Gateway 共用一个入口；反向代理只将预期域名转发到 Nitro，公共 Route 不占用 Platform 保留路径 |
 | Redis | 使用共享限流、短缓存和任务协调时配置 `NUXT_REDIS_URL`；配置后 Redis 不可用会 fail-closed，多实例必须配置 |
 | 管理员账号 | 首次启动时从受控服务端日志读取一次性随机初始密码，立即登录并完成不可跳过的密码轮换；用户名与邮箱可保留默认，但默认邮箱域名不可达，保留即意味着该账号无法接收密码重置邮件 |
 | 网络 | Nitro 监听 `127.0.0.1:<port>`，公网由 Nginx 或等价代理接入；按实际拓扑配置可信代理 CIDR 和转发层数 |
-| API Service | `openapi-service` 是独立 Node 进程，只连接内部网络且不映射公网业务端口；Service-managed Upstream 使用 `http://openapi-service:8080` 或等价私网地址 |
+| API Service | `openapi-service` 是独立 Node 进程，只连接内部网络且不映射公网业务端口；Upstream 使用 `http://openapi-service:8080` 或等价私网地址 |
 | API Service 资源 | 容器空闲 RSS 不高于 128 MiB、常规业务测试峰值不高于 256 MiB、启动到 ready 不高于 2 秒；缓存和来源并发均有上限 |
 | API Key 数据 | 确认普通列表仅返回掩码预览，只有 Key 所有者可按需查看完整值且查看行为写入操作日志；`NUXT_API_KEY_SECRET` 与数据库备份分开保存，明文不进入操作日志或普通应用日志 |
 | 主密钥边界 | 已确认 `0.1.0` 不支持 `NUXT_API_KEY_SECRET` 在线轮换；现有数据库不得直接替换该值 |
@@ -78,7 +78,7 @@ docker compose exec -T openapi-service node -e "fetch('http://127.0.0.1:8080/rea
 - 管理员可通过统一 `/login` 登录并进入后台；用户仍只能看到用户工作区。
 - 用户登录、API Key 列表、公开 API 列表可用。
 - 一个低风险动态 Route 可被 API Key 调用，详细调用日志和积分流水写入正常。Route 维度每日聚合必须按 [版本与支持范围](../architecture/release-scope.md) 验收，不能用兼容聚合数据代替。
-- API Service 的 `/healthz`、`/readyz`、OpenAPI 和受 Service Token 保护的测试 Route 可用；手动管理的 HTTP Route 不依赖 API Service 可用性。
+- API Service 的 `/healthz`、`/readyz`、OpenAPI 和受 Service Token 保护的测试 Route 可用。
 - PM2 日志无鉴权密钥错误、数据库连接错误或 `[db:migrate]` 失败记录。
 - `api_credit_reservations` 没有积压的 `pending` 或 `dead_letter`，调用日志和积分流水符合预期。
 - 静态资源在 `Accept-Encoding: br, gzip` 下返回 `Content-Encoding: br` 或 `gzip`。

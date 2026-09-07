@@ -1,6 +1,6 @@
 import { computed, effectScope, nextTick, reactive, ref, watch } from 'vue'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { PlatformEndpointCatalog, PlatformEndpointCatalogItem, PlatformEndpointCatalogService } from '#shared/types/platform'
+import type { PlatformEndpointCatalog, PlatformEndpointCatalogItem, PlatformEndpointCatalogService, PlatformEndpointPublicationResult } from '#shared/types/platform'
 import { useAdminEndpointCatalogPage } from '@/composables/admin/use-admin-endpoint-catalog-page'
 
 const { resource } = vi.hoisted(() => ({ resource: vi.fn() }))
@@ -10,7 +10,6 @@ const fetchMock = vi.fn()
 const confirm = vi.fn()
 const toast = vi.fn()
 const refreshCatalog = vi.fn()
-const refreshProducts = vi.fn()
 let scope = effectScope()
 
 function endpoint(key: string, status: PlatformEndpointCatalogItem['status'], publishable = true): PlatformEndpointCatalogItem {
@@ -21,14 +20,14 @@ function endpoint(key: string, status: PlatformEndpointCatalogItem['status'], pu
     sourceKind: 'discovered',
     endpoint: { method: 'GET', path: `/v1/${key}`, operationId: key },
     route: status === 'available' ? null : {
-      route: { id: key, pathPattern: `/v1/${key}`, enabled: status === 'live', managedBy: 'service' }
+      route: { id: key, pathPattern: `/v1/${key}`, state: status === 'live' ? 'active' : 'disabled' }
     }
   } as PlatformEndpointCatalogItem
 }
 
 function setup(items: PlatformEndpointCatalogItem[]) {
   const service = {
-    upstream: { id: 'service-1', name: 'Service', status: 'active', serviceManaged: true },
+    upstream: { id: 'service-1', name: 'Service', status: 'active' },
     endpoints: items,
     targetDrift: []
   } as unknown as PlatformEndpointCatalogService
@@ -38,12 +37,12 @@ function setup(items: PlatformEndpointCatalogItem[]) {
     services: [service],
     totals: { discovered: items.length, live: 0, available: 0, pending: 0, disabled: 0, driftedTargets: 0 }
   })
-  resource.mockImplementation(({ path }: { path: string }) => ({
-    data: path.endsWith('service-endpoints') ? catalog : ref([]),
-    refresh: path.endsWith('service-endpoints') ? refreshCatalog : refreshProducts,
+  resource.mockReturnValue({
+    data: catalog,
+    refresh: refreshCatalog,
     loading: ref(false),
     error: ref(null)
-  }))
+  })
   const page = scope.run(() => useAdminEndpointCatalogPage())!
   return { page, catalog, service }
 }
@@ -62,7 +61,6 @@ beforeEach(() => {
   fetchMock.mockResolvedValue({ revision: null, route: { id: 'created' } })
   confirm.mockResolvedValue(true)
   refreshCatalog.mockResolvedValue(undefined)
-  refreshProducts.mockResolvedValue(undefined)
 })
 
 afterEach(() => {
@@ -115,7 +113,7 @@ describe('endpoint selection and feedback', () => {
       ['/api/admin/v1/service-endpoints/disabled', { method: 'PATCH', body: { enabled: true } }]
     ])
     expect(refreshCatalog).toHaveBeenCalledOnce()
-    expect(refreshProducts).toHaveBeenCalledOnce()
+    expect(resource).toHaveBeenCalledOnce()
     expect([...page.selectedKeys.value]).toEqual(['live'])
     expect(page.bulkFeedback.value?.message).toContain('"succeeded":2,"failed":0,"pending":2')
     expect(confirm).not.toHaveBeenCalled()
@@ -152,14 +150,21 @@ describe('endpoint selection and feedback', () => {
     })
   })
 
-  it('updates pending feedback when a later manual mutation publishes the runtime', async () => {
-    const { page } = setup([endpoint('one', 'disabled'), endpoint('two', 'disabled')])
-    fetchMock.mockResolvedValueOnce({ revision: null })
-      .mockResolvedValueOnce({ revision: { id: 'revision-2' } })
+  it('clears pending feedback after applying the staged endpoint changes', async () => {
+    const { page, catalog } = setup([endpoint('one', 'disabled'), endpoint('two', 'disabled')])
     page.selectAllEndpoints(true)
     await page.bulkSetEnabled(true)
-    expect(page.endpointFeedback.value.one?.color).toBe('success')
-    expect(page.bulkFeedback.value?.message).toContain('"pending":0')
+    expect(page.endpointFeedback.value.one?.color).toBe('warning')
+    expect(page.bulkFeedback.value?.message).toContain('"pending":2')
+    catalog.value.totals.pending = 2
+    fetchMock.mockResolvedValueOnce({ revision: { id: 'revision-2' } })
+    await page.applyChanges()
+    expect(page.endpointFeedback.value).toEqual({})
+    expect(page.bulkFeedback.value).toBeNull()
+    expect(page.catalogFeedback.value).toMatchObject({
+      message: 'admin.apis.routing.catalog.feedback.changesApplied', color: 'success'
+    })
+    expect(toast).not.toHaveBeenCalled()
   })
 
   it('confirms a batch disable once and leaves inactive selections unchanged', async () => {
@@ -170,6 +175,29 @@ describe('endpoint selection and feedback', () => {
     expect(confirm.mock.calls[0]?.[0].title).toContain('"count":2')
     expect(fetchMock.mock.calls.map(call => call[1].body)).toEqual([{ enabled: false }, { enabled: false }])
     expect([...page.selectedKeys.value]).toEqual(['disabled'])
+  })
+
+  it('shows saved settings on the endpoint row without a floating notification', async () => {
+    const { page } = setup([endpoint('one', 'live')])
+    await page.handleSettingsSaved({ route: { id: 'one' }, revision: null } as PlatformEndpointPublicationResult)
+    expect(page.endpointFeedback.value.one).toEqual({
+      message: 'admin.apis.routing.catalog.feedback.savedPending', color: 'warning'
+    })
+    expect(refreshCatalog).toHaveBeenCalledOnce()
+    expect(toast).not.toHaveBeenCalled()
+  })
+
+  it('keeps an apply failure and its blocking Service visible on the page', async () => {
+    const { page, catalog } = setup([endpoint('one', 'pending')])
+    catalog.value.totals.pending = 1
+    fetchMock.mockRejectedValueOnce({ data: { data: { upstreamServiceId: 'service-1' } } })
+    await page.applyChanges()
+    expect(page.catalogFeedback.value).toMatchObject({
+      color: 'error',
+      description: 'admin.apis.routing.catalog.feedback.applyBlockedBy:{"upstream":"Service"}'
+    })
+    expect(toast).not.toHaveBeenCalled()
+    expect(page.operationBusy.value).toBe(false)
   })
 
   it('preserves the selection and sends no mutation when disabling is cancelled', async () => {

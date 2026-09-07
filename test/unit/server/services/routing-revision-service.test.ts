@@ -252,7 +252,7 @@ describe('routing revision service', () => {
     expect(revisions.items).toHaveLength(1)
   })
 
-  it('keeps an unverified Service-managed Target out of published routing', async () => {
+  it('keeps an unverified Target out of published routing', async () => {
     const graph = await createRoutingGraph({ verified: false })
 
     const skipped = await routingRevisionService.publish(null)
@@ -282,83 +282,24 @@ describe('routing revision service', () => {
       .toEqual([graph.upstream.id])
   })
 
-  it('publishes unrelated manual Routes while a new Service waits for discovery', async () => {
+  it('publishes verified Services while another Service waits for discovery', async () => {
     await createRoutingGraph({
       productSlug: 'waiting-service',
       pathPattern: '/v1/waiting-service',
       upstreamPathTemplate: '/healthz',
       verified: false
     })
-    const manualProduct = await platformProductService.create({
-      slug: 'independent-manual',
-      name: 'Independent Manual',
-      visibility: 'public',
-      version: 'v1'
+    const verified = await createRoutingGraph({
+      productSlug: 'verified-service',
+      pathPattern: '/v1/verified-service',
+      upstreamPathTemplate: '/healthz'
     })
-    const manualUpstream = await platformUpstreamService.create({
-      slug: 'independent-manual-service',
-      name: 'Independent Manual Service',
-      loadBalancing: 'round_robin',
-      targets: [{ baseUrl: 'https://manual.example.com', weight: 1 }]
-    })
-    const manualRoute = await platformRouteService.create({
-      apiVersionId: manualProduct.versions[0]!.id,
-      name: 'Independent manual route',
-      hosts: [],
-      method: 'GET',
-      pathPattern: '/v1/independent-manual',
-      upstreamServiceId: manualUpstream.id,
-      upstreamPathTemplate: '/healthz',
-      state: 'active'
-    })
-    if (!manualRoute) throw new Error('manual route was not created')
 
     const published = await routingRevisionService.publish(null)
     expect(published.configPayload.routes.map(route => route.id))
-      .toContain(manualRoute.id)
+      .toContain(verified.route.id)
     expect(published.configPayload.routes.map(route => route.pathPattern))
       .not.toContain('/v1/waiting-service')
-  })
-
-  it('keeps a manual runtime active while a Service Token upgrade awaits discovery', async () => {
-    const product = await platformProductService.create({
-      slug: 'manual-upgrade',
-      name: 'Manual Upgrade',
-      visibility: 'public',
-      version: 'v1'
-    })
-    const upstream = await platformUpstreamService.create({
-      slug: 'manual-upgrade-service',
-      name: 'Manual Upgrade Service',
-      loadBalancing: 'round_robin',
-      targets: [{ baseUrl: 'https://manual.example.com', weight: 1 }]
-    })
-    const route = await platformRouteService.create({
-      apiVersionId: product.versions[0]!.id,
-      name: 'Manual upgrade route',
-      hosts: [],
-      method: 'GET',
-      pathPattern: '/v1/manual-upgrade',
-      upstreamServiceId: upstream.id,
-      upstreamPathTemplate: '/v1/manual-upgrade',
-      state: 'active'
-    })
-    if (!route) throw new Error('manual upgrade route was not created')
-
-    const firstRevision = await routingRevisionService.publish(null)
-    await platformUpstreamService.updateServiceToken(
-      upstream.id,
-      'manual-upgrade-service-token-with-at-least-32-characters'
-    )
-
-    const repeatedRevision = await routingRevisionService.publish(null)
-
-    expect(repeatedRevision.id).toBe(firstRevision.id)
-    expect(repeatedRevision.configPayload.upstreams[0]).toMatchObject({
-      id: upstream.id,
-      serviceManaged: false,
-      targets: [{ baseUrl: 'https://manual.example.com/' }]
-    })
   })
 
   it('bootstraps the runtime singleton idempotently', async () => {
@@ -532,7 +473,7 @@ describe('routing revision service', () => {
     expect(revisions).toHaveLength(2)
   })
 
-  it('keeps the last verified Targets of an unavailable Service-managed Upstream', async () => {
+  it('keeps the last verified Targets of an unavailable Upstream', async () => {
     const unavailable = await createRoutingGraph({
       productSlug: 'unavailable-service'
     })
@@ -570,7 +511,7 @@ describe('routing revision service', () => {
     )?.targets[0]?.baseUrl).toBe('http://127.0.0.1:8082')
   })
 
-  it('does not keep a disabled Service-managed Target in the runtime fallback', async () => {
+  it('does not keep a disabled Target in the runtime fallback', async () => {
     const graph = await createRoutingGraph({
       productSlug: 'disabled-runtime-target'
     })
@@ -865,22 +806,16 @@ describe('routing revision service', () => {
     expect(revisions[0]?.configPayload.routes).toHaveLength(2)
   })
 
-  it('rejects generic edits and deletion for Service-managed routes', async () => {
+  it('rejects publishing endpoints absent from the discovered contract', async () => {
     const service = await createDiscoveredService({
       slug: 'managed-route-service'
     })
-    const published = await platformEndpointCatalogService.publish({
+    await expect(platformEndpointCatalogService.publish({
       upstreamServiceId: service.upstream.id,
       method: 'GET',
-      path: service.path
-    }, null)
-
-    await expect(platformRouteService.update(
-      published.route.id,
-      routeMutationInput(published.route)
-    )).rejects.toMatchObject({ data: { code: 'SERVICE_ROUTE_MANAGED' } })
-    await expect(platformRouteService.remove(published.route.id))
-      .rejects.toMatchObject({ data: { code: 'SERVICE_ROUTE_MANAGED' } })
+      path: '/v1/unknown'
+    }, null)).rejects.toMatchObject({ data: { code: 'SERVICE_ENDPOINT_NOT_FOUND' } })
+    expect(await database.select().from(schema.apiRoutes)).toHaveLength(0)
   })
 
   it('groups tagged operations as one Product and manages support routes invisibly', async () => {

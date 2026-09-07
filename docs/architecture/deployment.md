@@ -124,7 +124,7 @@ Liveness 只表示进程存活；Readiness 应覆盖继续接收流量所需的�
 4. 在 Platform 重新执行 Service 发现。
 5. 完成其余 Target 的滚动替换。
 
-Service 更新不要求停止 Platform。Service 不可用期间，Console、管理 API 和手动管理的 HTTP Route 仍可继续工作。
+Service 更新不要求停止 Platform。Service 不可用期间，Console、管理 API 和其他 Service 的接口仍可继续工作。
 
 ## 9. 回滚
 
@@ -138,7 +138,7 @@ Platform 与 Service 的回滚互不要求同步。
 
 ## 10. 多 Target
 
-同一 Service-managed Upstream 可以连接部署在不同服务器上的多个 Service Target：
+同一 Upstream 可以连接部署在不同服务器上的多个 Service Target：
 
 - 轮询适用于容量相近的实例。
 - 加权轮询按实例容量分配流量。
@@ -161,7 +161,7 @@ Upstream 的 Target 集合内完成，避免再引入跨 Upstream 的第二层�
 - Platform 和 Service 使用独立随机运行时密钥。
 - Console、站内 API 和动态 Gateway 使用同一个 Platform 入口，按保留路径划分职责；公网域名限制由反向代理或云平台入口负责。
 - `NUXT_API_KEY_SECRET` 是长期数据密钥根，已有数据库不能直接替换；Service Token 由 Upstream 的待验证/活动版本流程独立轮换。
-- Service Token 按 Service-managed Upstream 保存，不使用全局 Platform Token。
+- Service Token 按 Upstream 保存，不使用全局 Platform Token。
 - 单机或 Compose 部署使用私有网络。
 - 跨不可信网络必须使用 TLS；高安全环境可以增加 mTLS。
 - 镜像、日志、错误、OpenAPI 和配置 Schema 不得包含 Secret。

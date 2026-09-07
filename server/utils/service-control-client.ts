@@ -204,7 +204,7 @@ async function requestJson<TSchema extends z.ZodType>(
       ...init,
       allowedHosts: [url.hostname],
       allowSubdomains: false,
-      // Service-managed Targets may intentionally live on the private Docker
+      // Targets may intentionally live on the private Docker
       // network and commonly use HTTP for that hop.  DNS is still resolved
       // and pinned by safeFetch; control-plane redirects are returned
       // manually and never followed with configuration credentials.

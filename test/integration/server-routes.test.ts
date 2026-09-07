@@ -107,6 +107,17 @@ describe('Nitro server routes', () => {
     expect(messages['zh-CN'].common.dashboard.navigation.contentManagement).toBe('内容管理')
   })
 
+  it('does not expose standalone Route management APIs', async () => {
+    const routeId = '11111111-1111-4111-8111-111111111111'
+    for (const method of ['GET', 'POST', 'PATCH', 'DELETE'] as const) {
+      const path = method === 'PATCH' || method === 'DELETE'
+        ? `/api/admin/v1/routes/${routeId}`
+        : '/api/admin/v1/routes'
+      const response = await fetch(path, { method })
+      expect(response.status).toBe(404)
+    }
+  })
+
   it('applies production security headers without disclosing the server stack', async () => {
     const apiResponse = await fetch('/api/health')
     const documentResponse = await fetch('/')

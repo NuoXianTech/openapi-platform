@@ -34,7 +34,7 @@ import type { ServiceEndpointSummary } from '#shared/types/service-control'
 
 interface CatalogItem {
   key: string
-  sourceKind: 'discovered' | 'manual' | 'missing'
+  sourceKind: 'discovered' | 'missing'
   endpoint: ServiceEndpointSummary | null
   route: RouteBinding | null
   status: PublicationStatus
@@ -100,21 +100,19 @@ export const platformEndpointCatalogService = {
     const serviceViews = new Map<string, Awaited<ReturnType<
       typeof platformServiceControlService.get
     >>>()
-    await Promise.all(upstreams
-      .filter(upstream => upstream.serviceManaged)
-      .map(async (upstream) => {
-        try {
-          serviceViews.set(
+    await Promise.all(upstreams.map(async (upstream) => {
+      try {
+        serviceViews.set(
+          upstream.id,
+          await platformServiceControlService.get(
             upstream.id,
-            await platformServiceControlService.get(
-              upstream.id,
-              { checkAvailability: false }
-            )
+            { checkAvailability: false }
           )
-        } catch {
-          // An incomplete connection remains visible as an undiscovered Service.
-        }
-      }))
+        )
+      } catch {
+        // An incomplete connection remains visible as an undiscovered Service.
+      }
+    }))
 
     const services = upstreams.map((upstream) => {
       const serviceRoutes = routes.filter(binding => (
@@ -160,12 +158,10 @@ export const platformEndpointCatalogService = {
         })
 
       for (const binding of serviceRoutes) {
-        if (usedRouteIds.has(binding.route.id)) continue
+        if (usedRouteIds.has(binding.route.id) || binding.route.isSupportRoute) continue
         endpoints.push({
           key: `${upstream.id}:route:${binding.route.id}`,
-          sourceKind: !upstream.serviceManaged
-            ? 'manual' as const
-            : 'missing' as const,
+          sourceKind: 'missing',
           endpoint: null,
           route: binding,
           status: endpointPublicationStatus(binding, liveRoutes),
@@ -173,7 +169,6 @@ export const platformEndpointCatalogService = {
         })
       }
       const targetDrift: TargetRuntimeDrift[] = findTargetRuntimeDrift({
-        serviceManaged: upstream.serviceManaged,
         targets: upstream.targets,
         connection: upstream.connection,
         runtimeUpstream: liveUpstreams.get(upstream.id) ?? null
@@ -208,13 +203,10 @@ export const platformEndpointCatalogService = {
     path: string
   }, createdBy: number | null, options: { publishRouting?: boolean } = {}) {
     const upstream = await platformUpstreamService.findById(input.upstreamServiceId)
-    const serviceManaged = upstream
-      ? await platformUpstreamService.hasServiceConnection(upstream.id)
-      : false
-    if (!upstream || !serviceManaged || upstream.deletedAt) {
+    if (!upstream || upstream.deletedAt) {
       throw createApplicationError({
         statusCode: 404,
-        message: 'Service-managed upstream not found',
+        message: 'Service upstream not found',
         data: { code: 'SERVICE_UPSTREAM_NOT_FOUND' }
       })
     }
@@ -282,7 +274,7 @@ export const platformEndpointCatalogService = {
                 apiVersionId,
                 state: 'active'
               }),
-              { allowServiceManaged: true, transaction: tx }
+              { transaction: tx }
             )
           : await platformRouteService.create({
               apiVersionId,
@@ -305,7 +297,7 @@ export const platformEndpointCatalogService = {
               maxRequestBytes: 1024 * 1024,
               maxResponseBytes: 10 * 1024 * 1024,
               state: 'active'
-            }, { managedBy: 'service', transaction: tx })
+            }, { transaction: tx })
         if (!route) throw new Error('endpoint route could not be created')
         await synchronizeEndpointSupportRoutes({
           upstream: upstreamView,
@@ -332,19 +324,14 @@ export const platformEndpointCatalogService = {
     options: { publishRouting?: boolean } = {}
   ) {
     const binding = await platformRouteService.get(routeId)
-    const serviceManaged = await platformUpstreamService.hasServiceConnection(
-      binding.upstream.id
+    const view = await platformServiceControlService.get(
+      binding.upstream.id,
+      { checkAvailability: false }
     )
-    const view = serviceManaged
-      ? await platformServiceControlService.get(
-          binding.upstream.id,
-          { checkAvailability: false }
-        )
-      : null
-    const endpoint = view?.endpoints.find(item => (
+    const endpoint = view.endpoints.find(item => (
       !item.system && routeMatchesEndpoint(binding, item)
     )) ?? null
-    if (endpoint?.support) {
+    if (binding.route.isSupportRoute || endpoint?.support) {
       throw createApplicationError({
         statusCode: 404,
         message: 'support routes are managed automatically',
@@ -357,13 +344,11 @@ export const platformEndpointCatalogService = {
         const current = await platformRouteService.get(routeId, {
           transaction: tx
         })
-        if (view) {
-          await assertServiceContractCurrent(tx, {
-            upstreamServiceId: binding.upstream.id,
-            openapiDocumentId: binding.upstream.openapiDocumentId,
-            openapiSha256: view.connection.openapiSha256
-          })
-        }
+        await assertServiceContractCurrent(tx, {
+          upstreamServiceId: binding.upstream.id,
+          openapiDocumentId: binding.upstream.openapiDocumentId,
+          openapiSha256: view.connection.openapiSha256
+        })
         const route = await platformRouteService.update(routeId, {
           apiVersionId: current.route.apiVersionId,
           name: input.name ?? current.route.name,
@@ -393,8 +378,8 @@ export const platformEndpointCatalogService = {
           state: input.enabled === undefined
             ? current.route.state as 'draft' | 'active' | 'disabled'
             : input.enabled ? 'active' : 'disabled'
-        }, { allowServiceManaged: true, transaction: tx })
-        if (view && endpoint) {
+        }, { transaction: tx })
+        if (endpoint) {
           await synchronizeEndpointSupportRoutes({
             upstream: current.upstream,
             serviceName: view.connection.serviceName ?? current.upstream.name,

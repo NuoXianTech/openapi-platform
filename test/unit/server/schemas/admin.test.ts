@@ -4,6 +4,8 @@ import {
   adminCreateApiCategorySchema,
   adminCreateAnnouncementSchema,
   adminCreateFriendLinkSchema,
+  adminCreateUpstreamSchema,
+  adminUpdateEndpointPublicationSchema,
   adminCleanupApiCallLogsSchema,
   adminCleanupLoginLogsSchema,
   adminCleanupOperationLogsSchema,
@@ -17,6 +19,26 @@ import {
 } from '~~/server/schemas/admin'
 
 describe('admin schemas', () => {
+  it('requires a Service Token to create an upstream', () => {
+    const input = {
+      slug: 'service',
+      name: 'Service',
+      targets: [{ baseUrl: 'http://127.0.0.1:8080' }]
+    }
+    for (const serviceToken of [undefined, '', ' '.repeat(32), 'a'.repeat(31), 'a'.repeat(4097)]) {
+      expect(adminCreateUpstreamSchema.safeParse({ ...input, serviceToken }).success).toBe(false)
+    }
+    expect(adminCreateUpstreamSchema.parse({ ...input, serviceToken: ` ${'a'.repeat(32)} ` }).serviceToken)
+      .toBe('a'.repeat(32))
+  })
+
+  it('accepts endpoint governance without accepting contract mutations', () => {
+    const contract = { method: 'POST', pathPattern: '/v1/other', upstreamServiceId: crypto.randomUUID() }
+    expect(adminUpdateEndpointPublicationSchema.safeParse(contract).success).toBe(false)
+    expect(adminUpdateEndpointPublicationSchema.parse({ ...contract, enabled: false }))
+      .toEqual({ enabled: false })
+  })
+
   it('rejects unsafe admin mutations and requires explicit credit targets', () => {
     expect(adminUpdateUserSchema.safeParse({
       id: 1,

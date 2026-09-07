@@ -5,6 +5,7 @@ import { parseFetchError } from '~/utils/client-error'
 const { t } = useI18n()
 const {
   catalog,
+  catalogFeedback,
   applyChanges,
   applyChangeCount,
   bulkFeedback,
@@ -17,18 +18,15 @@ const {
   driftedServices,
   editingRoute,
   endpointFeedback,
-  createRouteUpstreamId,
   focusedUpstreamId,
   requiresDiscovery,
   handlePrimaryAction,
+  handleSettingsSaved,
   serviceUpstreams,
   isBusy,
   operationBusy,
   loading,
-  openCreateRoute,
   openEditRoute,
-  removeRoute,
-  products,
   refresh,
   resetFilters,
   resourceError,
@@ -44,7 +42,6 @@ const {
   statusFilter,
   statusItems,
   updatePublication,
-  upstreams,
   visibleServices
 } = useAdminEndpointCatalogPage()
 
@@ -70,15 +67,6 @@ useHead({ title: () => t('admin.apis.routing.catalog.title') })
           {{ $t('admin.apis.routing.catalog.actions.applyAllChanges', { count: applyChangeCount }) }}
         </UButton>
         <UButton
-          color="neutral"
-          variant="outline"
-          icon="i-lucide-plus"
-          :disabled="products.length === 0 || upstreams.length === 0 || operationBusy"
-          @click="openCreateRoute()"
-        >
-          {{ $t('admin.apis.routing.catalog.actions.manualRoute') }}
-        </UButton>
-        <UButton
           icon="i-lucide-scan-search"
           :loading="isBusy('discover:all')"
           :disabled="serviceUpstreams.length === 0 || operationBusy"
@@ -88,6 +76,17 @@ useHead({ title: () => t('admin.apis.routing.catalog.title') })
         </UButton>
       </div>
     </div>
+
+    <UAlert
+      v-if="catalogFeedback"
+      :color="catalogFeedback.color"
+      variant="subtle"
+      icon="i-lucide-info"
+      :title="catalogFeedback.message"
+      :description="catalogFeedback.description"
+      role="status"
+      aria-live="polite"
+    />
 
     <UAlert
       v-if="resourceError"
@@ -332,9 +331,7 @@ useHead({ title: () => t('admin.apis.routing.catalog.title') })
         :selection-disabled="operationBusy"
         @discover="discoverService"
         @edit="openEditRoute"
-        @manual="openCreateRoute"
         @primary="handlePrimaryAction"
-        @remove="removeRoute"
         @select="selectEndpoints"
         @update="updatePublication"
       />
@@ -369,13 +366,11 @@ useHead({ title: () => t('admin.apis.routing.catalog.title') })
       </template>
     </UEmpty>
 
-    <AdminPlatformRouteModal
+    <AdminPlatformEndpointSettingsModal
+      v-if="editingRoute"
       v-model:open="routeModalOpen"
-      :products="products"
-      :upstreams="upstreams"
       :route-binding="editingRoute"
-      :initial-upstream-id="createRouteUpstreamId"
-      @saved="refresh"
+      @saved="handleSettingsSaved"
     />
   </div>
 </template>

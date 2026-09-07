@@ -57,14 +57,14 @@ Upstream
 
 `/admin/apis` 是日常接口发布入口。它不是新的持久化领域，也不复制一份发布状态，而是将 Service Endpoint、Route 期望配置和当前活动 Revision 投影为一个接口目录。
 
-Service-managed Service 的标准流程是：
+Service 的标准流程是：
 
 1. Service 发现更新 OpenAPI 文档和 Endpoint 摘要，但不直接公开接口。
 2. 管理员在接口目录明确保存发布变更。
 3. Platform 按 Operation 的第一个业务 Tag 自动创建或复用 Product，并按路径版本创建 Version；默认公开 Path 与 Service Path 相同。
 4. 发布、停用以及 API Key、统计、积分、限流等治理变更先保存到控制面；管理员点击“应用全部变更”后，Platform 一次性生成并激活运行配置。只有完整配置实际变化时才生成新的 Routing Revision。
 5. 标记为 `x-openapi-platform.support=true` 的支撑 Operation 不显示为独立接口，由同组公开 Route 自动带上或停用。
-6. 高级设置仍可编辑 Host、公开 Path、Upstream 模板、超时和大小限制；Service-managed Route 的保存也进入待统一应用状态。
+6. 接口设置仅编辑鉴权、积分、统计、限流、超时和大小限制等治理规则；Method、Path 和上游映射由 Service 契约决定。保存进入待统一应用状态。
 
 Revision 是 Gateway 的安全运行边界，不是管理员必须手工编排的日常步骤。生成 Revision 时 Platform：
 
@@ -116,9 +116,9 @@ Route 支持：
 
 ## 7. Upstream
 
-### 7.1 Service-managed Upstream
+### 7.1 Service 连接
 
-填写 Service Token 的 Upstream 用于受信 API Service：
+每个 Upstream 都必须连接符合 Service 协议的 API Service，并配置 Service Token：
 
 - Platform 为每个 Upstream 独立加密保存 Service Token。
 - 修改 Service Token 先写入待验证版本；发现成功后才提升为活动凭证，期间已发布流量继续使用上一个已验证版本。
@@ -127,17 +127,11 @@ Route 支持：
 - 可发现 Service 身份、OpenAPI 和业务配置 Schema。
 - 管理页面同时检查各启用 Target 的 `readiness` 探针和带 Service Token 的只读控制端点，显示在线、部分可用、离线或未知；曾经完成 Service 发现不等同于当前在线，Token 不匹配也不能显示为在线。
 - 多个 Target 必须属于同一逻辑 Service 并暴露相同契约。
-- 新增、修改地址或重新启用的 Service-managed Target 在完成发现前不会进入新的 Routing Revision；存在 Platform 期望配置时，还必须同步到对应 Revision 和哈希。
+- 新增、修改地址或重新启用的 Target 在完成发现前不会进入新的 Routing Revision；存在 Platform 期望配置时，还必须同步到对应 Revision 和哈希。
 
-### 7.2 手动管理的 Upstream
+### 7.2 Target 选择
 
-未填写 Service Token 的 Upstream 用于普通 HTTP API：
-
-- Target 支持内网地址、容器名、HTTP 与 HTTPS；公网 HTTP 会被拒绝。
-- Gateway 对管理员配置的 Target 仍执行 Host、DNS、重定向和凭证安全校验。
-- 不要求实现 Service 发现或配置协议。
-
-### 7.3 Target 选择
+Target 支持内网地址、容器名、HTTP 与 HTTPS，公网 HTTP 会被拒绝。所有请求均执行 Host、DNS、重定向和凭证安全校验。
 
 一个 Upstream 可以包含多个启用 Target。当前策略包括轮询和加权轮询，权重只
 决定请求的首选 Target。网络错误或 `502/503/504` 会让该 Target 短暂冷却；
@@ -146,7 +140,7 @@ Route 支持：
 
 ## 8. Service 控制面
 
-管理员在 Service-managed Upstream 页面执行 Service 发现。Platform 会：
+管理员在 Upstream 页面执行 Service 发现。Platform 会：
 
 1. 读取 Service 描述。
 2. 校验 Service ID、`serviceProtocol` 和契约指纹；当前支持 `openapi-service/v1`，不比较 Service 与 Platform 的软件版本号。
@@ -158,7 +152,7 @@ Route 支持：
 
 业务配置保存后，Platform 使用乐观锁生成更高 Revision，分别向全部启用 Target 下发同一完整快照，并记录 `synced`、`drifted`、`error` 或 `unknown` 状态。部分 Target 失败不会被视为全部成功。
 
-发现成功，或配置同步至少有一个 Target 成功后，Platform 自动重新计算运行配置。相同配置复用当前 Revision；只有验证通过的 Target 集合实际变化时才生成新 Revision。部分同步生成只包含成功 Target 的快照；如果某个 Upstream 的全部 Target 同步失败，则该 Upstream 在后续 Revision 中继续使用最后一个有效 Target 快照，其他 Upstream 仍可独立更新。没有历史有效快照的新 Service-managed Upstream 会保持待发布状态，直到至少一个 Target 验证成功。期望配置与实际运行状态会保持可见差异，等待管理员修复后重试。发现不会自行创建公开 Route，但可以应用管理员此前已经明确发布、因 Service-managed Target 尚未验证而等待的 Route。
+发现成功，或配置同步至少有一个 Target 成功后，Platform 自动重新计算运行配置。相同配置复用当前 Revision；只有验证通过的 Target 集合实际变化时才生成新 Revision。部分同步生成只包含成功 Target 的快照；如果某个 Upstream 的全部 Target 同步失败，则该 Upstream 在后续 Revision 中继续使用最后一个有效 Target 快照，其他 Upstream 仍可独立更新。没有历史有效快照的新 Upstream 会保持待发布状态，直到至少一个 Target 验证成功。期望配置与实际运行状态会保持可见差异，等待管理员修复后重试。发现不会自行创建公开 Route，但可以应用管理员此前已经明确发布、因 Target 尚未验证而等待的 Route。
 
 Secret 使用独立存储域加密。管理 API 只返回是否已配置，浏览器和普通日志永远不会收到明文。
 
@@ -196,6 +190,6 @@ Platform 持有：
 - API Key 可重复查看是产品契约：`keyDigest` 服务鉴权查询，`keyCiphertext` 服务所有者恢复。除非先作出明确产品决策并提供数据迁移，否则不得改成一次性展示模型。
 - `NUXT_API_KEY_SECRET` 是数据密钥根；`0.1.0` 不支持 Keyring 或在线主密钥轮换，不能在已有数据库上直接替换。
 - 所有 Upstream Target 都必须经过 Host、DNS、重定向和凭证安全校验；公网 HTTP 不允许。
-- Service-managed Upstream 不接收调用方认证凭据。
+- Upstream 不接收调用方认证凭据。
 - 发布、回滚、Token 和 Secret 变更必须写入审计日志。
 - PGlite 只支持单 Platform 进程；多实例必须使用 PostgreSQL 和共享 Redis。

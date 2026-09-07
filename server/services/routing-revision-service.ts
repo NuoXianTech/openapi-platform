@@ -120,13 +120,12 @@ export const routingRevisionService = {
           route: apiRoutes,
           product: apiProducts,
           version: apiVersions,
-          serviceManaged: upstreamServiceConnections.upstreamServiceId,
           loadBalancing: upstreamServices.loadBalancing
         }).from(apiRoutes)
           .innerJoin(apiVersions, eq(apiVersions.id, apiRoutes.apiVersionId))
           .innerJoin(apiProducts, eq(apiProducts.id, apiVersions.productId))
           .innerJoin(upstreamServices, eq(upstreamServices.id, apiRoutes.upstreamServiceId))
-          .leftJoin(upstreamServiceConnections, eq(
+          .innerJoin(upstreamServiceConnections, eq(
             upstreamServiceConnections.upstreamServiceId,
             upstreamServices.id
           ))
@@ -152,7 +151,6 @@ export const routingRevisionService = {
 
         const upstreamDefinitions = new Map(routeRows.map(row => [row.route.upstreamServiceId, {
           id: row.route.upstreamServiceId,
-          serviceManaged: Boolean(row.serviceManaged),
           loadBalancing: row.loadBalancing as RoutingRevisionUpstream['loadBalancing']
         }]))
         const upstreamIds = Array.from(upstreamDefinitions.keys()).sort()
@@ -162,13 +160,10 @@ export const routingRevisionService = {
               eq(upstreamTargets.enabled, true)
             ))
           : []
-        const serviceManagedIds = upstreamIds.filter(id => (
-          upstreamDefinitions.get(id)?.serviceManaged === true
-        ))
-        const connectionRows = serviceManagedIds.length > 0
+        const connectionRows = upstreamIds.length > 0
           ? await tx.select().from(upstreamServiceConnections).where(inArray(
               upstreamServiceConnections.upstreamServiceId,
-              serviceManagedIds
+              upstreamIds
             ))
           : []
         const connections = new Map(connectionRows.map(connection => [
@@ -176,30 +171,24 @@ export const routingRevisionService = {
           connection
         ]))
 
-        // A Service-managed Upstream may be temporarily unavailable while a
-        // target is being discovered or reconfigured.  It must not prevent an
-        // unrelated manual Route from being published.  If an active snapshot
-        // already contains that Upstream, retain the last known-good runtime
-        // entry until a verified replacement is available; otherwise omit the
-        // Upstream and its Routes from this revision.
+        // While discovery or reconfiguration is pending, retain verified,
+        // enabled Targets from the active snapshot. Other Services can still
+        // publish; a new Service without any verified Target stays unpublished.
         const skippedUpstreamIds = new Set<string>()
         const upstreams: RoutingRevisionUpstream[] = upstreamIds.flatMap((id) => {
           const definition = upstreamDefinitions.get(id)!
-          let serviceManaged = definition.serviceManaged
           let targets = targetRows
             .filter(target => target.upstreamServiceId === id)
-            .filter(target => !serviceManaged
-              || isServiceTargetReady(target, connections.get(id) ?? null))
+            .filter(target => isServiceTargetReady(target, connections.get(id) ?? null))
             .map(target => ({ id: target.id, baseUrl: target.baseUrl, weight: target.weight }))
             .sort((left, right) => left.id.localeCompare(right.id))
-          if (serviceManaged && targets.length === 0) {
+          if (targets.length === 0) {
             const activeUpstream = activeUpstreams.get(id)
             if (activeUpstream) {
               // Keep the last active runtime while a managed Upstream waits
               // for a verified Target. Only retain Targets that still exist
               // and remain enabled; an intentional disable/delete must take
               // effect even while another Target is waiting for verification.
-              serviceManaged = activeUpstream.serviceManaged
               const enabledTargetIds = new Set(
                 targetRows
                   .filter(target => target.upstreamServiceId === id)
@@ -211,20 +200,10 @@ export const routingRevisionService = {
             }
           }
           if (targets.length === 0) {
-            if (definition.serviceManaged) {
-              skippedUpstreamIds.add(id)
-              return []
-            }
-            throw createApplicationError({
-              statusCode: 409,
-              message: 'active route references an upstream without enabled targets',
-              data: {
-                code: 'UPSTREAM_HAS_NO_TARGETS',
-                upstreamServiceId: id
-              }
-            })
+            skippedUpstreamIds.add(id)
+            return []
           }
-          return [{ ...definition, serviceManaged, targets }]
+          return [{ ...definition, targets }]
         })
 
         const routes = routeRows

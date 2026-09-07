@@ -101,9 +101,6 @@ export function toPlatformUpstreamSummary(row: UpstreamRow): PlatformUpstreamSum
     id: row.id,
     slug: row.slug,
     name: row.name,
-    serviceManaged: 'serviceManaged' in row
-      ? Boolean(row.serviceManaged)
-      : false,
     loadBalancing: row.loadBalancing as PlatformUpstreamSummary['loadBalancing'],
     status: row.status as PlatformUpstreamSummary['status'],
     createdAt: toIsoString(row.createdAt),
@@ -142,7 +139,6 @@ export function toPlatformRoute(row: RouteRow): PlatformRoute {
     maxResponseBytes: row.maxResponseBytes,
     catalogStatus: row.catalogStatus as PlatformRoute['catalogStatus'],
     sensitiveQueryParameters: row.sensitiveQueryParameters,
-    managedBy: row.managedBy as PlatformRoute['managedBy'],
     isSupportRoute: row.isSupportRoute,
     state: row.state as PlatformRoute['state'],
     createdAt: toIsoString(row.createdAt),
