@@ -61,10 +61,12 @@ Service 的标准流程是：
 
 1. Service 发现更新 OpenAPI 文档和 Endpoint 摘要，但不直接公开接口。
 2. 管理员在接口目录明确保存发布变更。
-3. Platform 按 Operation 的第一个业务 Tag 自动创建或复用 Product，并按路径版本创建 Version；默认公开 Path 与 Service Path 相同。
+3. Platform 按 Operation 的第一个业务 Tag 自动创建或复用接口分组（Product），并按路径版本创建 Version；默认公开 Path 与 Service Path 相同。后台不提供分组或版本的手工创建入口，分组标识和版本号只读。
 4. 发布、停用以及 API Key、统计、积分、限流等治理变更先保存到控制面；管理员点击“应用全部变更”后，Platform 一次性生成并激活运行配置。只有完整配置实际变化时才生成新的 Routing Revision。
 5. 标记为 `x-openapi-platform.support=true` 的支撑 Operation 不显示为独立接口，由同组公开 Route 自动带上或停用。
 6. 接口设置仅编辑鉴权、积分、统计、限流、超时和大小限制等治理规则；Method、Path 和上游映射由 Service 契约决定。保存进入待统一应用状态。
+
+接口分组页维护名称、说明、可见性与生命周期，版本设置维护发布状态和变更说明。自动复用分组及版本时保留这些设置；已退役的分组或版本必须先显式恢复为可发布状态，才能继续发布接口。
 
 Revision 是 Gateway 的安全运行边界，不是管理员必须手工编排的日常步骤。生成 Revision 时 Platform：
 

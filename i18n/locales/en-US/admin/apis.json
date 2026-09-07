@@ -59,7 +59,7 @@
         "unpublished": "Not published",
         "tabs": {
           "routes": "API catalog",
-          "products": "API groups",
+          "products": "Endpoint groups",
           "upstreams": "Services",
           "revisions": "Runtime snapshots"
         },
@@ -70,7 +70,7 @@
           "defaultDomain": "Default domain",
           "summary": "Summary",
           "description": "Description",
-          "version": "Initial version",
+          "version": "Version number",
           "versionState": "Version status",
           "changelog": "Changelog",
           "visibility": "Visibility",
@@ -94,8 +94,6 @@
           "routeState": "Endpoint state"
         },
         "actions": {
-          "createProduct": "New Product",
-          "createVersion": "New Version",
           "createUpstream": "New Upstream",
           "saveRoute": "Save settings",
           "addTarget": "Add Target",
@@ -105,8 +103,8 @@
           "activateRevision": "Roll back to this snapshot"
         },
         "sections": {
-          "productsTitle": "API Products",
-          "productsDescription": "Organize publishable API capabilities with Products and Versions.",
+          "productsTitle": "Endpoint groups",
+          "productsDescription": "Groups and versions are created from Service contracts when endpoints are first published. Manage their details and publication settings here.",
           "upstreamsTitle": "Upstream Services",
           "upstreamsDescription": "Manage Services and their Targets. All endpoints are discovered from OpenAPI contracts.",
           "revisionsTitle": "Runtime snapshots",
@@ -115,8 +113,8 @@
         "columns": {
           "method": "Method",
           "route": "Public Route",
-          "product": "Product",
-          "productVersion": "Product / Version",
+          "product": "Endpoint group",
+          "productVersion": "Group / Version",
           "upstream": "Upstream",
           "state": "State",
           "versions": "Versions",
@@ -133,8 +131,8 @@
           "activeRevision": "Runtime configuration"
         },
         "empty": {
-          "productsTitle": "No Products yet",
-          "productsDescription": "Create the first API Product. Its initial Version becomes publishable immediately.",
+          "productsTitle": "No endpoint groups yet",
+          "productsDescription": "Publish a Service endpoint from the endpoint list to create its group and version automatically.",
           "upstreamsTitle": "No Upstreams yet",
           "upstreamsDescription": "Enter a Service Token and Target URL to connect your first Service.",
           "targetsTitle": "No Targets configured",
@@ -176,19 +174,16 @@
           "defaultDomainHelp": "Optional. Routes without their own Host answer on this domain. Leave it empty to make them the lowest-priority any-Host fallback. Saving republishes the runtime snapshot."
         },
         "productForm": {
-          "title": "Create API Product",
-          "description": "Create a Product and its first Version. Multiple Routes can later belong to the same Version.",
-          "editTitle": "Edit API Product",
-          "editDescription": "Update Product metadata, visibility, and lifecycle.",
+          "editTitle": "Edit endpoint group",
+          "editDescription": "Update the group name, description, visibility, and lifecycle.",
+          "slugHelp": "Generated from the Service contract as a stable identifier for grouping and authorization.",
           "namePlaceholder": "For example, Weather service",
-          "summaryPlaceholder": "Describe the capability in one sentence",
-          "publishedTitle": "The initial Version will be publishable immediately",
-          "publishedDescription": "The current quick-create flow marks the initial Version as published so its Routes can enter a runtime snapshot."
+          "summaryPlaceholder": "Briefly describe what this group of endpoints provides"
         },
         "versionForm": {
-          "createTitle": "Create API Version",
-          "editTitle": "Edit API Version",
-          "description": "Manage the version identifier, publication state, and changelog for {product}."
+          "editTitle": "Version settings",
+          "description": "Manage the publication state and changelog for {product}.",
+          "versionHelp": "The version number comes from the Service endpoint path and is managed automatically."
         },
         "upstreamForm": {
           "title": "Create Upstream",
@@ -237,12 +232,12 @@
           "description": "The Route will stop accepting new public requests after it is disabled. Confirm that this is intended."
         },
         "deleteProduct": {
-          "title": "Delete Product: {name}",
-          "description": "Only Products without Routes and without references from the active runtime snapshot can be deleted."
+          "title": "Delete endpoint group: {name}",
+          "description": "Only groups without endpoints or references from the active runtime snapshot can be deleted."
         },
         "deleteVersion": {
-          "title": "Delete Version: {version}",
-          "description": "Only Versions without Routes and without references from the active runtime snapshot can be deleted."
+          "title": "Delete version: {version}",
+          "description": "Only versions without endpoints or references from the active runtime snapshot can be deleted."
         },
         "deleteUpstream": {
           "title": "Delete Upstream: {name}",
@@ -261,10 +256,8 @@
           "description": "This changes whether the Target receives traffic and Service configuration updates."
         },
         "feedback": {
-          "productCreated": "Product created",
-          "productUpdated": "Product updated",
-          "versionCreated": "Version created",
-          "versionUpdated": "Version updated",
+          "productUpdated": "Endpoint group updated",
+          "versionUpdated": "Version settings updated",
           "upstreamCreated": "Upstream created",
           "upstreamUpdated": "Upstream updated",
           "targetCreated": "Target added",
@@ -289,7 +282,6 @@
           "slugMaxLength": "Slug must be at most 80 characters",
           "hostInvalid": "Enter a valid domain; wildcard form such as *.example.com is supported",
           "summaryMaxLength": "Summary must be at most 300 characters",
-          "versionRequired": "Select or enter a Version",
           "targetRequired": "Add at least one Target",
           "targetUrlInvalid": "Enter a valid HTTP or HTTPS URL",
           "publicTargetHttpsRequired": "Public Targets must use HTTPS",

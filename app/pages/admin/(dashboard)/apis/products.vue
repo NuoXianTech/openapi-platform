@@ -36,17 +36,12 @@ const columns = computed<TableColumn<PlatformProduct>[]>(() => [
   { id: 'actions', header: '' }
 ])
 
-function openCreateProduct() {
-  editingProduct.value = null
-  modalOpen.value = true
-}
-
 function openEditProduct(product: PlatformProduct) {
   editingProduct.value = product
   modalOpen.value = true
 }
 
-function openVersion(product: PlatformProduct, version: PlatformApiVersion | null = null) {
+function openVersion(product: PlatformProduct, version: PlatformApiVersion) {
   versionProduct.value = product
   editingVersion.value = version
   versionModalOpen.value = true
@@ -103,8 +98,7 @@ async function removeVersion(product: PlatformProduct, version: PlatformApiVersi
 
 function productItems(product: PlatformProduct): DropdownMenuItem[][] {
   return [[
-    { label: t('common.actions.edit'), icon: 'i-lucide-pencil', onSelect: () => openEditProduct(product) },
-    { label: t('admin.apis.routing.actions.createVersion'), icon: 'i-lucide-git-branch-plus', onSelect: () => openVersion(product) }
+    { label: t('common.actions.edit'), icon: 'i-lucide-pencil', onSelect: () => openEditProduct(product) }
   ], [
     { label: t('common.actions.delete'), icon: 'i-lucide-trash-2', color: 'error', onSelect: () => removeProduct(product) }
   ]]
@@ -155,9 +149,6 @@ function versionItems(product: PlatformProduct, version: PlatformApiVersion): Dr
           @click="resource.refresh"
         >
           {{ $t('common.actions.refresh') }}
-        </UButton>
-        <UButton icon="i-lucide-plus" @click="openCreateProduct">
-          {{ $t('admin.apis.routing.actions.createProduct') }}
         </UButton>
       </template>
       <DashboardDataTable
@@ -233,22 +224,23 @@ function versionItems(product: PlatformProduct, version: PlatformApiVersion): Dr
         <template #empty-actions>
           <UButton
             size="sm"
-            icon="i-lucide-plus"
-            @click="openCreateProduct"
+            icon="i-lucide-list"
+            to="/admin/apis"
           >
-            {{ $t('admin.apis.routing.actions.createProduct') }}
+            {{ $t('admin.apis.routing.catalog.actions.manageEndpoints') }}
           </UButton>
         </template>
       </DashboardDataTable>
     </DashboardTableCard>
 
     <AdminPlatformProductModal
+      v-if="editingProduct"
       v-model:open="modalOpen"
       :product="editingProduct"
       @saved="refreshProducts"
     />
     <AdminPlatformVersionModal
-      v-if="versionProduct"
+      v-if="versionProduct && editingVersion"
       v-model:open="versionModalOpen"
       :product="versionProduct"
       :version="editingVersion"

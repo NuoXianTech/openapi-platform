@@ -24,18 +24,7 @@ export const adminUpdateRuntimeSchema = z.object({
   defaultDomain: hostSchema.nullable()
 })
 
-export const adminCreateProductSchema = z.object({
-  slug: slugSchema,
-  name: nameSchema,
-  summary: z.string().trim().max(CONTENT_CONSTRAINTS.PRODUCT_SUMMARY_MAX_LENGTH).optional(),
-  description: z.string().trim().max(CONTENT_CONSTRAINTS.PRODUCT_DESCRIPTION_MAX_LENGTH).optional(),
-  categoryId: z.coerce.number().int().positive().nullable().optional(),
-  visibility: z.enum(['public', 'private']).default('public'),
-  version: z.string().trim().min(1).max(80).default('v1')
-})
-
-export const adminUpdateProductSchema = z.object({
-  slug: slugSchema.optional(),
+export const adminUpdateProductSchema = z.strictObject({
   name: nameSchema.optional(),
   summary: z.string().trim().max(CONTENT_CONSTRAINTS.PRODUCT_SUMMARY_MAX_LENGTH).optional(),
   description: z.string().trim().max(CONTENT_CONSTRAINTS.PRODUCT_DESCRIPTION_MAX_LENGTH).optional(),
@@ -44,15 +33,7 @@ export const adminUpdateProductSchema = z.object({
   lifecycle: z.enum(['active', 'deprecated', 'retired']).optional()
 }).refine(value => Object.keys(value).length > 0, 'at least one field is required')
 
-export const adminCreateVersionSchema = z.object({
-  productId: z.uuid(),
-  version: z.string().trim().min(1).max(80),
-  state: z.enum(['draft', 'published', 'deprecated', 'retired']).default('draft'),
-  changelog: z.string().trim().max(CONTENT_CONSTRAINTS.VERSION_CHANGELOG_MAX_LENGTH).default('')
-})
-
-export const adminUpdateVersionSchema = z.object({
-  version: z.string().trim().min(1).max(80).optional(),
+export const adminUpdateVersionSchema = z.strictObject({
   state: z.enum(['draft', 'published', 'deprecated', 'retired']).optional(),
   changelog: z.string().trim().max(CONTENT_CONSTRAINTS.VERSION_CHANGELOG_MAX_LENGTH).optional()
 }).refine(value => Object.keys(value).length > 0, 'at least one field is required')

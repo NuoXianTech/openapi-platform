@@ -7,18 +7,7 @@ import { applyPlatformMutation } from '~~/server/services/platform-endpoint-publ
 import { getSqlState } from '~~/server/utils/database-error'
 import { firstRow } from '~~/server/utils/row'
 
-interface CreateProductInput {
-  slug: string
-  name: string
-  summary?: string
-  description?: string
-  categoryId?: number | null
-  visibility: 'public' | 'private'
-  version: string
-}
-
 interface UpdateProductInput {
-  slug?: string
   name?: string
   summary?: string
   description?: string
@@ -27,28 +16,12 @@ interface UpdateProductInput {
   lifecycle?: 'active' | 'deprecated' | 'retired'
 }
 
-interface CreateVersionInput {
-  productId: string
-  version: string
-  state: 'draft' | 'published' | 'deprecated' | 'retired'
-  changelog: string
-}
-
 interface UpdateVersionInput {
-  version?: string
   state?: 'draft' | 'published' | 'deprecated' | 'retired'
   changelog?: string
 }
 
-function conflict(message: string) {
-  return createApplicationError({
-    statusCode: 409,
-    message,
-    data: { code: 'PRODUCT_CONFLICT' }
-  })
-}
-
-function lifecycleDates(state: CreateVersionInput['state'], now = new Date()) {
+function lifecycleDates(state: NonNullable<UpdateVersionInput['state']>, now = new Date()) {
   return {
     publishedAt: ['published', 'deprecated', 'retired'].includes(state) ? now : null,
     deprecatedAt: ['deprecated', 'retired'].includes(state) ? now : null,
@@ -113,38 +86,6 @@ export const platformProductService = {
     }
   },
 
-  async create(input: CreateProductInput) {
-    try {
-      return await db.transaction(async (tx) => {
-        const now = new Date()
-        const product = firstRow(await tx.insert(apiProducts).values({
-          slug: input.slug,
-          name: input.name,
-          summary: input.summary ?? '',
-          description: input.description ?? '',
-          categoryId: input.categoryId ?? null,
-          visibility: input.visibility
-        }).returning())
-        if (!product) throw new Error('product insert returned no row')
-
-        const version = firstRow(await tx.insert(apiVersions).values({
-          productId: product.id,
-          version: input.version,
-          state: 'published',
-          ...lifecycleDates('published', now)
-        }).returning())
-        if (!version) throw new Error('version insert returned no row')
-        return { ...product, versions: [version] }
-      })
-    } catch (error) {
-      if (getSqlState(error) === '23505') throw conflict('product slug or version already exists')
-      if (getSqlState(error) === '23503') {
-        throw createApplicationError({ statusCode: 404, message: 'category not found', data: { code: 'PRODUCT_PARENT_NOT_FOUND' } })
-      }
-      throw error
-    }
-  },
-
   async update(
     id: string,
     input: UpdateProductInput,
@@ -153,7 +94,12 @@ export const platformProductService = {
     const executor = options.transaction ?? db
     try {
       const updated = firstRow(await executor.update(apiProducts).set({
-        ...input,
+        name: input.name,
+        summary: input.summary,
+        description: input.description,
+        categoryId: input.categoryId,
+        visibility: input.visibility,
+        lifecycle: input.lifecycle,
         updatedAt: new Date()
       }).where(and(eq(apiProducts.id, id), isNull(apiProducts.deletedAt))).returning())
       if (!updated) {
@@ -161,7 +107,6 @@ export const platformProductService = {
       }
       return updated
     } catch (error) {
-      if (getSqlState(error) === '23505') throw conflict('product slug already exists')
       if (getSqlState(error) === '23503') {
         throw createApplicationError({ statusCode: 404, message: 'category not found', data: { code: 'CATEGORY_NOT_FOUND' } })
       }
@@ -204,33 +149,6 @@ export const platformProductService = {
     return removed
   },
 
-  async createVersion(
-    input: CreateVersionInput,
-    options: { transaction?: DatabaseTransaction } = {}
-  ) {
-    const executor = options.transaction ?? db
-    try {
-      const product = firstRow(await executor.select({ id: apiProducts.id }).from(apiProducts)
-        .where(and(eq(apiProducts.id, input.productId), isNull(apiProducts.deletedAt)))
-        .limit(1))
-      if (!product) {
-        throw createApplicationError({ statusCode: 404, message: 'product not found', data: { code: 'PRODUCT_NOT_FOUND' } })
-      }
-      const version = firstRow(await executor.insert(apiVersions).values({
-        productId: input.productId,
-        version: input.version,
-        state: input.state,
-        changelog: input.changelog,
-        ...lifecycleDates(input.state)
-      }).returning())
-      if (!version) throw new Error('version insert returned no row')
-      return version
-    } catch (error) {
-      if (getSqlState(error) === '23505') throw conflict('version already exists for this product')
-      throw error
-    }
-  },
-
   async updateVersion(
     id: string,
     input: UpdateVersionInput,
@@ -248,17 +166,13 @@ export const platformProductService = {
     const timestampPatch = input.state
       ? lifecycleDates(input.state)
       : {}
-    try {
-      const version = firstRow(await executor.update(apiVersions).set({
-        ...input,
-        ...timestampPatch
-      }).where(eq(apiVersions.id, id)).returning())
-      if (!version) throw new Error('version update returned no row')
-      return version
-    } catch (error) {
-      if (getSqlState(error) === '23505') throw conflict('version already exists for this product')
-      throw error
-    }
+    const version = firstRow(await executor.update(apiVersions).set({
+      state: input.state,
+      changelog: input.changelog,
+      ...timestampPatch
+    }).where(eq(apiVersions.id, id)).returning())
+    if (!version) throw new Error('version update returned no row')
+    return version
   },
 
   async removeVersion(
@@ -328,17 +242,6 @@ export const platformProductService = {
     }))
     const { value: product, ...publication } = committed
     return { product, ...publication }
-  },
-
-  async createVersionAndPublish(
-    input: CreateVersionInput,
-    createdBy: number | null
-  ) {
-    const committed = await applyPlatformMutation(createdBy, async tx => ({
-      value: await platformProductService.createVersion(input, { transaction: tx })
-    }))
-    const { value: version, ...publication } = committed
-    return { version, ...publication }
   },
 
   async updateVersionAndPublish(

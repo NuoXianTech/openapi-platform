@@ -6,6 +6,8 @@ import {
   adminCreateFriendLinkSchema,
   adminCreateUpstreamSchema,
   adminUpdateEndpointPublicationSchema,
+  adminUpdateProductSchema,
+  adminUpdateVersionSchema,
   adminCleanupApiCallLogsSchema,
   adminCleanupLoginLogsSchema,
   adminCleanupOperationLogsSchema,
@@ -19,6 +21,29 @@ import {
 } from '~~/server/schemas/admin'
 
 describe('admin schemas', () => {
+  it('allows group metadata edits while rejecting changes to generated identifiers', () => {
+    expect(adminUpdateProductSchema.parse({
+      name: ' Weather ', summary: 'Forecasts', description: 'Weather endpoints',
+      categoryId: 1, visibility: 'private', lifecycle: 'deprecated'
+    })).toEqual({
+      name: 'Weather', summary: 'Forecasts', description: 'Weather endpoints',
+      categoryId: 1, visibility: 'private', lifecycle: 'deprecated'
+    })
+    expect(adminUpdateProductSchema.safeParse({ slug: 'renamed' }).success).toBe(false)
+    expect(adminUpdateProductSchema.safeParse({ name: 'Weather', slug: 'renamed' }).success).toBe(false)
+    expect(adminUpdateProductSchema.safeParse({ name: 'Weather', version: 'v2' }).success).toBe(false)
+    expect(adminUpdateProductSchema.safeParse({}).success).toBe(false)
+  })
+
+  it('allows version governance without changing its number or group', () => {
+    expect(adminUpdateVersionSchema.parse({ state: 'deprecated', changelog: ' Updated ' }))
+      .toEqual({ state: 'deprecated', changelog: 'Updated' })
+    expect(adminUpdateVersionSchema.safeParse({ version: 'v2' }).success).toBe(false)
+    expect(adminUpdateVersionSchema.safeParse({ state: 'published', version: 'v2' }).success).toBe(false)
+    expect(adminUpdateVersionSchema.safeParse({ state: 'published', productId: crypto.randomUUID() }).success).toBe(false)
+    expect(adminUpdateVersionSchema.safeParse({}).success).toBe(false)
+  })
+
   it('requires a Service Token to create an upstream', () => {
     const input = {
       slug: 'service',

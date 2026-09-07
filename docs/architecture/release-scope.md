@@ -24,7 +24,8 @@ Platform 不运行具体业务 Handler。Service 不管理 Platform 用户、公
 
 正式支持范围包括：
 
-- Product、Version、Upstream 与 Target 的管理生命周期，以及由 Service 契约生成的 Route 治理。
+- Service 契约自动生成的接口分组、版本和 Route；后台维护展示资料和治理设置，分组标识与版本号只读。
+- Upstream 与 Target 的管理生命周期。
 - Service Endpoint 接口目录，以及显式确认后的自动 Route 创建和 Revision 发布。
 - 不可变 Routing Revision、发布校验、环境激活与历史版本回滚。
 - Service Upstream，以及同一 Upstream 内的轮询和加权 Target。

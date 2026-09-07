@@ -22,6 +22,7 @@ import {
   vi
 } from 'vitest'
 import * as schema from '~~/server/db/schema'
+import { createProductFixture } from '../fixtures/platform-product'
 
 const serviceToken = 'gateway-acceptance-token-with-at-least-32-characters'
 const serviceConfigurationKey
@@ -44,9 +45,6 @@ const { apiKeyService } = await import(
 )
 const { dynamicGatewayService } = await import(
   '~~/server/services/dynamic-gateway-service'
-)
-const { platformProductService } = await import(
-  '~~/server/services/platform-product-service'
 )
 const { platformRouteService } = await import(
   '~~/server/services/platform-route-service'
@@ -167,7 +165,7 @@ beforeAll(async () => {
   })
 
   await platformRuntimeService.ensureDefault()
-  const product = await platformProductService.create({
+  const product = await createProductFixture(database, {
     slug: 'official-public-apis',
     name: 'Official public APIs',
     visibility: 'public',

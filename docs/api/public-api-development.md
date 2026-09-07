@@ -22,6 +22,8 @@ Platform v1 不承载具体公共接口代码。新增接口在 `openapi-service
 
 Service OpenAPI 变化不会在未经确认时暴露新 Endpoint，也不会静默改写现有公开 Route。新增 Endpoint 会显示为“可发布”，管理员明确保存并应用后才生效。
 
+接口分组与版本无需预先创建。首次发布时，Platform 根据业务 Tag 和接口路径自动生成；后台可编辑分组资料、可见性、生命周期以及版本状态和变更说明，分组标识和版本号只读。重新发布不会覆盖已保存的资料，也不会自动恢复已退役的分组或版本。
+
 ## 2. 业务配置
 
 模块开关、音乐 Cookie、IP 数据库密钥、Crypto 算法等字段在各自的 `src/modules/<module>/configuration.ts` 声明，并由 `src/modules/index.ts` 显式组合。Platform 只根据通用字段类型生成表单：

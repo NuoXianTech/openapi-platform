@@ -12,6 +12,7 @@ import type {
 import { API_STATUS } from '#shared/config/api-status'
 import * as schema from '~~/server/db/schema'
 import { canonicalJson } from '~~/server/utils/canonical-json'
+import { createProductFixture } from '../../../fixtures/platform-product'
 
 // Availability probes use the production DNS-pinned transport.  Delegate it
 // to the test's stubbed global fetch so database/revision tests remain fully
@@ -83,7 +84,7 @@ async function createRoutingGraph(options: {
   verified?: boolean
 }) {
   const productSlug = options.productSlug ?? 'proxy-smoke'
-  const product = await platformProductService.create({
+  const product = await createProductFixture(database, {
     slug: productSlug,
     name: productSlug,
     visibility: 'public',
@@ -602,7 +603,7 @@ describe('routing revision service', () => {
       pathPattern: '/v1/items/{id}',
       upstreamPathTemplate: '/items/{path.id}'
     })
-    const secondProduct = await platformProductService.create({
+    const secondProduct = await createProductFixture(database, {
       slug: 'second',
       name: 'Second',
       visibility: 'public',
@@ -919,6 +920,69 @@ describe('routing revision service', () => {
     expect(routes.find(binding => (
       binding.route.pathPattern === '/v1/player/assets/{asset}'
     ))?.route.state).toBe('disabled')
+  })
+
+  it('preserves generated group identifiers and edited metadata across publications', async () => {
+    const service = await createDiscoveredService({
+      slug: 'managed-groups',
+      endpoints: ['/v1/weather', '/v1/forecast'].map(path => ({
+        method: 'GET', path, operationId: null, summary: path,
+        tags: ['Weather'], system: false, support: false
+      }))
+    })
+    const first = await platformEndpointCatalogService.publish({
+      upstreamServiceId: service.upstream.id, method: 'GET', path: '/v1/weather'
+    }, null)
+    const original = await platformRouteService.get(first.route.id)
+    const groupPatch = {
+      name: 'Weather forecast', slug: 'must-not-change', summary: 'Edited summary',
+      description: 'Edited description', visibility: 'private' as const,
+      lifecycle: 'deprecated' as const
+    }
+    const versionPatch = {
+      version: 'v99', productId: crypto.randomUUID(),
+      state: 'deprecated' as const, changelog: 'Keep this changelog'
+    }
+    await platformProductService.update(original.product.id, groupPatch)
+    await platformProductService.updateVersion(original.version.id, versionPatch)
+
+    const second = await platformEndpointCatalogService.publish({
+      upstreamServiceId: service.upstream.id, method: 'GET', path: '/v1/forecast'
+    }, null)
+    const updated = await platformRouteService.get(second.route.id)
+    expect(updated.product).toMatchObject({
+      id: original.product.id, slug: 'managed-groups-weather',
+      name: groupPatch.name, summary: groupPatch.summary, description: groupPatch.description,
+      visibility: 'private', lifecycle: 'deprecated'
+    })
+    expect(updated.version).toMatchObject({
+      id: original.version.id, productId: original.product.id, version: 'v1',
+      state: 'deprecated', changelog: versionPatch.changelog
+    })
+    expect(await database.select().from(schema.apiProducts)).toHaveLength(1)
+    expect(await database.select().from(schema.apiVersions)).toHaveLength(1)
+  })
+
+  it.each([
+    ['group', 'PRODUCT_NOT_PUBLISHABLE'],
+    ['version', 'VERSION_NOT_PUBLISHABLE']
+  ] as const)('does not reactivate a retired %s when publishing an endpoint', async (kind, code) => {
+    const service = await createDiscoveredService({})
+    const published = await platformEndpointCatalogService.publish({
+      upstreamServiceId: service.upstream.id, method: 'GET', path: service.path
+    }, null)
+    const binding = await platformRouteService.get(published.route.id)
+    if (kind === 'group') {
+      await platformProductService.update(binding.product.id, { lifecycle: 'retired' })
+    } else {
+      await platformProductService.updateVersion(binding.version.id, { state: 'retired' })
+    }
+    await expect(platformEndpointCatalogService.publish({
+      upstreamServiceId: service.upstream.id, method: 'GET', path: service.path
+    }, null)).rejects.toMatchObject({ data: { code } })
+    const after = await platformRouteService.get(published.route.id)
+    expect(kind === 'group' ? after.product.lifecycle : after.version.state).toBe('retired')
+    expect(await database.select().from(schema.apiRoutes)).toHaveLength(1)
   })
 
   it('reconciles added and removed support routes from the discovered contract', async () => {

@@ -29,13 +29,13 @@ Product、Upstream、Route 全局唯一：`(host, method, path)` 的唯一性由
 
 ## 3. Product、Version 与 Route
 
-### API Product
+### 接口分组（Product）
 
-Product 是面向调用方组织能力和授权范围的单位。Product 可以包含多个 Version，并具有独立 slug、名称、说明、可见性和生命周期。
+Product 是面向调用方组织接口和授权范围的单位，在后台显示为“接口分组”。首次发布 Service 接口时，Platform 根据业务 Tag 自动创建或复用分组；没有业务 Tag 时使用 Service 分组。管理员可编辑名称、说明、分类、可见性和生命周期，slug 由系统维护，不能手工新建分组或修改其标识。
 
 ### API Version
 
-Version 表示 Product 的契约版本。Version 状态至少区分草稿、已发布、已废弃和已退役；只有允许发布的 Version 才能进入新的 Routing Revision。
+Version 表示分组的契约版本，由 Service 接口路径中的 `/v1`、`/v2` 等版本号自动生成，不能手工创建或修改版本号。管理员可维护版本状态与变更说明；只有允许发布的版本才能进入新的 Routing Revision。后续发布保留已有分组和版本的治理设置，不会自动恢复已退役的对象。
 
 ### Route
 

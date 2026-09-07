@@ -7,7 +7,7 @@ import { compactFormErrors, maxLengthError, requiredTextError } from '~/utils/fo
 
 const open = defineModel<boolean>('open', { default: false })
 const props = defineProps<{
-  product?: PlatformProductSummary | null
+  product: PlatformProductSummary
 }>()
 const emit = defineEmits<{ saved: [] }>()
 const toast = useToast()
@@ -15,31 +15,24 @@ const { t } = useI18n()
 
 interface ProductFormState {
   name: string
-  slug: string
   summary: string
   description: string
   visibility: 'public' | 'private'
   lifecycle: 'active' | 'deprecated' | 'retired'
-  version: string
 }
-
-const isEditing = computed(() => Boolean(props.product))
 
 function initialState(): ProductFormState {
   return {
-    name: props.product?.name ?? '',
-    slug: props.product?.slug ?? '',
-    summary: props.product?.summary ?? '',
-    description: props.product?.description ?? '',
-    visibility: props.product?.visibility ?? 'public',
-    lifecycle: props.product?.lifecycle ?? 'active',
-    version: 'v1'
+    name: props.product.name,
+    summary: props.product.summary,
+    description: props.product.description,
+    visibility: props.product.visibility,
+    lifecycle: props.product.lifecycle
   }
 }
 
 const state = reactive<ProductFormState>(initialState())
 const loading = ref(false)
-const slugPattern = /^[a-z0-9]+(?:-[a-z0-9]+)*$/
 
 const visibilityItems = computed(() => [
   { label: t('admin.apis.routing.visibility.public'), value: 'public' },
@@ -59,15 +52,7 @@ function validateProductForm(value: Partial<ProductFormState>): FormError<string
   return compactFormErrors(
     requiredTextError('name', value.name, t('admin.apis.routing.validation.nameRequired')),
     maxLengthError('name', value.name, 160, t('admin.apis.routing.validation.nameMaxLength')),
-    requiredTextError('slug', value.slug, t('admin.apis.routing.validation.slugRequired')),
-    value.slug && !slugPattern.test(value.slug.trim())
-      ? { name: 'slug', message: t('admin.apis.routing.validation.slugInvalid') }
-      : null,
-    maxLengthError('slug', value.slug, 80, t('admin.apis.routing.validation.slugMaxLength')),
-    maxLengthError('summary', value.summary, 300, t('admin.apis.routing.validation.summaryMaxLength')),
-    !isEditing.value
-      ? requiredTextError('version', value.version, t('admin.apis.routing.validation.versionRequired'))
-      : null
+    maxLengthError('summary', value.summary, 300, t('admin.apis.routing.validation.summaryMaxLength'))
   )
 }
 
@@ -75,30 +60,26 @@ async function onSubmit(event: FormSubmitEvent<ProductFormState>) {
   loading.value = true
   try {
     await $fetch(
-      isEditing.value ? `/api/admin/v1/products/${props.product!.id}` : '/api/admin/v1/products',
+      `/api/admin/v1/products/${props.product.id}`,
       {
-        method: isEditing.value ? 'PATCH' : 'POST',
+        method: 'PATCH',
         body: {
-          ...(isEditing.value ? {} : { version: event.data.version.trim() }),
           name: event.data.name.trim(),
-          slug: event.data.slug.trim(),
           summary: event.data.summary.trim(),
           description: event.data.description.trim(),
           visibility: event.data.visibility,
-          ...(isEditing.value ? { lifecycle: event.data.lifecycle } : {})
+          lifecycle: event.data.lifecycle
         }
       }
     )
     toast.add({
-      title: t(isEditing.value
-        ? 'admin.apis.routing.feedback.productUpdated'
-        : 'admin.apis.routing.feedback.productCreated'),
+      title: t('admin.apis.routing.feedback.productUpdated'),
       color: 'success'
     })
     open.value = false
     emit('saved')
   } catch (error: unknown) {
-    toast.add({ title: parseFetchError(error, t('admin.apis.routing.feedback.createFailed')), color: 'error' })
+    toast.add({ title: parseFetchError(error, t('admin.apis.routing.feedback.updateFailed')), color: 'error' })
   } finally {
     loading.value = false
   }
@@ -108,8 +89,8 @@ async function onSubmit(event: FormSubmitEvent<ProductFormState>) {
 <template>
   <UModal
     v-model:open="open"
-    :title="$t(isEditing ? 'admin.apis.routing.productForm.editTitle' : 'admin.apis.routing.productForm.title')"
-    :description="$t(isEditing ? 'admin.apis.routing.productForm.editDescription' : 'admin.apis.routing.productForm.description')"
+    :title="$t('admin.apis.routing.productForm.editTitle')"
+    :description="$t('admin.apis.routing.productForm.editDescription')"
     :dismissible="!loading"
     :ui="adminModalUi({ content: 'sm:max-w-2xl' })"
   >
@@ -121,13 +102,6 @@ async function onSubmit(event: FormSubmitEvent<ProductFormState>) {
         class="space-y-4"
         @submit="onSubmit"
       >
-        <UAlert
-          color="info"
-          variant="subtle"
-          icon="i-lucide-badge-check"
-          :title="$t('admin.apis.routing.productForm.publishedTitle')"
-          :description="$t('admin.apis.routing.productForm.publishedDescription')"
-        />
         <div class="grid gap-4 sm:grid-cols-2">
           <UFormField
             name="name"
@@ -141,14 +115,12 @@ async function onSubmit(event: FormSubmitEvent<ProductFormState>) {
             />
           </UFormField>
           <UFormField
-            name="slug"
             :label="$t('admin.apis.routing.fields.slug')"
-            :description="$t('admin.apis.routing.fields.slugHelp')"
-            required
+            :description="$t('admin.apis.routing.productForm.slugHelp')"
           >
             <UInput
-              v-model="state.slug"
-              placeholder="weather"
+              :model-value="product.slug"
+              readonly
               class="w-full font-mono"
             />
           </UFormField>
@@ -175,18 +147,6 @@ async function onSubmit(event: FormSubmitEvent<ProductFormState>) {
         </UFormField>
         <div class="grid gap-4 sm:grid-cols-2">
           <UFormField
-            v-if="!isEditing"
-            name="version"
-            :label="$t('admin.apis.routing.fields.version')"
-            required
-          >
-            <UInput
-              v-model="state.version"
-              placeholder="v1"
-              class="w-full font-mono"
-            />
-          </UFormField>
-          <UFormField
             name="visibility"
             :label="$t('admin.apis.routing.fields.visibility')"
           >
@@ -198,7 +158,6 @@ async function onSubmit(event: FormSubmitEvent<ProductFormState>) {
             />
           </UFormField>
           <UFormField
-            v-if="isEditing"
             name="lifecycle"
             :label="$t('admin.apis.routing.columns.lifecycle')"
           >
@@ -228,7 +187,7 @@ async function onSubmit(event: FormSubmitEvent<ProductFormState>) {
           form="platform-product-form"
           :loading="loading"
         >
-          {{ $t(isEditing ? 'common.actions.save' : 'admin.apis.routing.actions.createProduct') }}
+          {{ $t('common.actions.save') }}
         </UButton>
       </div>
     </template>
