@@ -146,17 +146,18 @@ export const adminDashboardService = {
   },
 
   async getInsights(): Promise<AdminDashboardInsightsData> {
-    const now = new Date()
+    const last24hEnd = new Date()
+    last24hEnd.setMinutes(0, 0, 0)
     const hourMs = 60 * 60 * 1000
-    const last24hStart = new Date(now.getTime() - 24 * hourMs)
+    const last24hStart = new Date(last24hEnd.getTime() - 24 * hourMs)
     const hourlySource = db.select({
-      // Anchor all 24 one-hour buckets to this snapshot instead of calendar
-      // hours. Epoch arithmetic is independent of the database session timezone.
+      // Anchor 24 complete hours to the current app-local hour boundary.
+      // Epoch arithmetic keeps grouping independent of the database session timezone.
       bucket: sql<number>`floor(extract(epoch from (${apiCalls.createdAt} - ${last24hStart.toISOString()}::timestamptz)) / 3600)::integer`.as('bucket')
     }).from(apiCalls)
       .where(and(
         gte(apiCalls.createdAt, last24hStart),
-        lt(apiCalls.createdAt, now),
+        lt(apiCalls.createdAt, last24hEnd),
         eq(apiCalls.isCounted, true)
       ))
       .as('hourly_source')

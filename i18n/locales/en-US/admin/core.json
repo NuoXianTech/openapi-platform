@@ -53,7 +53,7 @@
       },
       "hourly": {
         "title": "24-hour call trend",
-        "description": "Hourly tracked requests over the last 24 hours in local time, refreshed every minute",
+        "description": "Hourly tracked requests for the 24 hours ending at the current hour boundary, refreshed every minute",
         "calls": "Calls",
         "empty": "No calls in the last 24 hours"
       },
