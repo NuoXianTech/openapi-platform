@@ -441,13 +441,38 @@
           }
         },
         "catalog": {
-          "title": "API catalog",
+          "title": "Endpoints",
           "description": "Save Service-managed endpoint changes as you review them, then apply them together. Manual Routes take effect when saved. A new runtime snapshot is saved only when the effective configuration changes.",
           "endpointCount": "{count} endpoints",
           "contractMissing": "This endpoint is no longer present in the Service contract. Review it before disabling or adjusting the Route.",
           "manualRoute": "Manually configured proxy endpoint",
           "credits": "{value} credits/call",
           "searchPlaceholder": "Search Services, paths, or endpoint names",
+          "settingsUnavailable": "Configure after publishing",
+          "paidSettings": "Required for billing",
+          "columns": {
+            "endpoint": "Endpoint",
+            "status": "Publication",
+            "settings": "Call settings",
+            "actions": "Actions",
+            "source": "Source"
+          },
+          "accessibility": {
+            "statistics": "Call statistics for {path}",
+            "apiKey": "API key authentication for {path}"
+          },
+          "bulk": {
+            "selectAll": "Select current results",
+            "selectService": "Select all available actions in {name}",
+            "selectEndpoint": "Select {method} {path}",
+            "selected": "{count} selected",
+            "enable": "Enable selected",
+            "disable": "Disable selected",
+            "clear": "Clear selection",
+            "disableTitle": "Disable {count} selected endpoints?",
+            "progress": "Processing {completed} / {total}",
+            "completed": "Completed: {succeeded} succeeded, {failed} failed, {pending} awaiting apply"
+          },
           "metrics": {
             "discovered": "Discovered",
             "live": "Live",
@@ -475,7 +500,7 @@
             "manualRoute": "Custom endpoint",
             "publish": "Publish",
             "unpublish": "Disable",
-            "pendingApply": "Waiting to apply",
+            "pendingApply": "Pending apply",
             "applyAllChanges": "Apply all changes ({count})",
             "statistics": "Statistics",
             "advancedSettings": "Advanced settings",
@@ -491,6 +516,7 @@
             "unpublished": "Endpoint disabled",
             "changesApplied": "Endpoint changes applied",
             "changesPending": "Endpoint saved. Apply all changes to activate it.",
+            "savedPending": "Saved, awaiting apply",
             "applyFailed": "Applying endpoint changes failed",
             "statisticsEnabled": "Call statistics enabled",
             "statisticsDisabled": "Call statistics disabled",

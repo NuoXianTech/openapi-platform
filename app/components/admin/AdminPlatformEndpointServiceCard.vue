@@ -8,10 +8,15 @@ import {
   platformStatusColor,
   serviceAvailabilityColor
 } from '~/utils/platform-display'
+import type { EndpointFeedback } from '~/composables/admin/use-admin-endpoint-catalog-page'
 
 const props = defineProps<{
   service: PlatformEndpointCatalogService
   isBusy: (key: string) => boolean
+  feedback: Record<string, EndpointFeedback>
+  selectedKeys: Set<string>
+  selectableKeys: Set<string>
+  selectionDisabled: boolean
 }>()
 
 const emit = defineEmits<{
@@ -19,6 +24,7 @@ const emit = defineEmits<{
   edit: [item: PlatformEndpointCatalogItem]
   manual: [upstreamId: string]
   remove: [item: PlatformEndpointCatalogItem]
+  select: [keys: string[], selected: boolean]
   primary: [
     service: PlatformEndpointCatalogService,
     item: PlatformEndpointCatalogItem
@@ -32,6 +38,13 @@ const emit = defineEmits<{
 
 const { t } = useI18n()
 const route = useRoute()
+const serviceSelectableKeys = computed(() => props.service.endpoints
+  .filter(item => props.selectableKeys.has(item.key))
+  .map(item => item.key))
+const serviceSelectionState = computed(() => {
+  const count = serviceSelectableKeys.value.filter(key => props.selectedKeys.has(key)).length
+  return count === 0 ? false : count === serviceSelectableKeys.value.length ? true : 'indeterminate'
+})
 
 function serviceName() {
   return props.service.upstream.connection?.serviceName
@@ -66,6 +79,11 @@ function serviceStateLabel() {
 function endpointBusy(item: PlatformEndpointCatalogItem) {
   return props.isBusy(`endpoint:${item.key}`)
     || props.isBusy('apply:runtime')
+    || props.isBusy('bulk:endpoints')
+}
+
+function itemFeedback(item: PlatformEndpointCatalogItem) {
+  return props.feedback[item.route?.route.id ?? item.key]
 }
 
 function itemMethod(item: PlatformEndpointCatalogItem) {
@@ -104,6 +122,9 @@ function statusColor(status: PlatformEndpointCatalogItem['status']) {
 function primaryActionLabel(item: PlatformEndpointCatalogItem) {
   if (item.status === 'live') {
     return t('admin.apis.routing.catalog.actions.unpublish')
+  }
+  if (item.status === 'disabled') {
+    return t('common.actions.enable')
   }
   if (item.status === 'pending') {
     return t('admin.apis.routing.catalog.actions.pendingApply')
@@ -158,199 +179,240 @@ function toggleApiKey(item: PlatformEndpointCatalogItem) {
 </script>
 
 <template>
-  <UCard
-    variant="subtle"
-    :ui="{ body: 'p-0 sm:p-0' }"
+  <section
+    class="endpoint-service min-w-0"
+    :aria-label="serviceName()"
   >
-    <template #header>
-      <div class="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-        <div class="flex min-w-0 items-center gap-3">
-          <div class="flex size-10 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
-            <UIcon
-              :name="service.upstream.serviceManaged ? 'i-lucide-server' : 'i-lucide-globe-2'"
-              class="size-5"
-            />
-          </div>
-          <div class="min-w-0">
-            <h2 class="truncate text-base font-semibold text-highlighted">
-              {{ serviceName() }}
-            </h2>
-            <p class="mt-1 truncate font-mono text-xs text-muted">
-              {{ service.upstream.connection?.serviceId || service.upstream.slug }}
-              <template v-if="service.upstream.connection?.serviceVersion">
-                · {{ service.upstream.connection.serviceVersion }}
-              </template>
-              · {{ $t('admin.apis.routing.catalog.endpointCount', { count: service.endpoints.length }) }}
-            </p>
-          </div>
+    <div class="flex flex-col gap-3 border-b border-default py-4 sm:flex-row sm:items-center sm:justify-between">
+      <div class="flex min-w-0 items-center gap-3">
+        <div class="flex size-9 shrink-0 items-center justify-center rounded-md bg-muted text-muted">
+          <UIcon
+            :name="service.upstream.serviceManaged ? 'i-lucide-server' : 'i-lucide-globe-2'"
+            class="size-5"
+          />
         </div>
-        <div class="flex flex-wrap items-center gap-2 sm:justify-end">
-          <UBadge
-            :color="serviceStateColor()"
-            variant="subtle"
-            size="sm"
-          >
-            {{ serviceStateLabel() }}
-          </UBadge>
-          <UButton
-            v-if="service.upstream.serviceManaged"
-            :to="{ path: `/admin/apis/upstreams/${service.upstream.id}`, query: route.query }"
-            color="neutral"
-            variant="outline"
-            size="sm"
-            icon="i-lucide-sliders-horizontal"
-          >
-            {{ $t('admin.apis.routing.catalog.actions.serviceSettings') }}
-          </UButton>
-          <UButton
-            v-if="service.upstream.serviceManaged"
-            color="neutral"
-            variant="soft"
-            size="sm"
-            icon="i-lucide-scan-search"
-            :loading="isBusy(`discover:${service.upstream.id}`)"
-            @click="emit('discover', service.upstream.id)"
-          >
-            {{ $t('admin.apis.routing.catalog.actions.rediscover') }}
-          </UButton>
-        </div>
-      </div>
-    </template>
-
-    <div
-      v-if="service.endpoints.length"
-      class="divide-y divide-default"
-    >
-      <div
-        v-for="item in service.endpoints"
-        :key="item.key"
-        class="grid gap-4 px-4 py-4 lg:grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)_auto] lg:items-center sm:px-5"
-      >
         <div class="min-w-0">
-          <div class="flex items-center gap-2">
-            <ApiHttpMethodBadge
-              :method="itemMethod(item)"
-              size="xs"
-            />
-            <code
-              class="truncate text-xs font-semibold text-highlighted"
-              :title="sourcePath(item)"
-            >
-              {{ sourcePath(item) }}
-            </code>
-          </div>
-          <p class="mt-1.5 truncate text-xs text-muted">
-            {{ itemSummary(item) }}
+          <h2 class="break-words text-sm font-semibold text-highlighted">
+            {{ serviceName() }}
+          </h2>
+          <p class="mt-1 break-all font-mono text-xs text-muted">
+            {{ service.upstream.connection?.serviceId || service.upstream.slug }}
+            <template v-if="service.upstream.connection?.serviceVersion">
+              · {{ service.upstream.connection.serviceVersion }}
+            </template>
+            · {{ $t('admin.apis.routing.catalog.endpointCount', { count: service.endpoints.length }) }}
           </p>
         </div>
-
-        <div
-          class="hidden items-center gap-2 text-dimmed lg:flex"
-          aria-hidden="true"
+      </div>
+      <div class="flex flex-wrap items-center gap-2 sm:justify-end">
+        <UBadge
+          :color="serviceStateColor()"
+          variant="subtle"
+          size="sm"
         >
-          <span class="w-8 border-t border-dashed border-default" />
-          <UIcon name="i-lucide-arrow-right" class="size-4" />
-        </div>
-
-        <div class="min-w-0 rounded-lg border border-default bg-default px-3 py-2.5">
-          <div class="flex items-center gap-2">
-            <UIcon
-              :name="item.status === 'live' ? 'i-lucide-radio-tower' : 'i-lucide-route'"
-              class="size-4 shrink-0"
-              :class="item.status === 'live' ? 'text-success' : 'text-muted'"
-            />
-            <code
-              class="min-w-0 flex-1 truncate text-xs font-semibold text-highlighted"
-              :title="publicPath(item)"
-            >
-              {{ publicPath(item) }}
-            </code>
-            <UBadge
-              :color="statusColor(item.status)"
-              variant="subtle"
-              size="sm"
-            >
-              {{ $t(`admin.apis.routing.catalog.statuses.${item.status}`) }}
-            </UBadge>
-          </div>
-          <div
-            v-if="item.route"
-            class="mt-2 flex flex-wrap items-center gap-1.5"
-          >
-            <UButton
-              size="xs"
-              :color="item.route.route.isStatistics ? 'primary' : 'neutral'"
-              variant="soft"
-              icon="i-lucide-chart-no-axes-column"
-              :disabled="item.route.route.creditsCost > 0 || endpointBusy(item)"
-              :aria-label="$t('admin.apis.routing.catalog.actions.statistics')"
-              @click="toggleStatistics(item)"
-            >
-              {{ $t('admin.apis.routing.catalog.actions.statistics') }}
-            </UButton>
-            <UButton
-              size="xs"
-              :color="item.route.route.isApiKey ? 'primary' : 'neutral'"
-              variant="soft"
-              icon="i-lucide-key-round"
-              :disabled="item.route.route.creditsCost > 0 || endpointBusy(item)"
-              @click="toggleApiKey(item)"
-            >
-              {{ $t('admin.apis.routing.catalog.actions.apiKey') }}
-            </UButton>
-            <UBadge
-              v-if="item.route.route.creditsCost > 0"
-              color="warning"
-              variant="subtle"
-              size="sm"
-            >
-              {{ $t('admin.apis.routing.catalog.credits', {
-                value: item.route.route.creditsCost
-              }) }}
-            </UBadge>
-          </div>
-        </div>
-
-        <div class="flex items-center justify-end gap-1.5">
-          <UTooltip
-            v-if="item.route?.route.managedBy === 'manual'"
-            :text="item.status === 'disabled'
-              ? $t('admin.apis.routing.catalog.actions.deleteRoute')
-              : $t('admin.apis.routing.catalog.actions.deleteRouteUnavailable')"
-          >
-            <UButton
-              color="error"
-              variant="ghost"
-              size="sm"
-              icon="i-lucide-trash-2"
-              :disabled="item.status !== 'disabled' || endpointBusy(item)"
-              :aria-label="$t('admin.apis.routing.catalog.actions.deleteRoute')"
-              @click="emit('remove', item)"
-            />
-          </UTooltip>
-          <UButton
-            color="neutral"
-            variant="ghost"
-            size="sm"
-            icon="i-lucide-settings-2"
-            :disabled="!item.route || endpointBusy(item)"
-            :aria-label="$t('admin.apis.routing.catalog.actions.advancedSettings')"
-            @click="emit('edit', item)"
-          />
-          <UButton
-            size="sm"
-            :color="primaryActionColor(item)"
-            :variant="item.status === 'live' ? 'outline' : 'solid'"
-            :icon="primaryActionIcon(item)"
-            :loading="endpointBusy(item)"
-            :disabled="!item.publishable || item.status === 'pending' || item.status === 'retiring'"
-            @click="emit('primary', service, item)"
-          >
-            {{ primaryActionLabel(item) }}
-          </UButton>
-        </div>
+          {{ serviceStateLabel() }}
+        </UBadge>
+        <UButton
+          v-if="service.upstream.serviceManaged"
+          :to="{ path: `/admin/apis/upstreams/${service.upstream.id}`, query: route.query }"
+          color="neutral"
+          variant="ghost"
+          size="sm"
+          icon="i-lucide-sliders-horizontal"
+        >
+          {{ $t('admin.apis.routing.catalog.actions.serviceSettings') }}
+        </UButton>
+        <UButton
+          v-if="service.upstream.serviceManaged"
+          color="neutral"
+          variant="ghost"
+          size="sm"
+          icon="i-lucide-scan-search"
+          :loading="isBusy(`discover:${service.upstream.id}`)"
+          :disabled="selectionDisabled"
+          @click="emit('discover', service.upstream.id)"
+        >
+          {{ $t('admin.apis.routing.catalog.actions.rediscover') }}
+        </UButton>
       </div>
     </div>
+
+    <template
+      v-if="service.endpoints.length"
+    >
+      <div class="endpoint-entry endpoint-heading border-b border-default bg-muted/50 text-xs font-medium text-muted">
+        <UCheckbox
+          :model-value="serviceSelectionState"
+          :disabled="serviceSelectableKeys.length === 0 || selectionDisabled"
+          :aria-label="$t('admin.apis.routing.catalog.bulk.selectService', { name: serviceName() })"
+          @update:model-value="emit('select', serviceSelectableKeys, $event === true)"
+        />
+        <div class="endpoint-grid">
+          <span>{{ $t('admin.apis.routing.catalog.columns.endpoint') }}</span>
+          <span class="endpoint-column-label">{{ $t('admin.apis.routing.catalog.columns.status') }}</span>
+          <span class="endpoint-column-label">{{ $t('admin.apis.routing.catalog.columns.settings') }}</span>
+          <span class="endpoint-column-label text-end">{{ $t('admin.apis.routing.catalog.columns.actions') }}</span>
+        </div>
+      </div>
+      <ul class="divide-y divide-default">
+        <li
+          v-for="item in service.endpoints"
+          :key="item.key"
+          class="endpoint-entry transition-colors hover:bg-muted/40"
+          :class="{ 'bg-muted/60': selectedKeys.has(item.key) }"
+        >
+          <UCheckbox
+            class="mt-0.5"
+            :model-value="selectedKeys.has(item.key)"
+            :disabled="!selectableKeys.has(item.key) || selectionDisabled"
+            :aria-label="$t('admin.apis.routing.catalog.bulk.selectEndpoint', { method: itemMethod(item), path: publicPath(item) })"
+            @update:model-value="emit('select', [item.key], $event === true)"
+          />
+          <div class="endpoint-grid endpoint-row">
+            <div class="endpoint-detail min-w-0">
+              <div class="flex min-w-0 items-start gap-2">
+                <ApiHttpMethodBadge
+                  :method="item.route?.route.method ?? itemMethod(item)"
+                  size="xs"
+                  class="mt-0.5 w-14 shrink-0 justify-center"
+                />
+                <code
+                  class="min-w-0 break-all text-[13px] font-semibold leading-5 text-highlighted"
+                >
+                  {{ publicPath(item) }}
+                </code>
+              </div>
+              <p class="mt-1 text-xs leading-5 text-muted [overflow-wrap:anywhere]">
+                {{ itemSummary(item) }}
+              </p>
+              <p v-if="sourcePath(item) !== publicPath(item)" class="mt-1 flex items-start gap-1 text-xs text-muted">
+                <span class="shrink-0">{{ $t('admin.apis.routing.catalog.columns.source') }}</span>
+                <code class="min-w-0 break-all">{{ sourcePath(item) }}</code>
+              </p>
+              <div class="mt-1 min-h-4" role="status" aria-live="polite" aria-atomic="true">
+                <p
+                v-if="itemFeedback(item)"
+                  class="flex items-start gap-1 text-xs leading-4 [overflow-wrap:anywhere]"
+                  :class="{
+                  'text-success': itemFeedback(item)?.color === 'success',
+                  'text-warning': itemFeedback(item)?.color === 'warning',
+                  'text-error': itemFeedback(item)?.color === 'error'
+                  }"
+                >
+                  <UIcon
+                  :name="itemFeedback(item)?.color === 'error' ? 'i-lucide-circle-alert' : itemFeedback(item)?.color === 'warning' ? 'i-lucide-clock-3' : 'i-lucide-check'"
+                    class="size-4 shrink-0"
+                  />
+                {{ itemFeedback(item)?.message }}
+                </p>
+              </div>
+            </div>
+
+            <div class="endpoint-status flex flex-wrap items-center gap-2">
+              <UBadge
+                :color="statusColor(item.status)"
+                variant="subtle"
+                size="sm"
+                class="max-w-full whitespace-normal"
+              >
+                {{ $t(`admin.apis.routing.catalog.statuses.${item.status}`) }}
+              </UBadge>
+              <span v-if="item.route && item.route.route.creditsCost > 0" class="inline-flex items-center gap-1 text-xs text-muted">
+                <UIcon
+                  name="i-lucide-coins"
+                  class="size-3.5 shrink-0"
+                />
+                {{ $t('admin.apis.routing.catalog.credits', { value: item.route.route.creditsCost }) }}
+              </span>
+            </div>
+
+            <div class="endpoint-settings min-w-0">
+              <div
+                v-if="item.route"
+                class="flex flex-wrap gap-x-4 gap-y-2"
+              >
+                <USwitch
+                  size="sm"
+                  color="success"
+                  :model-value="item.route.route.isStatistics"
+                  :disabled="item.route.route.creditsCost > 0 || endpointBusy(item)"
+                  :label="$t('admin.apis.routing.catalog.actions.statistics')"
+                  :aria-label="$t('admin.apis.routing.catalog.accessibility.statistics', { path: publicPath(item) })"
+                  :ui="{ label: 'text-xs' }"
+                  @update:model-value="toggleStatistics(item)"
+                />
+                <USwitch
+                  size="sm"
+                  color="success"
+                  :model-value="item.route.route.isApiKey"
+                  :disabled="item.route.route.creditsCost > 0 || endpointBusy(item)"
+                  :label="$t('admin.apis.routing.actions.apiKey')"
+                  :aria-label="$t('admin.apis.routing.catalog.accessibility.apiKey', { path: publicPath(item) })"
+                  :ui="{ label: 'text-xs' }"
+                  @update:model-value="toggleApiKey(item)"
+                />
+              </div>
+              <span v-else class="text-xs text-muted">{{ $t('admin.apis.routing.catalog.settingsUnavailable') }}</span>
+              <p v-if="item.route && item.route.route.creditsCost > 0" class="mt-1.5 text-xs text-muted">
+                {{ $t('admin.apis.routing.catalog.paidSettings') }}
+              </p>
+            </div>
+
+            <div class="endpoint-actions flex items-center justify-end gap-1">
+              <UTooltip
+                v-if="item.route?.route.managedBy === 'manual'"
+                :text="item.status === 'disabled'
+                  ? $t('admin.apis.routing.actions.deleteRoute')
+                  : $t('admin.apis.routing.actions.deleteRouteUnavailable')"
+                :content="{ side: 'top', sideOffset: 8 }"
+                :disable-hoverable-content="true"
+                :ui="{ content: 'pointer-events-none' }"
+              >
+                <UButton
+                  color="error"
+                  variant="ghost"
+                  size="sm"
+                  icon="i-lucide-trash-2"
+                  :disabled="item.status !== 'disabled' || endpointBusy(item)"
+                  class="size-8 justify-center"
+                  :aria-label="$t('admin.apis.routing.actions.deleteRoute')"
+                  @click="emit('remove', item)"
+                />
+              </UTooltip>
+              <UTooltip
+                :text="$t('admin.apis.routing.catalog.actions.advancedSettings')"
+                :content="{ side: 'top', sideOffset: 8 }"
+                :disable-hoverable-content="true"
+                :ui="{ content: 'pointer-events-none' }"
+              >
+                <UButton
+                  color="neutral"
+                  variant="ghost"
+                  size="sm"
+                  icon="i-lucide-settings-2"
+                  class="size-8 justify-center"
+                  :disabled="!item.route || endpointBusy(item)"
+                  :aria-label="$t('admin.apis.routing.catalog.actions.advancedSettings')"
+                  @click="emit('edit', item)"
+                />
+              </UTooltip>
+              <UButton
+                size="sm"
+              class="h-8 w-32 shrink-0 justify-center"
+                :color="primaryActionColor(item)"
+                :variant="item.status === 'live' ? 'outline' : 'solid'"
+                :icon="primaryActionIcon(item)"
+              :loading="isBusy(`endpoint:${item.key}`)"
+              :disabled="!item.publishable || item.status === 'pending' || item.status === 'retiring' || endpointBusy(item)"
+                @click="emit('primary', service, item)"
+              >
+                {{ primaryActionLabel(item) }}
+              </UButton>
+            </div>
+          </div>
+        </li>
+      </ul>
+    </template>
 
     <div v-else class="px-5 py-8">
       <UEmpty
@@ -368,6 +430,7 @@ function toggleApiKey(item: PlatformEndpointCatalogItem) {
             size="sm"
             icon="i-lucide-scan-search"
             :loading="isBusy(`discover:${service.upstream.id}`)"
+            :disabled="selectionDisabled"
             @click="emit('discover', service.upstream.id)"
           >
             {{ $t('admin.apis.routing.catalog.actions.rediscover') }}
@@ -376,6 +439,7 @@ function toggleApiKey(item: PlatformEndpointCatalogItem) {
             v-else
             size="sm"
             icon="i-lucide-plus"
+            :disabled="selectionDisabled"
             @click="emit('manual', service.upstream.id)"
           >
             {{ $t('admin.apis.routing.catalog.actions.manualRoute') }}
@@ -383,5 +447,59 @@ function toggleApiKey(item: PlatformEndpointCatalogItem) {
         </template>
       </UEmpty>
     </div>
-  </UCard>
+  </section>
 </template>
+
+<style scoped>
+.endpoint-service {
+  container-type: inline-size;
+}
+
+.endpoint-grid {
+  display: grid;
+  min-width: 0;
+  gap: 0.75rem 1rem;
+}
+
+.endpoint-entry {
+  display: grid;
+  grid-template-columns: 1.25rem minmax(0, 1fr);
+  gap: 0.5rem;
+  padding: 0.625rem 0.5rem;
+}
+
+.endpoint-heading {
+  align-items: center;
+  padding-block: 0.625rem;
+}
+
+.endpoint-column-label {
+  display: none;
+}
+
+@container (min-width: 36rem) {
+  .endpoint-row {
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+  }
+
+  .endpoint-status {
+    justify-content: flex-end;
+  }
+}
+
+@container (min-width: 56rem) {
+  .endpoint-grid {
+    grid-template-columns: minmax(0, 1fr) 6.5rem 9rem 13rem;
+    align-items: center;
+  }
+
+  .endpoint-column-label {
+    display: block;
+  }
+
+  .endpoint-status {
+    justify-content: flex-start;
+  }
+}
+</style>

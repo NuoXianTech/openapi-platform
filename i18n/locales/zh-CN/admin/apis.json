@@ -441,13 +441,38 @@
           }
         },
         "catalog": {
-          "title": "接口目录",
+          "title": "接口列表",
           "description": "Service-managed 变更可先保存再统一应用；手动 Route 保存后立即生效。只有实际生效的配置发生变化时，才会保存新的运行快照。",
           "endpointCount": "{count} 个接口",
           "contractMissing": "Service 契约中已找不到此接口，请确认后下线或调整 Route",
           "manualRoute": "手动创建的转发接口",
           "credits": "{value} 积分/次",
           "searchPlaceholder": "搜索 Service、路径或接口名称",
+          "settingsUnavailable": "发布后可配置",
+          "paidSettings": "计费接口必须开启",
+          "columns": {
+            "endpoint": "接口",
+            "status": "发布状态",
+            "settings": "调用设置",
+            "actions": "操作",
+            "source": "来源"
+          },
+          "accessibility": {
+            "statistics": "{path} 的调用统计",
+            "apiKey": "{path} 的 API Key 鉴权"
+          },
+          "bulk": {
+            "selectAll": "全选当前结果",
+            "selectService": "选择 {name} 的全部可操作接口",
+            "selectEndpoint": "选择 {method} {path}",
+            "selected": "已选 {count} 项",
+            "enable": "启用所选",
+            "disable": "停用所选",
+            "clear": "取消选择",
+            "disableTitle": "停用选中的 {count} 个接口？",
+            "progress": "正在处理 {completed} / {total}",
+            "completed": "处理完成：成功 {succeeded} 项，失败 {failed} 项，待应用 {pending} 项"
+          },
           "metrics": {
             "discovered": "已发现",
             "live": "已上线",
@@ -491,6 +516,7 @@
             "unpublished": "接口已停用",
             "changesApplied": "接口变更已应用",
             "changesPending": "接口已保存，应用全部变更后才会生效",
+            "savedPending": "已保存，待应用",
             "applyFailed": "应用接口变更失败",
             "statisticsEnabled": "调用统计已启用",
             "statisticsDisabled": "调用统计已停用",

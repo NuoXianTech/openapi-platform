@@ -11,6 +11,11 @@ import type {
 import { parseFetchError } from '~/utils/client-error'
 import type { ServiceConfigurationView } from '#shared/types/service-control'
 
+export interface EndpointFeedback {
+  message: string
+  color: 'success' | 'warning' | 'error'
+}
+
 function emptyCatalog(): PlatformEndpointCatalog {
   return {
     activeRevisionId: null,
@@ -44,6 +49,11 @@ export function useAdminEndpointCatalogPage() {
   const search = ref('')
   const statusFilter = ref('all')
   const busyKeys = ref(new Set<string>())
+  const endpointFeedback = ref<Record<string, EndpointFeedback>>({})
+  const selectedKeys = ref(new Set<string>())
+  const bulkFeedback = ref<EndpointFeedback | null>(null)
+  const bulkProgress = ref({ completed: 0, total: 0 })
+  const operationBusy = computed(() => busyKeys.value.size > 0)
   const routeModalOpen = ref(false)
   const editingRoute = ref<PlatformRouteBinding | null>(null)
   const createRouteUpstreamId = ref<string | null>(null)
@@ -131,6 +141,37 @@ export function useAdminEndpointCatalogPage() {
         || (!keyword && statusFilter.value === 'all')
       ))
   })
+  const selectableEndpoints = computed(() => visibleServices.value.flatMap(service => (
+    service.endpoints
+      .filter(item => item.publishable && item.status !== 'pending' && item.status !== 'retiring')
+      .map(item => ({ service, item }))
+  )))
+  const selectableKeys = computed(() => new Set(selectableEndpoints.value.map(({ item }) => item.key)))
+  const selectedEndpoints = computed(() => selectableEndpoints.value.filter(({ item }) => selectedKeys.value.has(item.key)))
+  const selectedEnableCount = computed(() => selectedEndpoints.value.filter(({ item }) => item.status !== 'live').length)
+  const selectedDisableCount = computed(() => selectedEndpoints.value.filter(({ item }) => item.status === 'live' && item.route).length)
+  const selectionState = computed(() => selectedEndpoints.value.length === 0
+    ? false
+    : selectedEndpoints.value.length === selectableEndpoints.value.length ? true : 'indeterminate' as const)
+
+  watch(selectableKeys, (keys) => {
+    selectedKeys.value = new Set([...selectedKeys.value].filter(key => keys.has(key)))
+  })
+
+  function selectEndpoints(keys: string[], selected: boolean) {
+    if (operationBusy.value) return
+    const next = new Set(selectedKeys.value)
+    for (const key of keys) {
+      if (selected && selectableKeys.value.has(key)) next.add(key)
+      else next.delete(key)
+    }
+    selectedKeys.value = next
+    bulkFeedback.value = null
+  }
+
+  function selectAllEndpoints(selected: boolean) {
+    selectEndpoints([...selectableKeys.value], selected)
+  }
 
   watch(routeModalOpen, (open) => {
     if (!open) {
@@ -151,20 +192,27 @@ export function useAdminEndpointCatalogPage() {
   }
 
   function showPublicationResult(
+    item: PlatformEndpointCatalogItem,
     result: PlatformEndpointPublicationResult,
     successKey: string
   ) {
     const runtimeUpdated = Boolean(result.revision)
-    toast.add({
-      title: t(successKey),
-      description: t(runtimeUpdated
-        ? 'admin.apis.routing.feedback.runtimeUpdated'
-        : 'admin.apis.routing.catalog.feedback.changesPending'),
-      color: runtimeUpdated ? 'success' : 'warning',
-      icon: runtimeUpdated
-        ? 'i-lucide-circle-check'
-        : 'i-lucide-clock-3'
-    })
+    if (runtimeUpdated) {
+      for (const feedback of Object.values(endpointFeedback.value)) {
+        if (feedback.color !== 'warning') continue
+        feedback.message = t('admin.apis.routing.catalog.feedback.changesApplied')
+        feedback.color = 'success'
+      }
+    }
+    const feedback: EndpointFeedback = {
+      message: t(runtimeUpdated
+        ? successKey
+        : 'admin.apis.routing.catalog.feedback.savedPending'),
+      color: runtimeUpdated ? 'success' : 'warning'
+    }
+    endpointFeedback.value[item.route?.route.id ?? item.key] = feedback
+    // Discovery gives a newly published endpoint a new catalog key.
+    if (!item.route) endpointFeedback.value[result.route.id] = feedback
   }
 
   async function refresh() {
@@ -259,7 +307,7 @@ export function useAdminEndpointCatalogPage() {
   }
 
   async function applyChanges() {
-    if (!canApply.value) return
+    if (!canApply.value || operationBusy.value) return
     const previousRevisionId = catalog.value.activeRevisionId
     setBusy('apply:runtime', true)
     try {
@@ -270,6 +318,10 @@ export function useAdminEndpointCatalogPage() {
         { method: 'POST' }
       )
       const runtimeUpdated = result.revision.id !== previousRevisionId
+      if (runtimeUpdated) {
+        endpointFeedback.value = {}
+        bulkFeedback.value = null
+      }
       toast.add({
         title: t('admin.apis.routing.catalog.feedback.changesApplied'),
         description: t(runtimeUpdated
@@ -301,11 +353,14 @@ export function useAdminEndpointCatalogPage() {
 
   async function publishEndpoint(
     service: PlatformEndpointCatalogService,
-    item: PlatformEndpointCatalogItem
-  ) {
-    if (!item.endpoint) return
+    item: PlatformEndpointCatalogItem,
+    refreshAfter = true
+  ): Promise<boolean> {
+    if (!item.endpoint) return false
     const key = `endpoint:${item.key}`
+    if (isBusy(key) || isBusy('apply:runtime')) return false
     setBusy(key, true)
+    Reflect.deleteProperty(endpointFeedback.value, item.key)
     try {
       const result = await $fetch<PlatformEndpointPublicationResult>(
         '/api/admin/v1/service-endpoints/publish',
@@ -318,17 +373,19 @@ export function useAdminEndpointCatalogPage() {
           }
         }
       )
-      showPublicationResult(result, 'admin.apis.routing.catalog.feedback.published')
-      await refresh()
+      showPublicationResult(item, result, 'admin.apis.routing.catalog.feedback.published')
+      if (refreshAfter) await refresh()
+      return true
     } catch (error: unknown) {
-      toast.add({
-        title: parseFetchError(
+      endpointFeedback.value[item.key] = {
+        message: parseFetchError(
           error,
           t('admin.apis.routing.catalog.feedback.publishFailed')
         ),
         color: 'error'
-      })
-      await catalogResource.refresh()
+      }
+      if (refreshAfter) await catalogResource.refresh()
+      return false
     } finally {
       setBusy(key, false)
     }
@@ -337,29 +394,32 @@ export function useAdminEndpointCatalogPage() {
   async function updatePublication(
     item: PlatformEndpointCatalogItem,
     patch: PlatformEndpointPublicationPatch,
-    successKey: string
+    successKey: string,
+    refreshAfter = true
   ): Promise<boolean> {
     const routeId = item.route?.route.id
     if (!routeId) return false
     const key = `endpoint:${item.key}`
+    if (isBusy(key) || isBusy('apply:runtime')) return false
     setBusy(key, true)
+    Reflect.deleteProperty(endpointFeedback.value, routeId)
     try {
       const result = await $fetch<PlatformEndpointPublicationResult>(
         `/api/admin/v1/service-endpoints/${routeId}`,
         { method: 'PATCH', body: patch }
       )
-      showPublicationResult(result, successKey)
-      await refresh()
+      showPublicationResult(item, result, successKey)
+      if (refreshAfter) await refresh()
       return true
     } catch (error: unknown) {
-      toast.add({
-        title: parseFetchError(
+      endpointFeedback.value[routeId] = {
+        message: parseFetchError(
           error,
           t('admin.apis.routing.catalog.feedback.updateFailed')
         ),
         color: 'error'
-      })
-      await catalogResource.refresh()
+      }
+      if (refreshAfter) await catalogResource.refresh()
       return false
     } finally {
       setBusy(key, false)
@@ -370,6 +430,7 @@ export function useAdminEndpointCatalogPage() {
     service: PlatformEndpointCatalogService,
     item: PlatformEndpointCatalogItem
   ) {
+    if (isBusy('bulk:endpoints')) return
     if (!item.route) {
       await publishEndpoint(service, item)
       return
@@ -389,15 +450,61 @@ export function useAdminEndpointCatalogPage() {
       await update()
       return
     }
-    await confirm({
+    const confirmed = await confirm({
       title: t('admin.apis.routing.toggleRoute.title'),
       description: t('admin.apis.routing.toggleRoute.description'),
       confirmLabel: t('common.actions.disable'),
-      confirmColor: 'warning',
-      onConfirm: async () => {
-        if (!await update()) throw new Error('route update failed')
-      }
+      confirmColor: 'warning'
     })
+    if (confirmed) await update()
+  }
+
+  async function bulkSetEnabled(enabled: boolean) {
+    if (operationBusy.value) return
+    const candidates = selectedEndpoints.value.filter(({ item }) => (
+      enabled ? item.status !== 'live' : item.status === 'live' && item.route
+    ))
+    if (candidates.length === 0) return
+    setBusy('bulk:endpoints', true)
+    bulkFeedback.value = null
+    bulkProgress.value = { completed: 0, total: candidates.length }
+    try {
+      if (!enabled && !await confirm({
+        title: t('admin.apis.routing.catalog.bulk.disableTitle', { count: candidates.length }),
+        description: t('admin.apis.routing.toggleRoute.description'),
+        confirmLabel: t('admin.apis.routing.catalog.bulk.disable'),
+        confirmColor: 'warning'
+      })) return
+
+      let succeeded = 0
+      let pending = 0
+      // A manual Route can publish a runtime revision, so apply mutations in order.
+      for (const { service, item } of candidates) {
+        const success = item.route
+          ? await updatePublication(item, { enabled }, enabled
+            ? 'admin.apis.routing.catalog.feedback.published'
+            : 'admin.apis.routing.catalog.feedback.unpublished', false)
+          : await publishEndpoint(service, item, false)
+        if (success) {
+          succeeded += 1
+          if (endpointFeedback.value[item.route?.route.id ?? item.key]?.color === 'warning') pending += 1
+          else pending = 0
+          selectedKeys.value.delete(item.key)
+        }
+        bulkProgress.value.completed += 1
+      }
+      bulkFeedback.value = {
+        message: t('admin.apis.routing.catalog.bulk.completed', {
+          succeeded,
+          failed: candidates.length - succeeded,
+          pending
+        }),
+        color: succeeded < candidates.length ? 'error' : pending > 0 ? 'warning' : 'success'
+      }
+      await refresh()
+    } finally {
+      setBusy('bulk:endpoints', false)
+    }
   }
 
   async function removeRoute(item: PlatformEndpointCatalogItem) {
@@ -453,6 +560,9 @@ export function useAdminEndpointCatalogPage() {
   return {
     applyChanges,
     applyChangeCount,
+    bulkFeedback,
+    bulkProgress,
+    bulkSetEnabled,
     canApply,
     catalog,
     clearFocusedService,
@@ -460,11 +570,13 @@ export function useAdminEndpointCatalogPage() {
     discoverService,
     driftedServices,
     editingRoute,
+    endpointFeedback,
     createRouteUpstreamId,
     focusedUpstreamId,
     handlePrimaryAction,
     serviceUpstreams,
     isBusy,
+    operationBusy,
     loading,
     openCreateRoute,
     openEditRoute,
@@ -476,6 +588,13 @@ export function useAdminEndpointCatalogPage() {
     resourceError,
     routeModalOpen,
     search,
+    selectableKeys,
+    selectedKeys,
+    selectedEnableCount,
+    selectedDisableCount,
+    selectionState,
+    selectEndpoints,
+    selectAllEndpoints,
     statusFilter,
     statusItems,
     updatePublication,
