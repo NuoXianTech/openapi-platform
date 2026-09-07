@@ -40,6 +40,7 @@ function initialState(): UpstreamFormState {
 
 const state = reactive<UpstreamFormState>(initialState())
 const loading = ref(false)
+const formError = ref<string | null>(null)
 const isEditing = computed(() => Boolean(props.upstream))
 const slugPattern = /^[a-z0-9]+(?:-[a-z0-9]+)*$/
 
@@ -49,7 +50,10 @@ const loadBalancingItems = computed(() => [
 ])
 
 watch(open, (isOpen) => {
-  if (isOpen) Object.assign(state, initialState())
+  if (isOpen) {
+    Object.assign(state, initialState())
+    formError.value = null
+  }
 })
 
 function addTarget() {
@@ -115,6 +119,7 @@ function validateUpstreamForm(value: Partial<UpstreamFormState>): FormError<stri
 
 async function onSubmit(event: FormSubmitEvent<UpstreamFormState>) {
   loading.value = true
+  formError.value = null
   try {
     await $fetch(
       isEditing.value ? `/api/admin/v1/upstreams/${props.upstream!.id}` : '/api/admin/v1/upstreams',
@@ -153,7 +158,9 @@ async function onSubmit(event: FormSubmitEvent<UpstreamFormState>) {
     open.value = false
     emit('saved')
   } catch (error: unknown) {
-    toast.add({ title: parseFetchError(error, t('admin.apis.routing.feedback.createFailed')), color: 'error' })
+    formError.value = parseFetchError(error, t(isEditing.value
+      ? 'admin.apis.routing.feedback.updateFailed'
+      : 'admin.apis.routing.feedback.createFailed'))
   } finally {
     loading.value = false
   }
@@ -176,215 +183,180 @@ async function onSubmit(event: FormSubmitEvent<UpstreamFormState>) {
         class="space-y-5"
         @submit="onSubmit"
       >
-        <div class="grid gap-4 sm:grid-cols-2">
-          <UFormField
-            name="name"
-            :label="$t('admin.apis.routing.fields.name')"
-            required
-          >
-            <UInput
-              v-model="state.name"
-              :placeholder="$t('admin.apis.routing.upstreamForm.namePlaceholder')"
-              class="w-full"
-            />
-          </UFormField>
-          <UFormField
-            name="slug"
-            :label="$t('admin.apis.routing.fields.slug')"
-            :description="$t('admin.apis.routing.fields.slugHelp')"
-            required
-          >
-            <UInput
-              v-model="state.slug"
-              placeholder="core-api"
-              class="w-full font-mono"
-            />
-          </UFormField>
-        </div>
+        <UAlert
+          v-if="formError"
+          color="error"
+          variant="subtle"
+          icon="i-lucide-circle-alert"
+          :title="formError"
+        />
 
-        <UFormField
-          v-if="isEditing"
-          name="serviceToken"
-          :label="$t('admin.apis.routing.fields.serviceToken')"
-          :description="$t('admin.apis.routing.upstreamForm.serviceTokenEditHelp')"
-        >
-          <UInput
-            v-model="state.serviceToken"
-            type="password"
-            autocomplete="new-password"
-            :placeholder="$t('admin.apis.routing.upstreamForm.serviceTokenPlaceholder')"
-            class="w-full font-mono"
-          />
-        </UFormField>
-
-        <div
-          v-else
-          class="rounded-lg border border-default bg-elevated/30 p-4"
-        >
-          <div class="mb-4 flex items-start gap-3">
-            <div class="flex size-9 shrink-0 items-center justify-center rounded-md bg-primary/10 text-primary">
-              <UIcon
-                name="i-lucide-network"
-                class="size-4.5"
+        <section class="space-y-3">
+          <h3 class="text-sm font-semibold text-highlighted">
+            {{ $t('admin.apis.routing.upstreamForm.detailsTitle') }}
+          </h3>
+          <div class="grid gap-x-5 gap-y-4 sm:grid-cols-2">
+            <UFormField
+              name="name"
+              :label="$t('admin.apis.routing.fields.name')"
+              :help="$t('admin.apis.routing.upstreamForm.nameHelp')"
+              required
+            >
+              <UInput
+                v-model="state.name"
+                :placeholder="$t('admin.apis.routing.upstreamForm.namePlaceholder')"
+                :disabled="loading"
+                class="w-full"
               />
-            </div>
-            <div>
-              <h3 class="text-sm font-semibold text-highlighted">
-                {{ $t('admin.apis.routing.upstreamForm.connectionTitle') }}
-              </h3>
-              <p class="mt-1 text-xs leading-5 text-muted">
-                {{ $t('admin.apis.routing.upstreamForm.connectionDescription') }}
-              </p>
-            </div>
+            </UFormField>
+            <UFormField
+              name="slug"
+              :label="$t('admin.apis.routing.fields.slug')"
+              :help="$t('admin.apis.routing.fields.slugHelp')"
+              required
+            >
+              <UInput
+                v-model="state.slug"
+                placeholder="core-api"
+                autocomplete="off"
+                autocapitalize="off"
+                :spellcheck="false"
+                :disabled="loading"
+                class="w-full font-mono"
+              />
+            </UFormField>
           </div>
+        </section>
+
+        <section class="space-y-3 border-t border-default pt-4">
+          <h3 class="text-sm font-semibold text-highlighted">
+            {{ $t('admin.apis.routing.upstreamForm.connectionTitle') }}
+          </h3>
           <UFormField
             name="serviceToken"
             :label="$t('admin.apis.routing.fields.serviceToken')"
-            :description="$t('admin.apis.routing.upstreamForm.serviceTokenHelp')"
-            required
+            :help="$t(isEditing
+              ? 'admin.apis.routing.upstreamForm.serviceTokenEditHelp'
+              : 'admin.apis.routing.upstreamForm.serviceTokenHelp')"
+            :required="!isEditing"
           >
             <UInput
               v-model="state.serviceToken"
               type="password"
               autocomplete="new-password"
               :placeholder="$t('admin.apis.routing.upstreamForm.serviceTokenPlaceholder')"
+              :disabled="loading"
               class="w-full font-mono"
             />
           </UFormField>
-        </div>
+        </section>
 
-        <!--
-          Editing keeps load balancing on its own: Targets are managed from the
-          Upstream detail page, so there is no Target list to sit beside here.
-        -->
-        <UFormField
-          v-if="isEditing"
-          name="loadBalancing"
-          :label="$t('admin.apis.routing.fields.loadBalancing')"
-          :description="$t('admin.apis.routing.upstreamForm.loadBalancingHelp')"
-        >
-          <USelect
-            v-model="state.loadBalancing"
-            :items="loadBalancingItems"
-            value-key="value"
-            class="w-full sm:w-72"
-          />
-        </UFormField>
-
-        <div
-          v-else
-          class="rounded-lg border border-default bg-elevated/30 p-4"
-        >
-          <div class="mb-4 flex items-start gap-3">
-            <div class="flex size-9 shrink-0 items-center justify-center rounded-md bg-primary/10 text-primary">
-              <UIcon
-                name="i-lucide-server"
-                class="size-4.5"
-              />
-            </div>
-            <div class="min-w-0 flex-1">
-              <h3 class="text-sm font-semibold text-highlighted">
-                {{ $t('admin.apis.routing.upstreamForm.targetsTitle') }}
-              </h3>
-              <p class="mt-1 text-xs leading-5 text-muted">
-                {{ $t('admin.apis.routing.upstreamForm.targetsDescription') }}
-              </p>
-            </div>
+        <section class="space-y-3 border-t border-default pt-4">
+          <div class="space-y-1">
+            <h3 class="text-sm font-semibold text-highlighted">
+              {{ $t(isEditing
+                ? 'admin.apis.routing.upstreamForm.trafficTitle'
+                : 'admin.apis.routing.upstreamForm.targetsTitle') }}
+            </h3>
+            <p v-if="!isEditing" class="text-xs leading-5 text-muted">
+              {{ $t('admin.apis.routing.upstreamForm.targetsDescription') }}
+            </p>
           </div>
 
-          <!-- Load balancing lives here: it decides whether weights apply. -->
           <UFormField
             name="loadBalancing"
             :label="$t('admin.apis.routing.fields.loadBalancing')"
-            :description="$t('admin.apis.routing.upstreamForm.loadBalancingHelp')"
-            class="mb-4"
+            :help="$t(state.loadBalancing === 'weighted'
+              ? 'admin.apis.routing.upstreamForm.weightedHelp'
+              : 'admin.apis.routing.upstreamForm.roundRobinHelp')"
           >
             <USelect
               v-model="state.loadBalancing"
               :items="loadBalancingItems"
               value-key="value"
-              class="w-full sm:w-72"
+              :disabled="loading"
+              class="w-full sm:w-64"
             />
           </UFormField>
 
-          <UFormField name="targets">
-            <div class="space-y-2">
-              <div
-                v-for="(target, index) in state.targets"
-                :key="index"
-                class="rounded-lg border border-default bg-default p-3"
-              >
-                <span
-                  v-if="state.targets.length > 1"
-                  class="mb-2 block font-mono text-xs font-semibold text-muted"
-                >
-                  {{ $t('admin.apis.routing.upstreamForm.targetLabel', {
-                    number: index + 1
-                  }) }}
-                </span>
+          <template v-if="!isEditing">
+            <UFormField name="targets">
+              <div class="space-y-3">
                 <div
-                  class="grid gap-3"
-                  :class="state.loadBalancing === 'weighted'
-                    ? 'sm:grid-cols-[minmax(0,1fr)_6rem]'
-                    : 'sm:grid-cols-1'"
+                  v-for="(target, index) in state.targets"
+                  :key="index"
+                  class="min-w-0 rounded-lg border border-default bg-elevated/30 p-3 sm:p-4"
                 >
-                  <UFormField
-                    :name="`targets.${index}.baseUrl`"
-                    :label="$t('admin.apis.routing.fields.baseUrl')"
-                    class="min-w-0"
-                    required
+                  <div v-if="state.targets.length > 1" class="mb-3 flex min-h-6 items-center justify-between gap-3">
+                    <span class="text-xs font-medium text-muted">
+                      {{ $t('admin.apis.routing.upstreamForm.targetLabel', { number: index + 1 }) }}
+                    </span>
+                    <UButton
+                      color="neutral"
+                      variant="ghost"
+                      size="xs"
+                      square
+                      icon="i-lucide-trash-2"
+                      :disabled="loading"
+                      :aria-label="$t('admin.apis.routing.upstreamForm.removeTargetLabel', { number: index + 1 })"
+                      @click="removeTarget(index)"
+                    />
+                  </div>
+
+                  <div
+                    class="grid gap-4"
+                    :class="state.loadBalancing === 'weighted'
+                      ? 'sm:grid-cols-[minmax(0,1fr)_8.5rem]'
+                      : 'grid-cols-1'"
                   >
-                    <!--
-                      The remove button shares the field group so it aligns with
-                      the input itself rather than guessing at a label offset.
-                    -->
-                    <div class="flex min-w-0 items-center gap-2">
+                    <UFormField
+                      :name="'targets.' + index + '.baseUrl'"
+                      :label="$t('admin.apis.routing.fields.baseUrl')"
+                      class="min-w-0"
+                      required
+                    >
                       <UInput
                         v-model="target.baseUrl"
                         :placeholder="$t('admin.apis.routing.upstreamForm.targetPlaceholder')"
-                        class="min-w-0 flex-1 font-mono"
+                        autocomplete="off"
+                        autocapitalize="off"
+                        :spellcheck="false"
+                        :disabled="loading"
+                        class="w-full font-mono"
                       />
-                      <UButton
-                        color="neutral"
-                        variant="ghost"
-                        size="sm"
-                        square
-                        icon="i-lucide-trash-2"
-                        :disabled="state.targets.length === 1"
-                        :aria-label="$t('admin.apis.routing.actions.removeTarget')"
-                        @click="removeTarget(index)"
+                    </UFormField>
+                    <UFormField
+                      v-if="state.loadBalancing === 'weighted'"
+                      :name="'targets.' + index + '.weight'"
+                      :label="$t('admin.apis.routing.fields.weight')"
+                    >
+                      <UInputNumber
+                        v-model="target.weight"
+                        :min="1"
+                        :max="10000"
+                        :disabled="loading"
+                        class="w-full font-mono"
                       />
-                    </div>
-                  </UFormField>
-                  <UFormField
-                    v-if="state.loadBalancing === 'weighted'"
-                    :name="`targets.${index}.weight`"
-                    :label="$t('admin.apis.routing.fields.weight')"
-                  >
-                    <UInputNumber
-                      v-model="target.weight"
-                      :min="1"
-                      :max="10000"
-                      class="w-full"
-                    />
-                  </UFormField>
+                    </UFormField>
+                  </div>
                 </div>
               </div>
-            </div>
-          </UFormField>
+            </UFormField>
 
-          <UButton
-            class="mt-3"
-            color="neutral"
-            variant="outline"
-            size="sm"
-            icon="i-lucide-plus"
-            block
-            @click="addTarget"
-          >
-            {{ $t('admin.apis.routing.actions.addTarget') }}
-          </UButton>
-        </div>
+            <UButton
+              color="neutral"
+              variant="outline"
+              size="sm"
+              icon="i-lucide-plus"
+              :disabled="loading || state.targets.length >= UPSTREAM_CONSTRAINTS.TARGET_MAX_COUNT"
+              class="justify-center border-dashed"
+              block
+              @click="addTarget"
+            >
+              {{ $t('admin.apis.routing.actions.addTarget') }}
+            </UButton>
+          </template>
+        </section>
       </UForm>
     </template>
 

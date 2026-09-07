@@ -81,4 +81,11 @@ describe('dynamic API routing middleware', () => {
     expect(event.node.res.getHeader('access-control-allow-origin')).toBeUndefined()
     expect(dynamicGatewayMocks.tryHandle).not.toHaveBeenCalled()
   })
+
+  it.each(['GET', 'HEAD'])('serves bundled fonts outside the Gateway for %s requests', async (method) => {
+    const event = createMockEvent('/fonts/inter-latin-wght-normal.woff2', method)
+    await expect(handleOpenApiRouting(event)).resolves.toBeUndefined()
+    expect(dynamicGatewayMocks.tryHandle).not.toHaveBeenCalled()
+    expect(event.node.res.getHeader('access-control-allow-origin')).toBeUndefined()
+  })
 })

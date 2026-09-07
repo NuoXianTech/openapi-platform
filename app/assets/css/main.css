@@ -1,12 +1,18 @@
 @import "tailwindcss";
 @import "@nuxt/ui";
+@import "./fonts.css";
 
 @custom-variant dark (&:is(.dark *));
 
+@theme {
+  --font-sans: "Inter", "Noto Sans SC", "Microsoft YaHei UI", "PingFang SC", system-ui, sans-serif;
+  --font-mono: "IBM Plex Mono", "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+}
+
 :root {
-  --font-display: "Aptos Display", "Noto Sans SC", "Microsoft YaHei UI", sans-serif;
-  --font-body: Aptos, Inter, "Noto Sans SC", "Microsoft YaHei UI", sans-serif;
-  --font-code: "Cascadia Code", "JetBrains Mono", "SFMono-Regular", Consolas, monospace;
+  --font-display: var(--font-sans);
+  --font-body: var(--font-sans);
+  --font-code: var(--font-mono);
 
   --brand-ink: #09090b;
   --brand-primary: #18181b;
@@ -118,7 +124,7 @@ body {
   min-width: 320px;
   font-family: var(--font-body);
   -webkit-font-smoothing: antialiased;
-  text-rendering: optimizeLegibility;
+  text-rendering: auto;
 }
 
 h1,
@@ -134,6 +140,10 @@ pre,
 kbd,
 .font-mono {
   font-family: var(--font-code);
+  font-kerning: none;
+  font-variant-ligatures: none;
+  font-feature-settings: "liga" 0, "clig" 0, "calt" 0;
+  letter-spacing: normal;
 }
 
 ::selection {

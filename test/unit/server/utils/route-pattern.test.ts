@@ -40,7 +40,11 @@ describe('route pattern utilities', () => {
   it('protects Platform-owned paths from dynamic routes', () => {
     expect(isReservedPlatformPath('/api/admin/v1/routes')).toBe(true)
     expect(isReservedPlatformPath('/_i18n/hash/zh-CN/messages.json')).toBe(true)
+    expect(isReservedPlatformPath('/fonts')).toBe(true)
+    expect(isReservedPlatformPath('/fonts/inter-latin-wght-normal.woff2')).toBe(true)
     expect(isReservedPlatformPath('/admin')).toBe(true)
+    expect(isReservedPlatformPath('/v1/fonts')).toBe(false)
+    expect(isReservedPlatformPath('/fonts-api')).toBe(false)
     expect(isReservedPlatformPath('/v1/music')).toBe(false)
   })
 

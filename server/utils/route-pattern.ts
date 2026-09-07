@@ -4,6 +4,7 @@ const RESERVED_PLATFORM_PREFIXES = [
   '/api',
   '/_i18n',
   '/_nuxt',
+  '/fonts',
   '/admin',
   '/user',
   '/login',
