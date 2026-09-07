@@ -38,15 +38,14 @@
       },
       "transactions": {
         "title": "Credit transactions",
-        "description": "Review credit changes and resolve settlement exceptions",
+        "description": "Review posted transactions, pending charges, and billing exceptions in one place",
         "filterTitle": "Credit transaction filters",
         "detailsTitle": "Credit details",
-        "empty": "No credit transactions",
-        "views": {
-          "transactions": "Transactions",
-          "recovery": "Billing exceptions"
-        },
+        "empty": "No credit records",
+        "emptyExceptions": "No billing exceptions match these filters",
+        "reservedAmount": "Reserved, not charged",
         "filters": {
+          "status": "Record status",
           "userId": "User ID",
           "emptyAll": "Leave empty for all",
           "reason": "Reason",
@@ -64,53 +63,60 @@
           "maxAmount": "Maximum change",
           "maxAmountPlaceholder": "For example, 1000"
         },
+        "statusFilters": {
+          "all": "All records",
+          "exceptions": "Billing exceptions",
+          "dead_letter": "Needs manual review",
+          "pending": "Pending settlement",
+          "active": "Call in progress",
+          "posted": "Posted"
+        },
+        "statuses": {
+          "posted": "Posted",
+          "active": "Call in progress",
+          "pending": "Pending settlement",
+          "retrying": "Awaiting retry",
+          "dead_letter": "Needs manual review"
+        },
         "columns": {
           "time": "Time",
           "user": "User",
-          "reason": "Reason",
-          "amount": "Amount",
-          "balance": "Balance",
-          "operator": "Operator",
-          "remark": "Note"
-        }
-      },
-      "reservations": {
-        "title": "Billing exception handling",
-        "description": "Calls with failed automatic settlement appear here. After verifying the upstream result, retry settlement, confirm the charge, or release the reserved quota.",
-        "empty": "No billing exceptions",
-        "filterStatus": "Status",
-        "allStatuses": "All statuses",
-        "columns": {
-          "createdAt": "Created",
-          "user": "User",
-          "api": "API",
-          "amount": "Reserved credits",
+          "reason": "Reason / endpoint",
+          "amount": "Credits",
+          "balance": "Balance after",
           "status": "Status",
-          "attempts": "Attempts",
-          "error": "Last error"
+          "operator": "Operator",
+          "remark": "Note / error",
+          "actions": "Actions"
         },
-        "statuses": {
-          "active": "In progress",
-          "pending": "Awaiting settlement",
-          "dead_letter": "Manual review"
-        },
-        "actions": {
-          "retry": "Retry automatically",
-          "charge": "Confirm charge",
-          "release": "Release quota"
-        },
-        "confirmCharge": {
-          "title": "Confirm a {amount}-credit charge",
-          "description": "Use only after confirming the upstream call succeeded. This writes an auditable transaction and is idempotent."
-        },
-        "confirmRelease": {
-          "title": "Release {amount} reserved credits",
-          "description": "Use only when the call failed or should not be billed. The reservation will be removed."
-        },
-        "feedback": {
-          "retried": "Returned to the automatic settlement queue",
-          "charged": "Charge confirmed",
-          "released": "Reserved quota released"
+        "processing": {
+          "title": "Resolve",
+          "description": "These credits are still reserved. Verify the call result before choosing an action.",
+          "reservedAmount": "Reserved credits",
+          "api": "Endpoint",
+          "apiKey": "API key",
+          "requestId": "Request ID",
+          "attempts": "Failed attempts",
+          "lastError": "Latest settlement error",
+          "lastAttempt": "Last failure: {time}",
+          "nextAttempt": "Next automatic settlement: {time}",
+          "actionLabel": "Resolution",
+          "submit": "Apply resolution",
+          "actions": {
+            "retry": "Retry settlement",
+            "charge": "Confirm charge",
+            "release": "Release credits"
+          },
+          "actionDescriptions": {
+            "retry": "Keep the credits reserved and return this charge to the automatic settlement queue.",
+            "charge": "After verifying the call succeeded, deduct the reserved credits and record the charge.",
+            "release": "Release the reserved credits and cancel the charge for this call."
+          },
+          "feedback": {
+            "retry": "Returned to the automatic settlement queue",
+            "charge": "Charge confirmed and transaction recorded",
+            "release": "Reserved credits released and the charge canceled"
+          }
         }
       },
       "redemptionCodes": {

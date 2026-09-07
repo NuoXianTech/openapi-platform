@@ -32,37 +32,37 @@ export interface AdminCreditOverview {
 
 export type CreditReservationStatus = 'active' | 'pending' | 'dead_letter'
 
-export interface CreditReservationItem {
-  id: number
-  userId: number
-  username: string | null
+export const CREDIT_TRANSACTION_STATUS_FILTERS = [
+  'all', 'exceptions', 'dead_letter', 'pending', 'active', 'posted'
+] as const
+export type CreditTransactionStatusFilter = typeof CREDIT_TRANSACTION_STATUS_FILTERS[number]
+export type CreditTransactionStatus = 'posted' | CreditReservationStatus
+export type CreditReservationAction = 'retry' | 'charge' | 'release'
+
+export interface CreditReservationDetails {
   apiKeyId: number
   apiKeyName: string | null
-  routeId: string
-  routeName: string | null
-  routePath: string | null
-  apiCallId: number | null
   requestId: string
-  amount: number
-  status: CreditReservationStatus
   attempts: number
   lastError: string | null
   lastAttemptAt: string | null
   nextAttemptAt: string
-  createdAt: string
-  updatedAt: string
 }
 
-export interface AdminCreditTransactionRow {
+interface AdminCreditTransactionBase {
+  key: string
   id: number
   userId: number | null
   userName: string | null
   userRole: 'user' | 'admin' | null
+  /** Signed balance change for posted entries, planned debit for reservations. */
   amount: number
-  balanceAfter: number
   reason: string
   routeId: string | null
+  routeName: string | null
+  routePath: string | null
   apiCallId: number | null
+  creditReservationId: number | null
   codeId: number | null
   operatorId: number | null
   operatorName: string | null
@@ -71,3 +71,18 @@ export interface AdminCreditTransactionRow {
   meta: Record<string, unknown> | null
   createdAt: string
 }
+
+export type AdminCreditTransactionRow = AdminCreditTransactionBase & ({
+  kind: 'transaction'
+  status: 'posted'
+  balanceAfter: number
+  reservation: null
+} | {
+  kind: 'reservation'
+  status: CreditReservationStatus
+  balanceAfter: null
+  creditReservationId: number
+  reservation: CreditReservationDetails
+})
+
+export type AdminCreditReservationRow = Extract<AdminCreditTransactionRow, { kind: 'reservation' }>

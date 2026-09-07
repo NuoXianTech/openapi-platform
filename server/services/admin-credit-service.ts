@@ -1,4 +1,4 @@
-import { and, count, desc, eq, getTableColumns, gt, gte, ilike, lt, lte, sql, type SQL } from 'drizzle-orm'
+import { eq, sql } from 'drizzle-orm'
 import { apiCreditReservations, creditTransactions, users } from '~~/server/db/schema'
 import { db, type DatabaseTransaction } from '~~/server/db/client'
 import { createApplicationError } from '~~/server/errors/application-error'
@@ -8,10 +8,7 @@ import {
   type AdminCreditOperation
 } from './credit-adjustments'
 import { toNumber } from '~~/server/utils/number'
-import { normalizePagination } from '~~/server/utils/pagination'
 import type { CreditReason } from '#shared/types/credit-reason'
-import type { AdminCreditTransactionRow } from '#shared/types/admin-credits'
-import { toIsoString } from '~~/server/utils/date'
 
 interface AdminBatchAdjustInput {
   userIds: number[]
@@ -33,19 +30,6 @@ interface AdminAdjustmentInput {
 
 interface AdminResetInput extends AdminAdjustmentInput {
   targetValue?: number
-}
-
-interface ListTransactionsFilters {
-  userId?: number
-  reason?: CreditReason
-  direction?: 'in' | 'out'
-  operatorName?: string
-  startAt?: Date
-  endAt?: Date
-  minAmount?: number
-  maxAmount?: number
-  limit?: number
-  offset?: number
 }
 
 interface CreditOperationResult {
@@ -179,36 +163,5 @@ export const adminCreditService = {
       }
       return { affected: results.length, results }
     })
-  },
-
-  async listTransactions(filters: ListTransactionsFilters = {}) {
-    const conditions: SQL[] = []
-    if (typeof filters.userId === 'number') conditions.push(eq(creditTransactions.userId, filters.userId))
-    if (filters.reason) conditions.push(eq(creditTransactions.reason, filters.reason))
-    if (filters.direction === 'in') conditions.push(gt(creditTransactions.amount, 0))
-    if (filters.direction === 'out') conditions.push(lt(creditTransactions.amount, 0))
-    if (filters.operatorName) conditions.push(ilike(creditTransactions.operatorName, `%${filters.operatorName}%`))
-    if (filters.startAt) conditions.push(gte(creditTransactions.createdAt, filters.startAt))
-    if (filters.endAt) conditions.push(lte(creditTransactions.createdAt, filters.endAt))
-    if (typeof filters.minAmount === 'number') conditions.push(gte(creditTransactions.amount, filters.minAmount))
-    if (typeof filters.maxAmount === 'number') conditions.push(lte(creditTransactions.amount, filters.maxAmount))
-    const { limit, offset } = normalizePagination(filters)
-    const where = conditions.length ? and(...conditions) : undefined
-    const transactionColumns = getTableColumns(creditTransactions)
-    const [items, totalRows] = await Promise.all([
-      db.select({ ...transactionColumns, userName: users.username, userRole: users.role })
-        .from(creditTransactions)
-        .leftJoin(users, eq(users.id, creditTransactions.userId))
-        .where(where)
-        .orderBy(desc(creditTransactions.createdAt))
-        .limit(limit)
-        .offset(offset),
-      db.select({ value: count() }).from(creditTransactions).where(where)
-    ])
-    const responseItems: AdminCreditTransactionRow[] = items.map(item => ({
-      ...item,
-      createdAt: toIsoString(item.createdAt)
-    }))
-    return { items: responseItems, total: toNumber(totalRows[0]?.value) }
   }
 }

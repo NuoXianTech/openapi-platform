@@ -9,8 +9,7 @@ import { normalizePagination } from '~~/server/utils/pagination'
 import { firstRow } from '~~/server/utils/row'
 import type { CreditReason } from '#shared/types/credit-reason'
 import type { UserCreditConsumptionDailyRow, UserCreditSummary } from '#shared/types/user-credits'
-import type { CreditReservationItem } from '#shared/types/admin-credits'
-import { toIsoString, toNullableIsoString } from '~~/server/utils/date'
+import type { CreditReservationStatus } from '#shared/types/admin-credits'
 
 export type { CreditReason }
 
@@ -26,15 +25,9 @@ interface FinalizeReservationInput {
   reservationId: number
   apiCallId?: number | null
   remark?: string | null
+  operatorId?: number
+  operatorName?: string
   allowedStatuses?: Array<'pending' | 'dead_letter'>
-}
-
-export type CreditReservationStatus = 'active' | 'pending' | 'dead_letter'
-
-interface ListCreditReservationsFilters {
-  status?: CreditReservationStatus
-  limit?: number
-  offset?: number
 }
 
 interface ListUserTransactionsFilters {
@@ -238,6 +231,8 @@ async function finalizeReservation(input: FinalizeReservationInput) {
       routeId: reservation.routeId,
       apiCallId,
       creditReservationId: input.reservationId,
+      operatorId: input.operatorId ?? null,
+      operatorName: input.operatorName ?? null,
       remark: input.remark ?? null,
       meta: { requestId: reservation.requestId }
     })
@@ -249,53 +244,6 @@ async function finalizeReservation(input: FinalizeReservationInput) {
     await tx.delete(apiCreditReservations).where(eq(apiCreditReservations.id, input.reservationId))
     return { charged: reservation.amount, balanceAfter }
   })
-}
-
-async function listCreditReservations(filters: ListCreditReservationsFilters = {}) {
-  const conditions: SQL[] = []
-  if (filters.status) conditions.push(eq(apiCreditReservations.status, filters.status))
-  const where = conditions.length ? and(...conditions) : undefined
-  const { limit, offset } = normalizePagination(filters)
-  const baseQuery = db.select({
-    id: apiCreditReservations.id,
-    userId: apiCreditReservations.userId,
-    username: users.username,
-    apiKeyId: apiCreditReservations.apiKeyId,
-    apiKeyName: apiKeys.name,
-    routeId: apiCreditReservations.routeId,
-    routeName: apiRoutes.name,
-    routePath: apiRoutes.pathPattern,
-    apiCallId: apiCreditReservations.apiCallId,
-    requestId: apiCreditReservations.requestId,
-    amount: apiCreditReservations.amount,
-    status: apiCreditReservations.status,
-    attempts: apiCreditReservations.attempts,
-    lastError: apiCreditReservations.lastError,
-    lastAttemptAt: apiCreditReservations.lastAttemptAt,
-    nextAttemptAt: apiCreditReservations.nextAttemptAt,
-    createdAt: apiCreditReservations.createdAt,
-    updatedAt: apiCreditReservations.updatedAt
-  }).from(apiCreditReservations)
-    .leftJoin(users, eq(users.id, apiCreditReservations.userId))
-    .leftJoin(apiKeys, eq(apiKeys.id, apiCreditReservations.apiKeyId))
-    .leftJoin(apiRoutes, eq(apiRoutes.id, apiCreditReservations.routeId))
-  const countQuery = db.select({ value: count() }).from(apiCreditReservations)
-  const [items, totalRows] = await Promise.all([
-    (where ? baseQuery.where(where) : baseQuery)
-      .orderBy(desc(apiCreditReservations.createdAt))
-      .limit(limit)
-      .offset(offset),
-    where ? countQuery.where(where) : countQuery
-  ])
-  const responseItems: CreditReservationItem[] = items.map(item => ({
-    ...item,
-    status: item.status as CreditReservationStatus,
-    lastAttemptAt: toNullableIsoString(item.lastAttemptAt),
-    nextAttemptAt: toIsoString(item.nextAttemptAt),
-    createdAt: toIsoString(item.createdAt),
-    updatedAt: toIsoString(item.updatedAt)
-  }))
-  return { items: responseItems, total: toNumber(totalRows[0]?.value) }
 }
 
 async function retryCreditReservation(id: number) {
@@ -311,11 +259,13 @@ async function retryCreditReservation(id: number) {
   )).returning())
 }
 
-async function forceFinalizeCreditReservation(id: number, remark: string) {
+async function forceFinalizeCreditReservation(id: number, operator: { id: number, name: string }) {
   try {
     return await finalizeReservation({
       reservationId: id,
-      remark,
+      operatorId: operator.id,
+      operatorName: operator.name,
+      remark: `管理员 ${operator.name} 确认扣费`,
       allowedStatuses: ['pending', 'dead_letter']
     })
   } catch (error) {
@@ -536,7 +486,6 @@ export const creditService = {
   claimDueReservations,
   markReservationAttempt,
   releaseExpiredReservations,
-  listCreditReservations,
   retryCreditReservation,
   forceFinalizeCreditReservation,
   forceReleaseCreditReservation,

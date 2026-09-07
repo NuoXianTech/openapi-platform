@@ -229,7 +229,9 @@ describe('credit service reservations', () => {
       )
     }
 
-    await expect(creditService.forceFinalizeCreditReservation(charge.reservation.id, 'manual charge'))
+    await expect(creditService.forceFinalizeCreditReservation(charge.reservation.id, { id: 9, name: 'admin' }))
+      .resolves.toEqual({ charged: 3, balanceAfter: 7 })
+    await expect(creditService.forceFinalizeCreditReservation(charge.reservation.id, { id: 10, name: 'another-admin' }))
       .resolves.toEqual({ charged: 3, balanceAfter: 7 })
     await expect(creditService.forceReleaseCreditReservation(release.reservation.id))
       .resolves.toBe(true)
@@ -238,5 +240,19 @@ describe('credit service reservations', () => {
     const user = await client.query<{ credits: number }>('SELECT credits FROM users WHERE id = 1')
     expect(key.rows[0]?.used_credits).toBe(3)
     expect(user.rows[0]?.credits).toBe(7)
+    const transactions = await client.query('SELECT amount, operator_id, operator_name FROM credit_transactions')
+    expect(transactions.rows).toEqual([{ amount: -3, operator_id: 9, operator_name: 'admin' }])
+  })
+
+  it('does not allow an administrator to charge or retry an active call', async () => {
+    const result = await reserve(3)
+    expect(result.status).toBe('reserved')
+    if (result.status !== 'reserved') return
+
+    await expect(creditService.forceFinalizeCreditReservation(result.reservation.id, { id: 9, name: 'admin' }))
+      .rejects.toMatchObject({ statusCode: 404 })
+    await expect(creditService.retryCreditReservation(result.reservation.id)).resolves.toBeNull()
+    const user = await client.query<{ credits: number }>('SELECT credits FROM users WHERE id = 1')
+    expect(user.rows[0]?.credits).toBe(10)
   })
 })

@@ -38,15 +38,14 @@
       },
       "transactions": {
         "title": "积分流水",
-        "description": "查看积分变动记录，并处理自动结算异常",
+        "description": "统一查看已入账流水、待结算和异常扣费，核对后可人工处理",
         "filterTitle": "积分流水筛选",
         "detailsTitle": "积分明细",
-        "empty": "暂无积分日志",
-        "views": {
-          "transactions": "积分流水",
-          "recovery": "异常计费"
-        },
+        "empty": "暂无积分记录",
+        "emptyExceptions": "暂无符合筛选条件的异常扣费",
+        "reservedAmount": "预留，未扣费",
         "filters": {
+          "status": "记录状态",
           "userId": "用户 ID",
           "emptyAll": "留空查全部",
           "reason": "原因",
@@ -64,53 +63,60 @@
           "maxAmount": "最大变动金额",
           "maxAmountPlaceholder": "例如 1000"
         },
+        "statusFilters": {
+          "all": "全部记录",
+          "exceptions": "异常扣费",
+          "dead_letter": "需要人工处理",
+          "pending": "等待结算",
+          "active": "调用中",
+          "posted": "已入账"
+        },
+        "statuses": {
+          "posted": "已入账",
+          "active": "调用中",
+          "pending": "等待结算",
+          "retrying": "等待重试",
+          "dead_letter": "需要人工处理"
+        },
         "columns": {
           "time": "时间",
           "user": "用户",
-          "reason": "原因",
-          "amount": "金额",
-          "balance": "余额",
-          "operator": "操作人",
-          "remark": "备注"
-        }
-      },
-      "reservations": {
-        "title": "异常计费处理",
-        "description": "自动结算失败的调用会进入此处。确认上游结果后，可重试结算、确认扣费或释放预留额度。",
-        "empty": "暂无异常计费",
-        "filterStatus": "状态",
-        "allStatuses": "全部状态",
-        "columns": {
-          "createdAt": "创建时间",
-          "user": "用户",
-          "api": "接口",
-          "amount": "预留积分",
+          "reason": "原因 / 接口",
+          "amount": "积分",
+          "balance": "入账后余额",
           "status": "状态",
-          "attempts": "尝试次数",
-          "error": "最近错误"
+          "operator": "操作人",
+          "remark": "备注 / 错误",
+          "actions": "操作"
         },
-        "statuses": {
-          "active": "调用中",
-          "pending": "等待结算",
-          "dead_letter": "需要人工处理"
-        },
-        "actions": {
-          "retry": "重新自动结算",
-          "charge": "确认扣费",
-          "release": "释放额度"
-        },
-        "confirmCharge": {
-          "title": "确认扣除 {amount} 积分",
-          "description": "仅在确认上游调用成功时执行。操作会写入积分流水且不可重复。"
-        },
-        "confirmRelease": {
-          "title": "释放 {amount} 积分额度",
-          "description": "仅在确认调用未成功或不应计费时执行。该预留将被删除。"
-        },
-        "feedback": {
-          "retried": "已重新加入自动结算队列",
-          "charged": "已确认扣费",
-          "released": "已释放预留额度"
+        "processing": {
+          "title": "人工处理",
+          "description": "积分仍处于预留状态。请先核对调用结果，再选择处理方式。",
+          "reservedAmount": "预留积分",
+          "api": "接口",
+          "apiKey": "API Key",
+          "requestId": "请求 ID",
+          "attempts": "失败次数",
+          "lastError": "最近结算错误",
+          "lastAttempt": "最近失败时间：{time}",
+          "nextAttempt": "下次自动结算：{time}",
+          "actionLabel": "处理方式",
+          "submit": "执行处理",
+          "actions": {
+            "retry": "重新自动结算",
+            "charge": "确认扣费",
+            "release": "释放额度"
+          },
+          "actionDescriptions": {
+            "retry": "保留预留积分，重新加入自动结算队列。",
+            "charge": "确认调用成功后扣除预留积分，并记录实际扣费流水。",
+            "release": "释放预留额度，本次调用不再扣费。"
+          },
+          "feedback": {
+            "retry": "已重新加入自动结算队列",
+            "charge": "已确认扣费，流水已更新",
+            "release": "已释放预留额度，本次调用不再扣费"
+          }
         }
       },
       "redemptionCodes": {

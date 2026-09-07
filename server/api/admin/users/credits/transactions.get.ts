@@ -1,14 +1,16 @@
 /**
- * Admin · 用户积分变动流水查询
+ * Admin · 已入账流水与待结算扣费查询
  *
  * Query:
  *   - userId?     : number  指定用户
+ *   - status?     : all / posted / exceptions / active / pending / dead_letter
  *   - reason?     : string  admin_grant/admin_revoke/admin_reset/api_charge/api_refund
  *   - limit?      : 默认 20，最大 200
  *   - offset?     : 默认 0
  */
 
-import { adminCreditService } from '~~/server/services/admin-credit-service'
+import { listAdminCreditTransactions } from '~~/server/services/admin-credit-transaction-service'
+import { CREDIT_TRANSACTION_STATUS_FILTERS } from '#shared/types/admin-credits'
 import type { CreditReason } from '#shared/types/credit-reason'
 import { defineAdminEventHandler } from '~~/server/utils/auth'
 import { readPaginationQuery } from '~~/server/utils/pagination'
@@ -38,7 +40,8 @@ export default defineAdminEventHandler((event) => {
   const userId = readQueryPositiveInteger(query.userId)
   const reason = readQueryOption(query.reason, CREDIT_REASON_OPTIONS)
 
-  return adminCreditService.listTransactions({
+  return listAdminCreditTransactions({
+    status: readQueryOption(query.status, CREDIT_TRANSACTION_STATUS_FILTERS),
     userId,
     reason,
     direction: readQueryOption(query.direction, DIRECTION_OPTIONS),
