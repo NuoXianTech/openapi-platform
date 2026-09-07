@@ -24,3 +24,9 @@ export function formatPlatformDate(value: string | null, locale: string): string
     timeStyle: 'short'
   }).format(new Date(value))
 }
+
+export function shortServiceCommit(value: string | null | undefined): string {
+  const commit = value?.trim()
+  if (!commit) return '—'
+  return /^[0-9a-f]{8,64}$/i.test(commit) ? commit.slice(0, 7) : commit
+}
