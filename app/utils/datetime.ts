@@ -40,6 +40,15 @@ export function formatTrendShortDate(value: string): string {
   return `${month}-${day}`
 }
 
+/** Format chart timestamps in the viewer's local timezone, including midnight as 00:00. */
+export function formatTrendHour(value: string | number | Date, locale = DEFAULT_LOCALE): string {
+  const date = value instanceof Date ? value : new Date(value)
+  if (Number.isNaN(date.getTime())) return ''
+  return new Intl.DateTimeFormat(locale, {
+    hour: '2-digit', minute: '2-digit', hourCycle: 'h23'
+  }).format(date)
+}
+
 /** tooltip 用完整日期 "YYYY-MM-DD 周X"（解析失败回退原值） */
 export function formatTrendFullDate(value: string, locale = DEFAULT_LOCALE): string {
   const date = parseTrendDate(value)

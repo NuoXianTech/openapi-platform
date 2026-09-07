@@ -146,29 +146,34 @@ export const adminDashboardService = {
   },
 
   async getInsights(): Promise<AdminDashboardInsightsData> {
-    const last24hStart = new Date(Date.now() - 24 * 60 * 60 * 1000)
+    const now = new Date()
+    const hourMs = 60 * 60 * 1000
+    const last24hStart = new Date(now.getTime() - 24 * hourMs)
     const hourlySource = db.select({
-      hour: sql<Date>`date_trunc('hour', ${apiCalls.createdAt})`.as('hour')
+      // Anchor all 24 one-hour buckets to this snapshot instead of calendar
+      // hours. Epoch arithmetic is independent of the database session timezone.
+      bucket: sql<number>`floor(extract(epoch from (${apiCalls.createdAt} - ${last24hStart.toISOString()}::timestamptz)) / 3600)::integer`.as('bucket')
     }).from(apiCalls)
-      .where(and(gte(apiCalls.createdAt, last24hStart), eq(apiCalls.isCounted, true)))
+      .where(and(
+        gte(apiCalls.createdAt, last24hStart),
+        lt(apiCalls.createdAt, now),
+        eq(apiCalls.isCounted, true)
+      ))
       .as('hourly_source')
 
-    const hourlyRows = await db.select({ hour: hourlySource.hour, totalCalls: sql<number>`count(*)` })
+    const hourlyRows = await db.select({ bucket: hourlySource.bucket, totalCalls: sql<number>`count(*)` })
       .from(hourlySource)
-      .groupBy(hourlySource.hour)
-      .orderBy(asc(hourlySource.hour))
+      .groupBy(hourlySource.bucket)
+      .orderBy(asc(hourlySource.bucket))
 
-    const hourMap = new Map<string, number>()
+    const hourMap = new Map<number, number>()
     for (const row of hourlyRows) {
-      const date = row.hour instanceof Date ? row.hour : new Date(row.hour)
-      hourMap.set(date.toISOString(), toNumber(row.totalCalls))
+      hourMap.set(toNumber(row.bucket), toNumber(row.totalCalls))
     }
-    const nowHour = new Date()
-    nowHour.setMinutes(0, 0, 0)
     const hourlyTrend24h: AdminDashboardHourlyPoint[] = Array.from({ length: 24 }, (_, index) => {
-      const date = new Date(nowHour.getTime() - (23 - index) * 60 * 60 * 1000)
+      const date = new Date(last24hStart.getTime() + (index + 1) * hourMs)
       const hour = date.toISOString()
-      return { hour, label: HOURLY_LABEL_FORMATTER.format(date), totalCalls: hourMap.get(hour) ?? 0 }
+      return { hour, label: HOURLY_LABEL_FORMATTER.format(date), totalCalls: hourMap.get(index) ?? 0 }
     })
     return { hourlyTrend24h }
   }

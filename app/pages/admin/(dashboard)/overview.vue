@@ -78,7 +78,8 @@ const {
 })
 const {
   data: insightsData,
-  loading: insightsLoading
+  loading: insightsLoading,
+  refresh: refreshInsights
 } = usePrivateResource<AdminDashboardInsightsData>({
   path: '/api/admin/dashboard/insights',
   defaultData: createEmptyDashboardInsightsData
@@ -90,6 +91,11 @@ const chartTrend = computed(() => isUsingOverviewTrend.value ? data.value.trend 
 const chartLoading = computed(() => isUsingOverviewTrend.value ? loading.value : trendLoading.value)
 const distribution = computed(() => data.value.distribution)
 const hourlyTrend24h = computed(() => insightsData.value.hourlyTrend24h)
+
+useIntervalFn(() => {
+  if (!insightsLoading.value) void refreshInsights()
+}, 60_000)
+
 const recentCalls = computed(() => data.value.recentCalls)
 const generatedAt = computed(() => formatDateTime(data.value.generatedAt, '-', locale.value))
 const callsTrendValues = computed(() => getCallsTrendValues(overviewTrend.value))
@@ -331,7 +337,7 @@ function recentStatusColor(row: AdminDashboardRecentCall): HttpStatusColor {
           icon="i-mdi-clock-outline"
         >
           <div
-            v-if="insightsLoading"
+            v-if="insightsLoading && !hourlyTrend24h.length"
             class="h-64 w-full animate-pulse rounded-lg bg-elevated/50"
           />
           <ClientOnly v-else>

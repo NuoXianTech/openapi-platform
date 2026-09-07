@@ -53,7 +53,7 @@
       },
       "hourly": {
         "title": "24-hour call trend",
-        "description": "Tracked API requests grouped by hour",
+        "description": "Hourly tracked requests over the last 24 hours in local time, refreshed every minute",
         "calls": "Calls",
         "empty": "No calls in the last 24 hours"
       },

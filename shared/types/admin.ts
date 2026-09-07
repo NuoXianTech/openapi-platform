@@ -13,6 +13,7 @@ export interface AdminUserItem {
 }
 
 export interface AdminDashboardHourlyPoint {
+  /** Exclusive end of this one-hour interval, as an ISO timestamp. */
   hour: string
   label: string
   totalCalls: number
