@@ -16,18 +16,22 @@ const { apis = [], categoryMap = {} } = defineProps<ApiCardGridProps>()
       tag="div"
       class="api-card-grid"
     >
-      <ApiCard
+      <div
         v-for="api in apis"
         :key="api.id"
-        :name="api.name"
-        :status="api.status"
-        :category-name="api.categoryId == null ? '' : categoryMap[api.categoryId]?.name"
-        :short-desc="api.shortDesc"
-        :description="api.description"
-        :doc-url="api.docUrl"
-        :endpoints="api.endpoints"
-        :total-calls="api.totalCalls"
-      />
+        class="api-card-grid__item"
+      >
+        <ApiCard
+          :name="api.name"
+          :status="api.status"
+          :category-name="api.categoryId == null ? '' : categoryMap[api.categoryId]?.name"
+          :short-desc="api.shortDesc"
+          :description="api.description"
+          :doc-url="api.docUrl"
+          :endpoints="api.endpoints"
+          :total-calls="api.totalCalls"
+        />
+      </div>
     </TransitionGroup>
   </div>
 </template>
@@ -40,6 +44,10 @@ const { apis = [], categoryMap = {} } = defineProps<ApiCardGridProps>()
   grid-auto-rows: 1fr;
   gap: 16px;
   align-items: stretch;
+}
+
+.api-card-grid__item {
+  min-width: 0;
 }
 
 @media (min-width: 640px) {

@@ -22,11 +22,15 @@ const {
   totalPages,
   isLoading,
   loadError,
-  isEmpty,
   refreshCatalog
 } = usePublicApiCatalog({ pageSize: DIRECTORY_PAGE_SIZE })
 
 const paginatedApis = filteredApis
+const resultState = computed(() => {
+  if (isLoading.value && !paginatedApis.value.length) return 'loading'
+  if (loadError.value && !isLoading.value) return 'error'
+  return paginatedApis.value.length ? 'content' : 'empty'
+})
 
 const retryActions = computed(() => [{
   label: t('common.actions.retry'),
@@ -133,60 +137,67 @@ useSeoMeta({
           </span>
         </div>
 
-        <div v-if="isLoading" class="api-directory__skeletons" aria-hidden="true">
-          <USkeleton
-            v-for="index in DIRECTORY_PAGE_SIZE"
-            :key="index"
-            class="h-52 w-full rounded-lg"
-          />
-        </div>
-
-        <UEmpty
-          v-else-if="loadError"
-          icon="i-mdi-alert-circle-outline"
-          :title="$t('common.states.loadFailed')"
-          :description="loadError"
-          variant="naked"
-          size="lg"
-          :actions="retryActions"
-          class="api-directory__state"
-        />
-
-        <UEmpty
-          v-else-if="isEmpty"
-          icon="i-mdi-magnify-remove-outline"
-          :title="$t('public.directory.emptyTitle')"
-          :description="$t('public.directory.emptyDescription')"
-          variant="naked"
-          size="lg"
-          class="api-directory__state"
-        />
-
-        <div v-else class="api-directory__results">
-          <ApiCardGrid
-            :apis="paginatedApis"
-            :category-map="categoryMap"
-          />
-
-          <nav
-            class="api-directory__pagination"
-            :aria-label="$t('public.directory.paginationAria')"
-          >
-            <span>
-              {{ $t('public.directory.pagination', { page, totalPages }) }}
-            </span>
-            <UPagination
-              :page="page"
-              :items-per-page="pageSize"
-              :total="total"
-              :sibling-count="1"
-              show-edges
-              size="sm"
-              :ui="{ first: 'hidden', last: 'hidden', list: 'gap-0.5 sm:gap-1' }"
-              @update:page="handlePageChange"
+        <CommonStateTransition
+          :state-key="resultState"
+          :busy="isLoading"
+          :refreshing="isLoading && paginatedApis.length > 0"
+          class="api-directory__result-state"
+        >
+          <div v-if="resultState === 'loading'" class="api-directory__skeletons" aria-hidden="true">
+            <USkeleton
+              v-for="index in DIRECTORY_PAGE_SIZE"
+              :key="index"
+              class="h-52 w-full rounded-lg"
             />
-          </nav>
-        </div>
+          </div>
+
+          <UEmpty
+            v-else-if="resultState === 'error'"
+            icon="i-mdi-alert-circle-outline"
+            :title="$t('common.states.loadFailed')"
+            :description="loadError || undefined"
+            variant="naked"
+            size="lg"
+            :actions="retryActions"
+            class="api-directory__state"
+          />
+
+          <UEmpty
+            v-else-if="resultState === 'empty'"
+            icon="i-mdi-magnify-remove-outline"
+            :title="$t('public.directory.emptyTitle')"
+            :description="$t('public.directory.emptyDescription')"
+            variant="naked"
+            size="lg"
+            class="api-directory__state"
+          />
+
+          <div v-else class="api-directory__results">
+            <ApiCardGrid
+              :apis="paginatedApis"
+              :category-map="categoryMap"
+            />
+
+            <nav
+              class="api-directory__pagination"
+              :aria-label="$t('public.directory.paginationAria')"
+            >
+              <span>
+                {{ $t('public.directory.pagination', { page, totalPages }) }}
+              </span>
+              <UPagination
+                :page="page"
+                :items-per-page="pageSize"
+                :total="total"
+                :sibling-count="1"
+                show-edges
+                size="sm"
+                :ui="{ first: 'hidden', last: 'hidden', list: 'gap-0.5 sm:gap-1' }"
+                @update:page="handlePageChange"
+              />
+            </nav>
+          </div>
+        </CommonStateTransition>
       </section>
     </main>
 
@@ -368,6 +379,10 @@ useSeoMeta({
 
 .api-directory__state {
   padding-block: 3rem;
+}
+
+.api-directory__result-state {
+  min-height: 16rem;
 }
 
 .api-directory__pagination {

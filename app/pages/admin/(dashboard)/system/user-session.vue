@@ -263,6 +263,7 @@ const inviteModeReady = computed(() => (
           v-for="item in items"
           :key="item.provider"
           v-model:open="getForm(item.provider).open"
+          :unmount-on-hide="false"
           class="dashboard-oauth-provider-card"
         >
           <button

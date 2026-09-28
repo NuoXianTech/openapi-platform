@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { FormError, FormSubmitEvent } from '@nuxt/ui'
+import type { FormError, FormErrorEvent, FormSubmitEvent } from '@nuxt/ui'
 import type { PlatformEndpointPublicationPatch, PlatformRouteBinding } from '#shared/types/platform'
 import { adminModalUi } from '~/utils/admin-modal-ui'
 import { compactFormErrors, integerRangeError, maxLengthError, requiredTextError } from '~/utils/form-validation'
@@ -68,6 +68,20 @@ async function onSubmit(event: FormSubmitEvent<EndpointSettingsForm>) {
     open.value = false
   }
 }
+
+async function onError(event: FormErrorEvent) {
+  const firstError = event.errors[0]
+  if (!firstError?.name || firstError.name === 'name') return
+  advancedOpen.value = true
+  await nextTick()
+  // Reka removes the retained panel's hidden state after its own DOM update.
+  await new Promise<void>(resolve => requestAnimationFrame(() => resolve()))
+  if (!open.value || !advancedOpen.value) return
+  if (!firstError.id) return
+  const field = document.getElementById(firstError.id)
+  const input = field?.querySelector<HTMLElement>('input:not([type="hidden"]), textarea, select') ?? field
+  input?.focus()
+}
 </script>
 
 <template>
@@ -85,6 +99,7 @@ async function onSubmit(event: FormSubmitEvent<EndpointSettingsForm>) {
         :validate="validateSettings"
         class="space-y-5"
         @submit="onSubmit"
+        @error="onError"
       >
         <UAlert
           v-if="error"
@@ -121,6 +136,7 @@ async function onSubmit(event: FormSubmitEvent<EndpointSettingsForm>) {
 
         <UCollapsible
           v-model:open="advancedOpen"
+          :unmount-on-hide="false"
           class="rounded-lg border border-default bg-elevated/30"
         >
           <button

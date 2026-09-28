@@ -51,8 +51,11 @@ function resetFilters() {
       trailing-icon="i-mdi-chevron-down"
       :color="props.activeCount > 0 ? 'primary' : 'neutral'"
       :variant="props.activeCount > 0 ? 'soft' : 'outline'"
-      class="w-full justify-center sm:w-auto"
-      :ui="{ label: 'truncate' }"
+      class="group w-full justify-center sm:w-auto"
+      :ui="{
+        label: 'truncate',
+        trailingIcon: 'transition-transform duration-200 group-data-[state=open]:rotate-180 motion-reduce:transition-none'
+      }"
     >
       {{ displayLabel }}
     </UButton>
