@@ -175,7 +175,7 @@ function clearTurnstileError() {
 </script>
 
 <template>
-  <CommonAppAuthShell>
+  <CommonAppAuthShell :show-brand="false">
     <AuthBrandHeader
       :title="t('auth.login.welcome', { siteName: settings.siteName })"
     />

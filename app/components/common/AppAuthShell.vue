@@ -1,5 +1,11 @@
 <script setup lang="ts">
 import SiteBrand from './SiteBrand.vue'
+
+withDefaults(defineProps<{
+  showBrand?: boolean
+}>(), {
+  showBrand: true
+})
 </script>
 
 <template>
@@ -8,6 +14,7 @@ import SiteBrand from './SiteBrand.vue'
 
     <section class="auth-panel">
       <SiteBrand
+        v-if="showBrand"
         size="auth"
         class="auth-home"
       />

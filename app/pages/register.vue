@@ -195,7 +195,7 @@ function clearTurnstileError() {
 </script>
 
 <template>
-  <CommonAppAuthShell>
+  <CommonAppAuthShell :show-brand="false">
     <AuthBrandHeader
       :title="pageHeading"
     />
