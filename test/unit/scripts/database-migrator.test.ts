@@ -27,9 +27,9 @@ afterEach(async () => {
 
 describe('database migration runner', () => {
   it('uses the fixed PGlite directory for blank overrides', () => {
-    expect(resolvePgliteDataDir()).toBe('.data/pglite')
-    expect(resolvePgliteDataDir('')).toBe('.data/pglite')
-    expect(resolvePgliteDataDir('   ')).toBe('.data/pglite')
+    expect(resolvePgliteDataDir()).toBe(resolve('.data/pglite'))
+    expect(resolvePgliteDataDir('')).toBe(resolve('.data/pglite'))
+    expect(resolvePgliteDataDir('   ')).toBe(resolve('.data/pglite'))
     expect(resolvePgliteDataDir(' custom/pglite ')).toBe('custom/pglite')
   })
 

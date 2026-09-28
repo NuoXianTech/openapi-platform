@@ -13,12 +13,12 @@ pnpm install --frozen-lockfile
 pnpm typecheck
 pnpm lint
 pnpm check:dead-code
-pnpm test:unit
+pnpm test
 pnpm build
-pnpm test:integration:built
+pnpm test:integration
 ```
 
-构建命令会生成 `.output/package.json` 和 `.output/server/index.mjs`。根级 `package.json` 只提供部署所需的 `start`、`migrate` 脚本，实际入口仍是 Nuxt/Nitro 官方 Node server，不通过自定义启动器包装应用。
+构建命令会生成 `.output/package.json` 和 `.output/server/index.mjs`。部署清单提供 `start`、`migrate` 和 `doctor`；薄启动脚本负责读取配置和检查环境，实际服务仍由 Nuxt/Nitro 官方 Node server 执行。
 
 不要在生产 VPS 上执行 Platform 的 `pnpm install`、`pnpm build` 或任何仓库的 `docker build`。Nuxt/Nitro 生产构建可能短时间占用 6～8 GB 内存；Platform 和 API Service 都应在 Linux CI 或开发机构建并发布镜像，VPS 只负责拉取和运行。
 
@@ -34,7 +34,7 @@ NODE_ENV=production npm run migrate
 NODE_ENV=production npm start
 ```
 
-GitHub Release 会保留版本目录、`LICENSE`、README 和 `.env.example`，但将 `.output` 的内容直接放到版本目录根部。解压后进入该目录执行相同的 `npm run migrate`、`npm start` 即可。不要把工作目录设为 `server`，否则面板读取到的是 Nitro 内部 `package.json`。
+GitHub Release 会保留版本目录、`LICENSE`、README 和 `.env.example`，但将 `.output` 的内容直接放到版本目录根部。解压后进入该目录执行相同的 `npm run migrate`、`npm start` 即可，排障运行 `npm run doctor`。这些命令默认读取根目录 `.env`，进程环境变量优先。源码目录中的 `.output` 自动关联源码配置，独立发布包使用自己的配置。不要把面板工作目录设为 `server`，否则读到的是 Nitro 内部 `package.json`。
 
 必须完整部署运行目录，包括隐藏的 `server/node_modules/.nitro`。不要只上传 `server`，也不要使用会忽略隐藏目录或破坏符号链接的压缩工具。Windows 构建产物含 Junction，跨系统上传容易出现 `Cannot find module 'entities/decode'`；生产优先在 Linux CI 或 Docker 内构建。
 
@@ -165,7 +165,7 @@ NUXT_PROXY_FORWARDED_HOPS=1
 NUXT_REDIS_URL=redis://127.0.0.1:6379
 ```
 
-生产环境没有 `DATABASE_URL` 时会自动使用 PGlite。PGlite 始终使用当前工作目录下的 `.data/pglite`，该目录必须保持持久化并纳入服务器备份。首次创建管理员时，服务端日志只会输出一次随机初始密码；应立即登录并完成资料和密码初始化。
+生产环境没有 `DATABASE_URL` 时会自动使用 PGlite。通过 `PLATFORM_DATA_DIR` 指定稳定的数据根目录，实际数据库位于其 `pglite` 子目录；相对路径以所选配置文件目录为基准，默认 `.data`。升级版本目录时保留同一数据目录与原密钥。首次创建管理员时，服务端日志只会输出一次随机初始密码；应立即登录并完成资料和密码初始化。
 
 IP 数据文件只属于 Service，不要挂载到 Platform 的 PM2 进程。`ip.databaseKey` 由 Platform 以 Service 业务 Secret 的形式分域加密保存。Service 统一从 `SERVICE_DATA_DIR/assets/ip` 读取数据库，并把加密配置快照固定写入 `SERVICE_DATA_DIR/runtime`。
 

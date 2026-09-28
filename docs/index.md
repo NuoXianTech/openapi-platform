@@ -32,6 +32,7 @@ OpenAPI Platform 是自托管 API 管理平台，负责动态路由、访问治�
 
 ## 运行与发布
 
+- [本地启动与诊断](./operations/local-startup.md)
 - [运行时配置](./operations/runtime-config.md)
 - [数据库迁移与版本升级](./operations/database-migrations.md)
 - [Platform 与 Service 集成测试](./operations/service-integration-testing.md)
@@ -72,9 +73,9 @@ Platform：
 pnpm lint
 pnpm typecheck
 pnpm check:dead-code
-pnpm test:unit
+pnpm test
 pnpm build
-pnpm test:integration:built
+pnpm test:integration
 ```
 
 Service：

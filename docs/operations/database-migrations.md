@@ -5,6 +5,10 @@ Platform 的数据库结构跟随 Platform 版本发布。生产服务器不需�
 ```text
 .output/package.json
 .output/server/index.mjs
+.output/server/start.mjs
+.output/server/doctor.mjs
+.output/server/runtime-config.mjs
+.output/server/runtime-checks.mjs
 .output/server/migrate.mjs
 .output/server/database-migrator.mjs
 .output/server/db/migrations/postgresql/
@@ -13,6 +17,8 @@ Platform 的数据库结构跟随 Platform 版本发布。生产服务器不需�
 GitHub Release 会把 `.output` 内的内容提升到版本目录根部，因此发布包中对应路径为 `package.json`、`server/migrate.mjs` 和 `server/db/migrations/postgresql/`。
 
 API Service 不连接 Platform 数据库，也不执行这些迁移。
+
+`start`、`migrate` 和 `doctor` 共用配置读取与数据路径规则：进程环境变量优先，默认读取项目/发布根目录 `.env`；`PLATFORM_ENV_FILE` 可选择其他配置文件，`PLATFORM_DATA_DIR` 选择持久化数据根目录。PGlite 使用其中的 `pglite` 子目录。源码 `.output` 与源码根目录使用同一位置，切换工作目录不会创建第二份数据库。
 
 ## 版本化规则
 
@@ -34,9 +40,9 @@ Drizzle 使用 `drizzle.__drizzle_migrations` 记录已应用迁移。执行器�
 
 ```bash
 pnpm db:generate --name descriptive_name
-pnpm test:unit
+pnpm test
 pnpm build
-pnpm test:integration:built
+pnpm test:integration
 ```
 
 先完成并审查同一批次的 Schema 设计，再生成一次迁移。只有需要查询、关联、排序、唯一性或数据库约束保证的数据才增加普通列；真正可扩展且不参与关键查询的配置、描述和快照可以放入 JSONB。不要用 JSONB 规避已经稳定的关系模型，也不要为尚未存在的状态预留字段。

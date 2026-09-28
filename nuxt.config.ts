@@ -12,16 +12,22 @@ const { name: appName, version: appVersion } = require('./package.json') as {
 
 const isProduction = process.env.NODE_ENV === 'production'
 const databaseMigrationsDir = 'server/db/migrations/postgresql'
-const databaseMigrationScripts = ['scripts/migrate.mjs', 'scripts/database-migrator.mjs']
+const runtimeScripts = [
+  'scripts/migrate.mjs', 'scripts/database-migrator.mjs',
+  'scripts/start.mjs', 'scripts/doctor.mjs',
+  'scripts/runtime-config.mjs', 'scripts/runtime-checks.mjs'
+]
 const databaseMigratorModule = resolve('scripts/database-migrator.mjs')
 const deploymentPackage = {
   name: appName,
   version: appVersion,
   private: true,
   type: 'module',
+  engines: { node: '>=24 <25' },
   scripts: {
-    start: 'node server/index.mjs',
-    migrate: 'node server/migrate.mjs'
+    start: 'node server/start.mjs',
+    migrate: 'node server/migrate.mjs',
+    doctor: 'node server/doctor.mjs'
   }
 }
 const privatePageRouteRule = {
@@ -94,7 +100,7 @@ export default defineNuxtConfig({
     externals: {
       // This module lives outside server/, so Nitro otherwise emits a broken
       // relative import for it from .nuxt/dev on Windows.
-      inline: [databaseMigratorModule]
+      inline: [databaseMigratorModule, resolve('scripts/runtime-config.mjs')]
     },
     compressPublicAssets: {
       gzip: true,
@@ -108,7 +114,7 @@ export default defineNuxtConfig({
             resolve(nitro.options.output.serverDir, 'db/migrations/postgresql'),
             { recursive: true, force: true }
           ),
-          ...databaseMigrationScripts.map(script => copyFile(
+          ...runtimeScripts.map(script => copyFile(
             resolve(script),
             resolve(nitro.options.output.serverDir, basename(script))
           ))

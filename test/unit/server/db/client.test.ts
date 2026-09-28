@@ -1,6 +1,6 @@
 import { existsSync, mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { join, resolve } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import {
   ensurePgliteDataDir,
@@ -32,9 +32,9 @@ describe('database client utilities', () => {
   })
 
   it('uses the fixed PGlite directory for blank overrides', () => {
-    expect(resolvePgliteDataDir()).toBe('.data/pglite')
-    expect(resolvePgliteDataDir('')).toBe('.data/pglite')
-    expect(resolvePgliteDataDir('   ')).toBe('.data/pglite')
+    expect(resolvePgliteDataDir()).toBe(resolve('.data/pglite'))
+    expect(resolvePgliteDataDir('')).toBe(resolve('.data/pglite'))
+    expect(resolvePgliteDataDir('   ')).toBe(resolve('.data/pglite'))
     expect(resolvePgliteDataDir(' custom/pglite ')).toBe('custom/pglite')
   })
 

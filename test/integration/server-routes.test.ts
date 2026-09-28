@@ -52,6 +52,7 @@ await setup({
     NITRO_HOST: '127.0.0.1',
     NITRO_PORT: String(serverPort),
     DATABASE_URL: '',
+    PLATFORM_DATA_DIR: join(testWorkingDirectory, '.data'),
     DB_AUTO_MIGRATE: 'true',
     NUXT_AUTH_SECRET: 'integration-auth-secret-with-32-bytes',
     NUXT_API_KEY_SECRET: '0123456789abcdef0123456789abcdef'

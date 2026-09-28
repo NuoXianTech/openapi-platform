@@ -50,19 +50,33 @@ OpenAPI Platform 是一个自托管的 API 发布、访问控制、调用统计�
 | `DATABASE_URL` | 可选 | PostgreSQL 连接地址。 |
 | `NITRO_HOST`、`NITRO_PORT` | 可选 | Node 服务监听地址和端口。 |
 
-配置 `DATABASE_URL` 时使用 PostgreSQL；未配置或留空时自动使用 PGlite。PGlite 始终使用固定的 `.data/pglite` 目录，只允许一个 Node 进程访问，生产环境必须保证该目录持久化并纳入备份。Redis 可在 `NUXT_REDIS_URL` 留空时不启用；一旦配置 Redis，协调相关操作会在 Redis 不可用时 fail-closed。完整语义和安全边界见[运行时配置](docs/operations/runtime-config.md)。
+配置 `DATABASE_URL` 时使用 PostgreSQL；未配置或留空时自动使用 PGlite。默认数据位置为项目根目录的 `.data/pglite`，可用 `PLATFORM_DATA_DIR` 指定持久化数据根目录。PGlite 只允许一个 Node 进程访问。Redis 可在 `NUXT_REDIS_URL` 留空时不启用；一旦配置 Redis，协调相关操作会在 Redis 不可用时 fail-closed。完整语义见[运行时配置](docs/operations/runtime-config.md)。
 
 ## 快速开始
 
 ### 本地开发
 
+准备 Node.js 24 和项目指定版本的 pnpm，安装依赖并配置环境变量后启动：
+
 ```bash
 git clone https://github.com/NuoXianTech/openapi-platform.git
 cd openapi-platform
-pnpm install
+pnpm install --frozen-lockfile
 cp .env.example .env
+# 在 .env 中填写自己的 NUXT_AUTH_SECRET 和 NUXT_API_KEY_SECRET
 pnpm dev
 ```
+
+配置和密钥由你管理，启动命令只读取和校验，不生成或改写。后续使用：
+
+```bash
+pnpm dev          # 日常开发
+pnpm build        # 只构建，不连接数据库或要求运行密钥
+pnpm start        # 读取 .env，自动迁移并运行已有构建
+pnpm run doctor   # 检查配置、依赖、数据目录、端口和就绪状态
+```
+
+Node.js、pnpm、依赖安装与环境变量均由你准备。`dev`、`build`、`preview` 使用 Nuxt 原生命令；本地预览运行 `pnpm preview`。项目的 `start` 额外提供只读配置加载和启动检查，随后运行 Nitro 官方入口。详细规则见[本地启动与诊断](docs/operations/local-startup.md)。
 
 ### Docker 运行
 

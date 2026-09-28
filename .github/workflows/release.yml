@@ -91,7 +91,7 @@ jobs:
         run: pnpm check:dead-code
 
       - name: Run unit tests
-        run: pnpm test:unit
+        run: pnpm test
 
       - name: Check out API Service main
         uses: actions/checkout@v7
@@ -118,7 +118,7 @@ jobs:
         run: pnpm build
 
       - name: Run integration tests
-        run: pnpm test:integration:built
+        run: pnpm test:integration
 
       - name: Package application
         shell: bash
@@ -154,6 +154,10 @@ jobs:
           tar -tzf "release/${archive_name}" > "$contents_file"
           grep -Fxq "${package_name}/package.json" "$contents_file"
           grep -Fxq "${package_name}/server/index.mjs" "$contents_file"
+          grep -Fxq "${package_name}/server/start.mjs" "$contents_file"
+          grep -Fxq "${package_name}/server/doctor.mjs" "$contents_file"
+          grep -Fxq "${package_name}/server/runtime-config.mjs" "$contents_file"
+          grep -Fxq "${package_name}/server/runtime-checks.mjs" "$contents_file"
           grep -Fxq "${package_name}/server/migrate.mjs" "$contents_file"
           grep -Fxq "${package_name}/server/database-migrator.mjs" "$contents_file"
           grep -Fxq "${package_name}/server/db/migrations/postgresql/meta/_journal.json" "$contents_file"
@@ -168,7 +172,7 @@ jobs:
           PACKAGE_JSON="${RUNNER_TEMP}/${package_name}/package.json" node -e '
             const { readFileSync } = require("node:fs")
             const packageJson = JSON.parse(readFileSync(process.env.PACKAGE_JSON, "utf8"))
-            if (packageJson.scripts?.start !== "node server/index.mjs" || packageJson.scripts?.migrate !== "node server/migrate.mjs") {
+            if (packageJson.scripts?.start !== "node server/start.mjs" || packageJson.scripts?.migrate !== "node server/migrate.mjs" || packageJson.scripts?.doctor !== "node server/doctor.mjs") {
               throw new Error("Release package has invalid runtime scripts.")
             }
           '

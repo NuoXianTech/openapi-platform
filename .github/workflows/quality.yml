@@ -135,7 +135,7 @@ jobs:
         run: pnpm check:dead-code
 
       - name: Run unit test suite
-        run: pnpm test:unit
+        run: pnpm test
 
       - name: Check out API Service main
         uses: actions/checkout@v7
@@ -162,7 +162,7 @@ jobs:
         run: pnpm build
 
       - name: Run integration test suite
-        run: pnpm test:integration:built
+        run: pnpm test:integration
 
       - name: Publish validation summary
         if: success()

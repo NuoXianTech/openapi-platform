@@ -1,4 +1,4 @@
-import { access, mkdtemp, readFile, rm } from 'node:fs/promises'
+import { access, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { spawn } from 'node:child_process'
@@ -12,6 +12,8 @@ const deploymentPackagePath = resolve(projectRoot, '.output/package.json')
 const artifactRunner = resolve(projectRoot, '.output/server/migrate.mjs')
 const migrationsDir = resolve(projectRoot, '.output/server/db/migrations/postgresql')
 const pgliteDataDir = join(testWorkingDirectory, '.data', 'pglite')
+const envFile = join(testWorkingDirectory, '.env')
+await writeFile(envFile, 'DATABASE_URL=\n')
 
 afterAll(() => rm(testWorkingDirectory, { recursive: true, force: true }))
 
@@ -22,6 +24,8 @@ function runArtifactMigration() {
       env: {
         ...process.env,
         DATABASE_URL: '',
+        PLATFORM_ENV_FILE: envFile,
+        PLATFORM_DATA_DIR: join(testWorkingDirectory, '.data'),
         MIGRATIONS_DIR: '',
         NODE_ENV: 'production',
         TZ: 'UTC'
@@ -58,9 +62,11 @@ describe('built deployment artifact', () => {
       version: sourcePackage.version,
       private: true,
       type: 'module',
+      engines: { node: '>=24 <25' },
       scripts: {
-        start: 'node server/index.mjs',
-        migrate: 'node server/migrate.mjs'
+        start: 'node server/start.mjs',
+        migrate: 'node server/migrate.mjs',
+        doctor: 'node server/doctor.mjs'
       }
     })
   })
@@ -68,6 +74,10 @@ describe('built deployment artifact', () => {
   it('ships and applies the exact migration set from .output', async () => {
     await Promise.all([
       access(artifactRunner),
+      access(resolve(projectRoot, '.output/server/start.mjs')),
+      access(resolve(projectRoot, '.output/server/doctor.mjs')),
+      access(resolve(projectRoot, '.output/server/runtime-config.mjs')),
+      access(resolve(projectRoot, '.output/server/runtime-checks.mjs')),
       access(resolve(process.cwd(), '.output/server/database-migrator.mjs')),
       access(resolve(migrationsDir, 'meta/_journal.json'))
     ])

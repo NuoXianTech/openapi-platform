@@ -6,6 +6,9 @@ import { migrate as migratePglite } from 'drizzle-orm/pglite/migrator'
 import { drizzle as drizzlePostgres } from 'drizzle-orm/postgres-js'
 import { migrate as migratePostgres } from 'drizzle-orm/postgres-js/migrator'
 import postgres from 'postgres'
+import { resolvePgliteDataDir } from './runtime-config.mjs'
+
+export { resolvePgliteDataDir }
 
 // Nitro may inline this module and rewrite import.meta.url to file:///_entry.js,
 // which is not a valid absolute file URL on Windows. The executable entry and
@@ -135,12 +138,6 @@ function resolveMigrationsFolder(configuredDirectory) {
   }
 
   throw new Error(`Cannot find bundled database migrations. Tried:\n${candidates.join('\n')}`)
-}
-
-const DEFAULT_PGLITE_DATA_DIR = '.data/pglite'
-
-export function resolvePgliteDataDir(dataDir) {
-  return dataDir?.trim() || DEFAULT_PGLITE_DATA_DIR
 }
 
 function resolveDatabaseConfig(options) {

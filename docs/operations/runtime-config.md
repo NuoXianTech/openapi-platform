@@ -1,6 +1,6 @@
 # 运行时配置
 
-本项目按 Nuxt 官方 runtimeConfig 范式管理生产配置。生产密钥只允许在运行时通过环境变量注入，不允许写入源码、文档、镜像层或构建产物。
+本项目按 Nuxt 官方 runtimeConfig 范式管理生产配置。配置和密钥由部署者管理；启动命令在运行时只读取 `.env` 并补充环境变量，已存在的进程环境变量优先，不生成或改写配置。密钥不进入源码、镜像层或构建产物。诊断使用 `pnpm run doctor`，完整流程见[本地启动与诊断](./local-startup.md)。
 
 ## 基本原则
 
@@ -28,7 +28,9 @@
 | `NODE_ENV` | `production` | 让 Nuxt、Vue Router 和相关依赖使用生产分支，减少开发警告和日志噪声 |
 | `TZ` | `Asia/Shanghai` | 统一日志、统计、运维时间以及数据库迁移中的自然日转换 |
 | `DATABASE_POOL_SIZE` | `10` | `postgres-js` 连接池上限，启动迁移会单独使用 `max=1` 的连接 |
-| `DATABASE_URL` | 留空 | 非空时使用 PostgreSQL；留空或未配置时自动使用固定目录 `.data/pglite` |
+| `DATABASE_URL` | 留空 | 非空时使用 PostgreSQL；留空时使用 PGlite |
+| `PLATFORM_ENV_FILE` | 留空 | 默认根目录 `.env`；可指定其他文件，建议绝对路径；显式文件不存在时报错 |
+| `PLATFORM_DATA_DIR` | `.data` | 持久化数据根目录，PGlite 位于其 `pglite` 子目录；相对路径基于所选配置文件的目录 |
 | `DB_AUTO_MIGRATE` | 留空 | 默认启动时自动迁移；设置为 `false` 可临时跳过启动迁移 |
 | `MIGRATIONS_DIR` | 留空 | 仅迁移目录不在构建产物默认位置时设置；显式迁移和启动自动迁移共用该覆盖项 |
 | `NUXT_REDIS_URL` | 留空 | Redis 连接地址；配置后启用共享原子限流、公开短缓存和分布式协调，并在 Redis 不可用时 fail-closed |
@@ -87,7 +89,7 @@ Node API Service 的部署配置包含 `API_SERVICE_TOKEN`、独立的 `SERVICE_
 数据库建议：
 
 - PostgreSQL 适合常规生产、远程数据库、成熟备份和未来扩展。
-- PGlite 适合单进程、低运维成本、自包含的小型部署；它不是多实例共享数据库，固定使用 `.data/pglite`，生产时必须备份该目录。
+- PGlite 适合单进程、低运维成本、自包含的小型部署；它不是多实例共享数据库，默认使用 `.data/pglite`，生产时应配置稳定的 `PLATFORM_DATA_DIR` 并备份。
 - 未配置 `DATABASE_URL` 时自动使用 PGlite；生产部署必须确认 `.data/pglite` 已挂载到预期的持久化存储并纳入备份。
 
 ## 密钥生成
@@ -153,7 +155,7 @@ pm2 start server/index.mjs --name openapi-platform --update-env
 | 直接替换 `NUXT_API_KEY_SECRET` | `0.1.0` 不支持在线轮换；保持原值，或在停写、备份和专用重加密迁移下更换 |
 | Upstream Token 泄露 | 按 Service 文档进入维护窗口，保持 `SERVICE_CONFIG_KEY` 不变，替换 Service Token，再在对应 Upstream 更新加密 Token 并重新发现、同步配置 |
 | 生产监听公网端口 | `NITRO_HOST=127.0.0.1`，由 Nginx 代理公网流量 |
-| 数据库迁移误连 | PostgreSQL 发布前确认 `DATABASE_URL` 的主机、库名和用户；PGlite 发布前确认当前工作目录下的固定 `.data/pglite` |
+| 数据库迁移误连 | PostgreSQL 发布前确认 `DATABASE_URL` 的主机、库名和用户；PGlite 发布前用 `doctor` 核对配置文件及 `PLATFORM_DATA_DIR` 解析结果 |
 | 自动迁移误执行 | 维护窗口可临时设置 `DB_AUTO_MIGRATE=false`，手动确认后再恢复默认 |
 | Redis 故障后限流失效 | 配置 `NUXT_REDIS_URL` 后应用会 fail-closed，并监控 `/api/ready` |
 | Redis 故障后后台任务重复 | 配置 `NUXT_REDIS_URL` 后租约不可用时任务 fail-closed |

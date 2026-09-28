@@ -51,19 +51,33 @@ OpenAPI Platform is a self-hosted platform for API publishing, access control, u
 | `DATABASE_URL` | Optional | PostgreSQL connection URL. |
 | `NITRO_HOST`, `NITRO_PORT` | Optional | Node server listen address and port. |
 
-When `DATABASE_URL` is set, the Platform uses PostgreSQL; otherwise it automatically uses PGlite. PGlite always stores data in the fixed `.data/pglite` directory, which must be persistent and backed up in production. Redis is optional when `NUXT_REDIS_URL` is empty; once configured, Redis is required for coordinated operations. See [runtime configuration](docs/operations/runtime-config.md) for the complete behavior and security boundaries.
+When `DATABASE_URL` is set, the Platform uses PostgreSQL; otherwise it automatically uses PGlite. Data defaults to `.data/pglite` under the project root. Set `PLATFORM_DATA_DIR` to select a persistent data root, and back it up with the runtime secrets. Redis is optional when `NUXT_REDIS_URL` is empty; once configured, Redis is required for coordinated operations. See [runtime configuration](docs/operations/runtime-config.md).
 
 ## Quick start
 
 ### Local development
 
+Install Node.js 24 and the pinned pnpm version, install dependencies, configure your environment, and start development:
+
 ```bash
 git clone https://github.com/NuoXianTech/openapi-platform.git
 cd openapi-platform
-pnpm install
+pnpm install --frozen-lockfile
 cp .env.example .env
+# Set your own NUXT_AUTH_SECRET and NUXT_API_KEY_SECRET in .env
 pnpm dev
 ```
+
+Configuration and secrets remain under your control. Startup reads and validates them without generating or rewriting values. For daily use:
+
+```bash
+pnpm dev          # Development server
+pnpm build        # Build only; no runtime secrets or database required
+pnpm start        # Load .env, migrate automatically, and start the existing build
+pnpm run doctor   # Check configuration, dependencies, data paths, ports, and readiness
+```
+
+Node.js, pnpm, dependencies, and environment variables are prepared manually. `dev`, `build`, and `preview` use native Nuxt commands; use `pnpm preview` for local previews. The project-specific `start` adds read-only configuration loading and checks before running the official Nitro entry. See [local startup and diagnostics](docs/operations/local-startup.md).
 
 ### Docker
 

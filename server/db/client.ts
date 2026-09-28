@@ -5,6 +5,7 @@ import { drizzle as drizzlePostgres } from 'drizzle-orm/postgres-js'
 import { PGlite } from '@electric-sql/pglite'
 import { drizzle as drizzlePglite } from 'drizzle-orm/pglite'
 import * as schema from './schema'
+import { resolvePgliteDataDir as resolveDataDir } from '../../scripts/runtime-config.mjs'
 
 interface CreatePostgresClientOptions {
   max?: number
@@ -49,10 +50,8 @@ function createPostgresClient(options: CreatePostgresClientOptions = {}) {
   })
 }
 
-const DEFAULT_PGLITE_DATA_DIR = '.data/pglite'
-
 export function resolvePgliteDataDir(dataDir?: string): string {
-  return dataDir?.trim() || DEFAULT_PGLITE_DATA_DIR
+  return resolveDataDir(dataDir)
 }
 
 function isFilesystemPgliteDataDir(dataDir: string) {

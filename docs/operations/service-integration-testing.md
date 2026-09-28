@@ -147,7 +147,7 @@ Service 发现和配置同步包含网络调用。如果后续运行快照发布
 pnpm lint
 pnpm typecheck
 pnpm check:dead-code
-pnpm test:unit
+pnpm test
 pnpm test:api-service
 
 # openapi-service

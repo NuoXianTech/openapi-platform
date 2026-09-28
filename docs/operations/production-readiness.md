@@ -9,9 +9,9 @@ pnpm install --frozen-lockfile
 pnpm typecheck
 pnpm lint
 pnpm check:dead-code
-pnpm test:unit
+pnpm test
 pnpm build
-pnpm test:integration:built
+pnpm test:integration
 ```
 
 失败即停止发布。涉及公开 API、积分、鉴权、数据库 schema 或后台统计时，测试必须覆盖核心分支；暂未覆盖的风险要写进发布说明。

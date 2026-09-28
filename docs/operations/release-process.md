@@ -55,9 +55,9 @@ Git Tag 必须：
    pnpm lint
    pnpm typecheck
    pnpm check:dead-code
-   pnpm test:unit
+   pnpm test
    pnpm build
-   pnpm test:integration:built
+   pnpm test:integration
    ```
 
 7. 确认构建后集成测试已经实际执行 `.output/server/migrate.mjs`。

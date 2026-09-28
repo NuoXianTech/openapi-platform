@@ -1,7 +1,6 @@
 import { createCipheriv, createDecipheriv, createHmac, randomBytes } from 'node:crypto'
-import { decodeBase64Url } from '~~/server/utils/secure-token'
+import { parseApiKeySecret } from '../../scripts/runtime-config.mjs'
 
-const SECRET_BYTES = 32
 const ENCRYPTION_VERSION = 'v1'
 
 export type StoredSecretDomain
@@ -11,24 +10,6 @@ export type StoredSecretDomain
     | 'service-configuration'
 
 let cachedApiKeySecret: Buffer | null = null
-
-function parseApiKeySecret(raw: string): Buffer {
-  if (!raw) {
-    throw new Error('NUXT_API_KEY_SECRET is required')
-  }
-  if (/^[0-9a-fA-F]+$/.test(raw) && raw.length === SECRET_BYTES * 2) {
-    return Buffer.from(raw, 'hex')
-  }
-  const decoded = decodeBase64Url(raw)
-  if (decoded.length === SECRET_BYTES) {
-    return decoded
-  }
-  const utf8 = Buffer.from(raw, 'utf8')
-  if (utf8.length === SECRET_BYTES) {
-    return utf8
-  }
-  throw new Error(`NUXT_API_KEY_SECRET must be ${SECRET_BYTES} bytes (hex / base64url / utf-8)`)
-}
 
 export function getApiKeySecret(): Buffer {
   if (cachedApiKeySecret) return cachedApiKeySecret

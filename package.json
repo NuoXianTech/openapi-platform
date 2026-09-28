@@ -7,21 +7,18 @@
   "scripts": {
     "build": "nuxt build",
     "dev": "nuxt dev",
+    "doctor": "node scripts/doctor.mjs",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "node scripts/migrate.mjs",
     "preview": "nuxt preview",
-    "start": "node .output/server/index.mjs",
+    "start": "node scripts/start.mjs",
     "postinstall": "nuxt prepare",
     "typecheck": "nuxt typecheck",
     "lint": "eslint . --max-warnings 0",
-    "lint:fix": "eslint . --fix",
     "check:dead-code": "knip",
-    "test": "vitest",
-    "test:unit": "vitest run",
+    "test": "vitest run",
     "test:api-service": "vitest run --config vitest.api-service.config.ts",
-    "test:integration": "pnpm build && pnpm test:integration:built",
-    "test:integration:built": "vitest run --config vitest.integration.config.ts",
-    "test:run": "pnpm test:unit && pnpm test:integration"
+    "test:integration": "vitest run --config vitest.integration.config.ts"
   },
   "dependencies": {
     "@electric-sql/pglite": "0.5.8",
@@ -57,6 +54,9 @@
     "typescript-eslint": "8.70.1",
     "vitest": "^5.0.2",
     "vue-tsc": "^3.3.11"
+  },
+  "engines": {
+    "node": ">=24 <25"
   },
   "packageManager": "pnpm@11.20.0"
 }

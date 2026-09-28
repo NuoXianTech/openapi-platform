@@ -1,31 +1,20 @@
-import fs from 'node:fs'
-import path from 'node:path'
-import { fileURLToPath } from 'node:url'
-import { runDatabaseMigrations } from './database-migrator.mjs'
+import { assertSupportedNode, loadRuntimeEnvironment, resolveRuntimeRoot } from './runtime-config.mjs'
 
-const scriptDirectory = path.dirname(fileURLToPath(import.meta.url))
-
-function loadRuntimeEnv() {
-  const candidates = [
-    path.resolve(process.cwd(), '.env'),
-    path.resolve(scriptDirectory, '..', '.env'),
-    path.resolve(scriptDirectory, '..', '..', '.env')
-  ]
-
-  for (const candidate of [...new Set(candidates)]) {
-    if (!fs.existsSync(candidate)) continue
-
-    process.loadEnvFile(candidate)
-    console.log(`[db:migrate] Loaded environment from ${candidate}`)
-    return
-  }
-}
-
-loadRuntimeEnv()
-
+let migrationStarted = false
 try {
+  assertSupportedNode()
+  const root = resolveRuntimeRoot(import.meta.url)
+  const config = loadRuntimeEnvironment(root)
+  process.chdir(root)
+  console.log(`[db:migrate] Configuration: ${config.envFile}`)
+  const { runDatabaseMigrations } = await import('./database-migrator.mjs')
+  migrationStarted = true
   await runDatabaseMigrations()
 } catch (error) {
-  console.error('[db:migrate] Migration failed.', error)
+  // Driver errors can contain connection strings. The detailed driver code is
+  // useful without echoing an environment file's password into terminal logs.
+  if (migrationStarted) {
+    console.error('[db:migrate] Migration failed. Check configuration, data permissions and migration compatibility.', { code: error.code ?? 'MIGRATION_FAILED' })
+  } else console.error(`[db:migrate] ${error.message}`)
   process.exitCode = 1
 }
