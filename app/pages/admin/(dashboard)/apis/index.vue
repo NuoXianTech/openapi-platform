@@ -25,7 +25,8 @@ const {
   focusedUpstreamId,
   requiresDiscovery,
   handlePrimaryAction,
-  handleSettingsSaved,
+  settingsState,
+  saveSettings,
   loading,
   openEditRoute,
   refresh,
@@ -369,9 +370,11 @@ useHead({ title: () => t('admin.apis.routing.catalog.title') })
 
     <AdminPlatformEndpointSettingsModal
       v-if="editingRoute"
+      :key="editingRoute.route.id"
       v-model:open="routeModalOpen"
       :route-binding="editingRoute"
-      @saved="handleSettingsSaved"
+      :operation="settingsState(editingRoute.route.id)"
+      :save="saveSettings"
     />
   </div>
 </template>

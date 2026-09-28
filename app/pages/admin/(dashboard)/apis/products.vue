@@ -1,31 +1,19 @@
 <script setup lang="ts">
 import type { DropdownMenuItem, TableColumn } from '@nuxt/ui'
 import { PAGE_SIZE_OPTIONS } from '~/constants/pagination'
-import { usePrivatePagedList } from '~/composables/dashboard/use-private-paged-list'
+import { useAdminProductManagement } from '~/composables/admin/use-admin-product-management'
 import type { PlatformApiVersion, PlatformProduct } from '#shared/types/platform'
 import { parseFetchError } from '~/utils/client-error'
 import { formatPlatformDate, platformStatusColor } from '~/utils/platform-display'
 
 const { t, locale } = useI18n()
-const modalOpen = ref(false)
-const editingProduct = ref<PlatformProduct | null>(null)
-const versionModalOpen = ref(false)
-const versionProduct = ref<PlatformProduct | null>(null)
-const editingVersion = ref<PlatformApiVersion | null>(null)
-const toast = useToast()
-const confirm = useConfirmDialog()
+const {
+  resource, products, page, pageSize, total, controls,
+  modalOpen, editingProduct, versionModalOpen, versionProduct, editingVersion,
+  openEditProduct, openVersion, refresh, saveProduct, saveVersion, removeProduct, removeVersion
+} = useAdminProductManagement()
 
 useHead({ title: () => t('admin.apis.routing.sections.productsTitle') })
-
-const resource = usePrivatePagedList<Record<string, never>, PlatformProduct>({
-  path: '/api/admin/v1/products/paged',
-  defaultFilters: {},
-  defaultPageSize: PAGE_SIZE_OPTIONS[0]
-})
-const products = computed(() => resource.items.value)
-const page = resource.page
-const pageSize = resource.pageSize
-const total = resource.total
 
 const columns = computed<TableColumn<PlatformProduct>[]>(() => [
   { id: 'product', header: t('admin.apis.routing.columns.product') },
@@ -36,78 +24,18 @@ const columns = computed<TableColumn<PlatformProduct>[]>(() => [
   { id: 'actions', header: '' }
 ])
 
-function openEditProduct(product: PlatformProduct) {
-  editingProduct.value = product
-  modalOpen.value = true
-}
-
-function openVersion(product: PlatformProduct, version: PlatformApiVersion) {
-  versionProduct.value = product
-  editingVersion.value = version
-  versionModalOpen.value = true
-}
-
-async function refreshProducts() {
-  await resource.refresh()
-  if (versionProduct.value) {
-    versionProduct.value = products.value.find(item => item.id === versionProduct.value?.id) ?? null
-  }
-}
-
-async function removeProduct(product: PlatformProduct) {
-  await confirm({
-    title: t('admin.apis.routing.deleteProduct.title', { name: product.name }),
-    description: t('admin.apis.routing.deleteProduct.description'),
-    confirmColor: 'error',
-    onConfirm: async () => {
-      try {
-        await $fetch(
-          `/api/admin/v1/products/${product.id}`,
-          { method: 'DELETE' }
-        )
-        toast.add({ title: t('common.feedback.deleted'), color: 'success' })
-        await refreshProducts()
-      } catch (error: unknown) {
-        toast.add({ title: parseFetchError(error, t('common.feedback.deleteFailed')), color: 'error' })
-        throw error
-      }
-    }
-  })
-}
-
-async function removeVersion(product: PlatformProduct, version: PlatformApiVersion) {
-  await confirm({
-    title: t('admin.apis.routing.deleteVersion.title', { version: version.version }),
-    description: t('admin.apis.routing.deleteVersion.description'),
-    confirmColor: 'error',
-    onConfirm: async () => {
-      try {
-        await $fetch(
-          `/api/admin/v1/versions/${version.id}`,
-          { method: 'DELETE' }
-        )
-        toast.add({ title: t('common.feedback.deleted'), color: 'success' })
-        await refreshProducts()
-      } catch (error: unknown) {
-        toast.add({ title: parseFetchError(error, t('common.feedback.deleteFailed')), color: 'error' })
-        throw error
-      }
-    }
-  })
-}
-
 function productItems(product: PlatformProduct): DropdownMenuItem[][] {
   return [[
-    { label: t('common.actions.edit'), icon: 'i-lucide-pencil', onSelect: () => openEditProduct(product) }
+    { label: t('common.actions.edit'), icon: 'i-lucide-pencil', disabled: controls.value.disabled, onSelect: () => openEditProduct(product) }
   ], [
-    { label: t('common.actions.delete'), icon: 'i-lucide-trash-2', color: 'error', onSelect: () => removeProduct(product) }
+    { label: t('common.actions.delete'), icon: 'i-lucide-trash-2', color: 'error', disabled: controls.value.disabled, onSelect: () => removeProduct(product) }
   ]]
 }
 
 function versionItems(product: PlatformProduct, version: PlatformApiVersion): DropdownMenuItem[][] {
   return [[
-    { label: t('common.actions.edit'), icon: 'i-lucide-pencil', onSelect: () => openVersion(product, version) },
-    { label: t('common.actions.delete'), icon: 'i-lucide-trash-2', color: 'error', onSelect: () => removeVersion(product, version) }
+    { label: t('common.actions.edit'), icon: 'i-lucide-pencil', disabled: controls.value.disabled, onSelect: () => openVersion(product, version) },
+    { label: t('common.actions.delete'), icon: 'i-lucide-trash-2', color: 'error', disabled: controls.value.disabled, onSelect: () => removeVersion(product, version) }
   ]]
 }
 </script>
@@ -127,7 +55,8 @@ function versionItems(product: PlatformProduct, version: PlatformApiVersion): Dr
           color="error"
           variant="soft"
           size="xs"
-          @click="resource.refresh"
+          :disabled="controls.refreshDisabled"
+          @click="refresh"
         >
           {{ $t('common.actions.retry') }}
         </UButton>
@@ -146,7 +75,8 @@ function versionItems(product: PlatformProduct, version: PlatformApiVersion): Dr
           variant="outline"
           icon="i-lucide-refresh-cw"
           :loading="resource.loading.value"
-          @click="resource.refresh"
+          :disabled="controls.refreshDisabled"
+          @click="refresh"
         >
           {{ $t('common.actions.refresh') }}
         </UButton>
@@ -235,16 +165,22 @@ function versionItems(product: PlatformProduct, version: PlatformApiVersion): Dr
 
     <AdminPlatformProductModal
       v-if="editingProduct"
+      :key="editingProduct.id"
       v-model:open="modalOpen"
       :product="editingProduct"
-      @saved="refreshProducts"
+      :saving="controls.savingProduct"
+      :disabled="controls.disabled"
+      :save="saveProduct"
     />
     <AdminPlatformVersionModal
       v-if="versionProduct && editingVersion"
+      :key="editingVersion.id"
       v-model:open="versionModalOpen"
       :product="versionProduct"
       :version="editingVersion"
-      @saved="refreshProducts"
+      :saving="controls.savingVersion"
+      :disabled="controls.disabled"
+      :save="saveVersion"
     />
   </div>
 </template>

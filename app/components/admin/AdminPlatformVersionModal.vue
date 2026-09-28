@@ -2,17 +2,17 @@
 import type { FormSubmitEvent } from '@nuxt/ui'
 import type { PlatformApiVersion, PlatformProduct } from '#shared/types/platform'
 import { adminModalUi } from '~/utils/admin-modal-ui'
-import { parseFetchError } from '~/utils/client-error'
+import type { VersionFormValues } from '~/composables/admin/use-admin-product-management'
 
 const open = defineModel<boolean>('open', { default: false })
 const props = defineProps<{
   product: PlatformProduct
   version: PlatformApiVersion
+  saving: boolean
+  disabled: boolean
+  save: (values: VersionFormValues) => Promise<boolean>
 }>()
-const emit = defineEmits<{ saved: [] }>()
 const { t } = useI18n()
-const toast = useToast()
-const loading = ref(false)
 const state = reactive({
   state: props.version.state,
   changelog: props.version.changelog
@@ -33,30 +33,8 @@ watch(open, (value) => {
   })
 })
 
-async function submit(event: FormSubmitEvent<typeof state>) {
-  loading.value = true
-  try {
-    await $fetch<PlatformApiVersion>(
-      `/api/admin/v1/versions/${props.version.id}`,
-      {
-        method: 'PATCH',
-        body: {
-          state: event.data.state,
-          changelog: event.data.changelog.trim()
-        }
-      }
-    )
-    toast.add({
-      title: t('admin.apis.routing.feedback.versionUpdated'),
-      color: 'success'
-    })
-    open.value = false
-    emit('saved')
-  } catch (error) {
-    toast.add({ title: parseFetchError(error, t('common.feedback.operationFailed')), color: 'error' })
-  } finally {
-    loading.value = false
-  }
+async function submit(event: FormSubmitEvent<VersionFormValues>) {
+  if (!props.disabled) await props.save(event.data)
 }
 </script>
 
@@ -65,7 +43,7 @@ async function submit(event: FormSubmitEvent<typeof state>) {
     v-model:open="open"
     :title="$t('admin.apis.routing.versionForm.editTitle')"
     :description="$t('admin.apis.routing.versionForm.description', { product: product.name })"
-    :dismissible="!loading"
+    :dismissible="!saving"
     :ui="adminModalUi({ content: 'sm:max-w-xl' })"
   >
     <template #body>
@@ -98,7 +76,7 @@ async function submit(event: FormSubmitEvent<typeof state>) {
         <UButton
           color="neutral"
           variant="outline"
-          :disabled="loading"
+          :disabled="saving"
           @click="open = false"
         >
           {{ $t('common.actions.cancel') }}
@@ -106,7 +84,8 @@ async function submit(event: FormSubmitEvent<typeof state>) {
         <UButton
           type="submit"
           form="platform-version-form"
-          :loading="loading"
+          :loading="saving"
+          :disabled="disabled"
         >
           {{ $t('common.actions.save') }}
         </UButton>

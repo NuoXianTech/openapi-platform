@@ -78,6 +78,20 @@ Service 的标准流程是：
 
 接口分组页维护名称、说明、可见性与生命周期，版本设置维护发布状态和变更说明。自动复用分组及版本时保留这些设置；已退役的分组或版本必须先显式恢复为可发布状态，才能继续发布接口。
 
+管理台 Endpoint 快捷变更与高级设置保存统一进入
+`app/composables/admin/use-admin-endpoint-catalog-operations.ts`。高级设置弹窗只管理草稿和校验；
+执行前按当前目录重新检查 Route 与操作准入，保存期间纳入目录占用，反馈关联到同一 Endpoint。
+保存后的读取失败单独呈现，不将已成功的变更改报失败；离开页面后忽略旧保存响应。
+
+Product / Version 的编辑上下文、保存、删除确认和列表刷新由
+`app/composables/admin/use-admin-product-management.ts` 管理。确认期间保留操作占用，失败可在原确认中重试；
+成功读取后重新定位 Product 和 Version，读取失败保留编辑上下文。表单草稿与校验留在各自弹窗。
+
+默认域名保存与历史 Routing Revision 激活由
+`app/composables/admin/use-admin-runtime-management.ts` 协调准入、确认、反馈和双资源刷新。
+刷新不覆盖未提交的域名草稿，保存成功也不清除请求期间继续输入的内容。
+这两类管理模块均区分变更结果和刷新错误，卸载后不再使用旧请求结果或确认回调发起后续操作。
+
 Revision 是 Gateway 的安全运行边界，不是管理员必须手工编排的日常步骤。生成 Revision 时 Platform：
 
 1. 读取全部可发布配置。

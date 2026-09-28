@@ -1,4 +1,4 @@
-import type { Ref } from 'vue'
+import { onScopeDispose, type Ref } from 'vue'
 import type {
   PlatformEndpointCatalog,
   PlatformEndpointCatalogItem,
@@ -50,6 +50,8 @@ export function useAdminEndpointCatalogOperations(options: {
   const { catalog, visibleServices, canApply, refresh } = options
   const { t } = useI18n()
   const confirm = useConfirmDialog()
+  const disposed = ref(false)
+  onScopeDispose(() => { disposed.value = true })
   const applying = ref(false)
   const discoveringAll = ref(false)
   const discoveringServices = ref(new Set<string>())
@@ -63,7 +65,7 @@ export function useAdminEndpointCatalogOperations(options: {
   const bulkFeedback = ref<EndpointFeedback | null>(null)
   const bulkProgress = ref({ completed: 0, total: 0 })
   const selectedKeys = ref(new Set<string>())
-  const busy = computed(() => applying.value || discoveringAll.value || bulkRunning.value
+  const busy = computed(() => disposed.value || applying.value || discoveringAll.value || bulkRunning.value
     || discoveringServices.value.size > 0 || runningEndpoints.value.size > 0)
   const serviceUpstreams = computed(() => catalog.value.services
     .map(service => service.upstream).filter(upstream => upstream.status === 'active'))
@@ -125,7 +127,7 @@ export function useAdminEndpointCatalogOperations(options: {
     const identity = endpointIdentity(item)
     const loading = runningEndpoints.value.has(identity)
     // Discovery may overlap endpoint changes, as in the existing catalog UI.
-    const blocked = loading || applying.value || bulkRunning.value
+    const blocked = disposed.value || loading || applying.value || bulkRunning.value
     return {
       loading,
       primaryDisabled: !selectable(item) || (!item.route && !item.endpoint) || blocked,
@@ -282,15 +284,17 @@ export function useAdminEndpointCatalogOperations(options: {
     endpointResults.value.delete(identity)
     try {
       const result = await mutate()
+      if (disposed.value) return 'failed'
       const outcome = showPublicationResult(item, result, successKey)
-      if (refreshAfter) await refresh()
-      return outcome
+      if (refreshAfter) await refreshAfterPublication()
+      return disposed.value ? 'failed' : outcome
     } catch (error: unknown) {
+      if (disposed.value) return 'failed'
       endpointResults.value.set(identity, {
         pending: false,
         feedback: { message: parseFetchError(error, t(failureKey)), color: 'error' }
       })
-      if (refreshAfter) await refresh()
+      if (refreshAfter) await refreshAfterPublication()
       return 'failed'
     } finally {
       runningEndpoints.value.delete(identity)
@@ -395,11 +399,33 @@ export function useAdminEndpointCatalogOperations(options: {
     }
   }
 
-  async function handleSettingsSaved(result: PlatformEndpointPublicationResult) {
-    catalogFeedback.value = null
-    const item = catalog.value.services.flatMap(service => service.endpoints).find(item => item.route?.route.id === result.route.id)
-    if (item) showPublicationResult(item, result, 'admin.apis.routing.feedback.routeUpdated')
-    await refresh()
+  async function refreshAfterPublication() {
+    if (disposed.value) return
+    try {
+      await refresh()
+    } catch (error: unknown) {
+      if (!disposed.value) catalogFeedback.value = { message: parseFetchError(error, t('common.feedback.loadFailed')), color: 'error' }
+    }
+  }
+
+  function findRoute(routeId: string) {
+    return catalog.value.services.flatMap(service => service.endpoints).find(item => item.route?.route.id === routeId)
+  }
+
+  function settingsState(routeId: string) {
+    const item = findRoute(routeId)
+    const state = item ? endpointState(item) : null
+    return {
+      loading: state?.loading ?? false,
+      disabled: state?.editDisabled ?? true,
+      error: state?.feedback?.color === 'error' ? state.feedback.message : null
+    }
+  }
+
+  async function saveSettings(routeId: string, patch: PlatformEndpointPublicationPatch) {
+    const item = findRoute(routeId)
+    if (!item || endpointState(item).editDisabled) return false
+    return await updatePublication(item, patch, 'admin.apis.routing.feedback.routeUpdated') !== 'failed'
   }
 
   return {
@@ -423,6 +449,7 @@ export function useAdminEndpointCatalogOperations(options: {
     toggleStatistics,
     toggleApiKey,
     bulkSetEnabled,
-    handleSettingsSaved
+    settingsState,
+    saveSettings
   }
 }

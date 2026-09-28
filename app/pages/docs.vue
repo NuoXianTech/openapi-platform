@@ -180,8 +180,9 @@ useSeoMeta({
               :items-per-page="pageSize"
               :total="total"
               :sibling-count="1"
+              show-edges
               size="sm"
-              :ui="{ first: 'hidden sm:flex', last: 'hidden sm:flex' }"
+              :ui="{ first: 'hidden', last: 'hidden', list: 'gap-0.5 sm:gap-1' }"
               @update:page="handlePageChange"
             />
           </nav>

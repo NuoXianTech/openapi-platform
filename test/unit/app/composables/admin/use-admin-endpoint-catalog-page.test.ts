@@ -82,6 +82,89 @@ afterEach(() => {
 })
 
 describe('endpoint selection and feedback', () => {
+  it('holds advanced settings admission through refresh and blocks apply, batch and duplicate saves', async () => {
+    const item = endpoint('one', 'live')
+    const { page, catalog } = setup([item])
+    catalog.value.totals.pending = 1
+    page.selectAllEndpoints(true)
+    const pending = deferred<PlatformEndpointPublicationResult>()
+    const reading = deferred<undefined>()
+    fetchMock.mockReturnValueOnce(pending.promise)
+    refreshCatalog.mockReturnValueOnce(reading.promise)
+    const operation = page.saveSettings('one', { name: 'Edited', creditsCost: 5, isApiKey: true, isStatistics: true })
+    expect(page.settingsState('one')).toMatchObject({ loading: true, disabled: true })
+    await page.saveSettings('one', { name: 'Duplicate' })
+    await page.applyChanges()
+    await page.bulkSetEnabled(false)
+    await page.toggleStatistics(item)
+    expect(fetchMock).toHaveBeenCalledOnce()
+    expect(fetchMock.mock.calls[0]).toEqual(['/api/admin/v1/service-endpoints/one', {
+      method: 'PATCH', body: { name: 'Edited', creditsCost: 5, isApiKey: true, isStatistics: true }
+    }])
+    pending.resolve({ route: { id: 'one' }, revision: null } as PlatformEndpointPublicationResult)
+    await vi.waitFor(() => expect(refreshCatalog).toHaveBeenCalledOnce())
+    expect(page.settingsState('one').loading).toBe(true)
+    reading.resolve(undefined)
+    await expect(operation).resolves.toBe(true)
+    expect(page.settingsState('one').disabled).toBe(false)
+  })
+
+  it('rechecks settings admission when apply starts after opening the editor', async () => {
+    const item = endpoint('one', 'live')
+    const { page, catalog } = setup([item])
+    page.openEditRoute(item)
+    catalog.value.totals.pending = 1
+    const pending = deferred<{ revision: { id: string } }>()
+    fetchMock.mockReturnValueOnce(pending.promise)
+    const applying = page.applyChanges()
+    await expect(page.saveSettings('one', { name: 'Edited' })).resolves.toBe(false)
+    expect(fetchMock).toHaveBeenCalledOnce()
+    pending.resolve({ revision: { id: 'revision-2' } })
+    await applying
+  })
+
+  it('permits paid advanced settings and refuses a route removed since the editor opened', async () => {
+    const item = endpoint('one', 'live')
+    item.route!.route.creditsCost = 5
+    const { page, catalog } = setup([item])
+    await expect(page.saveSettings('one', { creditsCost: 10 })).resolves.toBe(true)
+    catalog.value.services[0]!.endpoints = []
+    expect(page.settingsState('one').disabled).toBe(true)
+    await expect(page.saveSettings('one', { creditsCost: 0 })).resolves.toBe(false)
+    expect(fetchMock).toHaveBeenCalledOnce()
+  })
+
+  it('keeps failed settings open for retry and clears the error on the next attempt', async () => {
+    const { page } = setup([endpoint('one', 'live')])
+    fetchMock.mockRejectedValueOnce({ data: { message: 'rejected' } })
+    await expect(page.saveSettings('one', { name: 'Edited' })).resolves.toBe(false)
+    expect(page.settingsState('one').error).toBe('rejected')
+    await expect(page.saveSettings('one', { name: 'Edited' })).resolves.toBe(true)
+    expect(page.settingsState('one').error).toBeNull()
+  })
+
+  it('does not convert saved settings to failure when refresh rejects', async () => {
+    const { page, rowState } = setup([endpoint('one', 'live')])
+    refreshCatalog.mockRejectedValueOnce(new Error('read failed'))
+    await expect(page.saveSettings('one', { name: 'Edited' })).resolves.toBe(true)
+    expect(rowState('one').feedback?.color).toBe('warning')
+    expect(page.catalogFeedback.value?.color).toBe('error')
+    expect(refreshCatalog).toHaveBeenCalledOnce()
+  })
+
+  it('ignores settings responses after disposal', async () => {
+    const { page, rowState } = setup([endpoint('one', 'live')])
+    const pending = deferred<PlatformEndpointPublicationResult>()
+    fetchMock.mockReturnValueOnce(pending.promise)
+    const saving = page.saveSettings('one', { name: 'Edited' })
+    scope.stop()
+    pending.resolve({ route: { id: 'one' }, revision: null } as PlatformEndpointPublicationResult)
+    await expect(saving).resolves.toBe(false)
+    expect(rowState('one').feedback).toBeUndefined()
+    expect(refreshCatalog).not.toHaveBeenCalled()
+    await expect(page.saveSettings('one', { name: 'Again' })).resolves.toBe(false)
+  })
+
   it('applies pending changes while another Service awaits address discovery', async () => {
     const { page, catalog } = setup([endpoint('one', 'pending')])
     catalog.value.totals.pending = 1
@@ -216,7 +299,7 @@ describe('endpoint selection and feedback', () => {
 
   it('shows saved settings on the endpoint row without a floating notification', async () => {
     const { page, rowState } = setup([endpoint('one', 'live')])
-    await page.handleSettingsSaved({ route: { id: 'one' }, revision: null } as PlatformEndpointPublicationResult)
+    await page.saveSettings('one', { name: 'Edited' })
     expect(rowState('one').feedback).toEqual({
       message: 'admin.apis.routing.catalog.feedback.savedPending', color: 'warning'
     })

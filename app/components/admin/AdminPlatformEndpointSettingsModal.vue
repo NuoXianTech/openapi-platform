@@ -1,8 +1,7 @@
 <script setup lang="ts">
 import type { FormError, FormSubmitEvent } from '@nuxt/ui'
-import type { PlatformEndpointPublicationResult, PlatformRouteBinding } from '#shared/types/platform'
+import type { PlatformEndpointPublicationPatch, PlatformRouteBinding } from '#shared/types/platform'
 import { adminModalUi } from '~/utils/admin-modal-ui'
-import { parseFetchError } from '~/utils/client-error'
 import { compactFormErrors, integerRangeError, maxLengthError, requiredTextError } from '~/utils/form-validation'
 import {
   createEndpointSettingsForm,
@@ -13,13 +12,14 @@ import {
 const open = defineModel<boolean>('open', { default: false })
 const props = defineProps<{
   routeBinding: PlatformRouteBinding
+  operation: { loading: boolean, disabled: boolean, error: string | null }
+  save: (routeId: string, patch: PlatformEndpointPublicationPatch) => Promise<boolean>
 }>()
-const emit = defineEmits<{ saved: [result: PlatformEndpointPublicationResult] }>()
 const { t } = useI18n()
 
 const state = reactive<EndpointSettingsForm>(createEndpointSettingsForm(props.routeBinding.route))
-const loading = ref(false)
-const error = ref<string | null>(null)
+const loading = computed(() => props.operation.loading)
+const error = computed(() => props.operation.error)
 const advancedOpen = ref(true)
 const catalogStatusItems = computed(() => [
   { label: t('admin.apis.routing.catalogStatuses.automatic'), value: 'automatic' },
@@ -30,7 +30,6 @@ watch(open, (isOpen) => {
   if (isOpen) {
     Object.assign(state, createEndpointSettingsForm(props.routeBinding.route))
     advancedOpen.value = true
-    error.value = null
   }
 })
 
@@ -63,19 +62,10 @@ function validateSettings(value: Partial<EndpointSettingsForm>): FormError<strin
 }
 
 async function onSubmit(event: FormSubmitEvent<EndpointSettingsForm>) {
-  loading.value = true
-  error.value = null
-  try {
-    const result = await $fetch<PlatformEndpointPublicationResult>(
-      `/api/admin/v1/service-endpoints/${props.routeBinding.route.id}`,
-      { method: 'PATCH', body: endpointSettingsPayload(event.data) }
-    )
+  if (props.operation.disabled) return
+  const routeId = props.routeBinding.route.id
+  if (await props.save(routeId, endpointSettingsPayload(event.data)) && props.routeBinding.route.id === routeId) {
     open.value = false
-    emit('saved', result)
-  } catch (cause: unknown) {
-    error.value = parseFetchError(cause, t('admin.apis.routing.feedback.updateFailed'))
-  } finally {
-    loading.value = false
   }
 }
 </script>
@@ -280,6 +270,7 @@ async function onSubmit(event: FormSubmitEvent<EndpointSettingsForm>) {
           type="submit"
           form="platform-endpoint-settings"
           :loading="loading"
+          :disabled="operation.disabled"
         >
           {{ $t('admin.apis.routing.actions.saveRoute') }}
         </UButton>

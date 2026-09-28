@@ -2,26 +2,19 @@
 import type { FormError, FormSubmitEvent } from '@nuxt/ui'
 import type { PlatformProductSummary } from '#shared/types/platform'
 import { adminModalUi } from '~/utils/admin-modal-ui'
-import { parseFetchError } from '~/utils/client-error'
+import type { ProductFormValues } from '~/composables/admin/use-admin-product-management'
 import { compactFormErrors, maxLengthError, requiredTextError } from '~/utils/form-validation'
 
 const open = defineModel<boolean>('open', { default: false })
 const props = defineProps<{
   product: PlatformProductSummary
+  saving: boolean
+  disabled: boolean
+  save: (values: ProductFormValues) => Promise<boolean>
 }>()
-const emit = defineEmits<{ saved: [] }>()
-const toast = useToast()
 const { t } = useI18n()
 
-interface ProductFormState {
-  name: string
-  summary: string
-  description: string
-  visibility: 'public' | 'private'
-  lifecycle: 'active' | 'deprecated' | 'retired'
-}
-
-function initialState(): ProductFormState {
+function initialState(): ProductFormValues {
   return {
     name: props.product.name,
     summary: props.product.summary,
@@ -31,8 +24,7 @@ function initialState(): ProductFormState {
   }
 }
 
-const state = reactive<ProductFormState>(initialState())
-const loading = ref(false)
+const state = reactive<ProductFormValues>(initialState())
 
 const visibilityItems = computed(() => [
   { label: t('admin.apis.routing.visibility.public'), value: 'public' },
@@ -48,7 +40,7 @@ watch(open, (isOpen) => {
   if (isOpen) Object.assign(state, initialState())
 })
 
-function validateProductForm(value: Partial<ProductFormState>): FormError<string>[] {
+function validateProductForm(value: Partial<ProductFormValues>): FormError<string>[] {
   return compactFormErrors(
     requiredTextError('name', value.name, t('admin.apis.routing.validation.nameRequired')),
     maxLengthError('name', value.name, 160, t('admin.apis.routing.validation.nameMaxLength')),
@@ -56,33 +48,8 @@ function validateProductForm(value: Partial<ProductFormState>): FormError<string
   )
 }
 
-async function onSubmit(event: FormSubmitEvent<ProductFormState>) {
-  loading.value = true
-  try {
-    await $fetch(
-      `/api/admin/v1/products/${props.product.id}`,
-      {
-        method: 'PATCH',
-        body: {
-          name: event.data.name.trim(),
-          summary: event.data.summary.trim(),
-          description: event.data.description.trim(),
-          visibility: event.data.visibility,
-          lifecycle: event.data.lifecycle
-        }
-      }
-    )
-    toast.add({
-      title: t('admin.apis.routing.feedback.productUpdated'),
-      color: 'success'
-    })
-    open.value = false
-    emit('saved')
-  } catch (error: unknown) {
-    toast.add({ title: parseFetchError(error, t('admin.apis.routing.feedback.updateFailed')), color: 'error' })
-  } finally {
-    loading.value = false
-  }
+async function onSubmit(event: FormSubmitEvent<ProductFormValues>) {
+  if (!props.disabled) await props.save(event.data)
 }
 </script>
 
@@ -91,7 +58,7 @@ async function onSubmit(event: FormSubmitEvent<ProductFormState>) {
     v-model:open="open"
     :title="$t('admin.apis.routing.productForm.editTitle')"
     :description="$t('admin.apis.routing.productForm.editDescription')"
-    :dismissible="!loading"
+    :dismissible="!saving"
     :ui="adminModalUi({ content: 'sm:max-w-2xl' })"
   >
     <template #body>
@@ -177,7 +144,7 @@ async function onSubmit(event: FormSubmitEvent<ProductFormState>) {
         <UButton
           color="neutral"
           variant="outline"
-          :disabled="loading"
+          :disabled="saving"
           @click="open = false"
         >
           {{ $t('common.actions.cancel') }}
@@ -185,7 +152,8 @@ async function onSubmit(event: FormSubmitEvent<ProductFormState>) {
         <UButton
           type="submit"
           form="platform-product-form"
-          :loading="loading"
+          :loading="saving"
+          :disabled="disabled"
         >
           {{ $t('common.actions.save') }}
         </UButton>

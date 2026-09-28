@@ -340,6 +340,9 @@ const detailDescription = computed(() => {
             :page="detailPage"
             :items-per-page="detailPageSize"
             :total="detailTotal"
+            :sibling-count="1"
+            show-edges
+            :ui="{ first: 'hidden', last: 'hidden', list: 'gap-0.5 sm:gap-1' }"
             size="sm"
             class="justify-center"
             @update:page="loadDetailPage"
