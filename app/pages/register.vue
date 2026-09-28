@@ -69,7 +69,6 @@ const fields = computed(() => [
     type: 'text' as const,
     label: t('auth.fields.username'),
     placeholder: t('auth.placeholders.username'),
-    help: t('auth.register.usernameHelp'),
     autocomplete: 'username',
     icon: 'i-mdi-account-outline',
     defaultValue: '',
