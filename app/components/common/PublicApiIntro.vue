@@ -1,8 +1,8 @@
 <script setup lang="ts">
 import { TransitionPresets, usePreferredReducedMotion, useTransition } from '@vueuse/core'
+import { I18nT } from 'vue-i18n'
 import ApiHttpMethodBadge from '~/components/api/HttpMethodBadge.vue'
 import { USER_OVERVIEW_PATH } from '~/constants/dashboard-config'
-import { formatCompactCount } from '~/utils/number-format'
 import {
   formatYiyanResponseExample,
   PUBLIC_API_EXAMPLE_TIMESTAMP
@@ -11,10 +11,8 @@ import {
 interface Props {
   siteDescription?: string
   uptimeDays?: number | null
-  totalCount?: number
+  showCallCount?: boolean
   callCount?: number
-  successRate?: number
-  userCount?: number
   summaryLoading?: boolean
   summaryError?: boolean
 }
@@ -22,10 +20,8 @@ interface Props {
 const props = withDefaults(defineProps<Props>(), {
   siteDescription: '',
   uptimeDays: null,
-  totalCount: 0,
+  showCallCount: true,
   callCount: 0,
-  successRate: 0,
-  userCount: 0,
   summaryLoading: false,
   summaryError: false
 })
@@ -36,97 +32,71 @@ const { registrationEnabled } = useSiteSettings()
 const { copyText } = useCopyFeedback()
 const requestUrl = useRequestURL()
 const preferredReducedMotion = usePreferredReducedMotion()
-const metricsMounted = ref(false)
+const isMounted = ref(false)
 const transitionDisabled = computed(() => preferredReducedMotion.value === 'reduce')
+const callCountTarget = ref(0)
+const isCallCountAnimating = ref(false)
+const animatedCallCount = useTransition(callCountTarget, {
+  duration: 900,
+  transition: TransitionPresets.easeOutCubic,
+  disabled: transitionDisabled,
+  onStarted: () => {
+    isCallCountAnimating.value = true
+  },
+  onFinished: () => {
+    isCallCountAnimating.value = false
+  }
+})
 
-function createAnimatedMetric() {
-  const target = ref(0)
-  const isAnimating = ref(false)
-  const value = useTransition(target, {
-    duration: 900,
-    transition: TransitionPresets.easeOutCubic,
-    disabled: transitionDisabled,
-    onStarted: () => {
-      isAnimating.value = true
-    },
-    onFinished: () => {
-      isAnimating.value = false
-    }
-  })
-
-  return { target, value, isAnimating }
-}
-
-const {
-  target: callCountTarget,
-  value: animatedCallCount,
-  isAnimating: isCallCountAnimating
-} = createAnimatedMetric()
-const {
-  target: totalCountTarget,
-  value: animatedTotalCount,
-  isAnimating: isTotalCountAnimating
-} = createAnimatedMetric()
-const {
-  target: successRateTarget,
-  value: animatedSuccessRate,
-  isAnimating: isSuccessRateAnimating
-} = createAnimatedMetric()
-const {
-  target: userCountTarget,
-  value: animatedUserCount,
-  isAnimating: isUserCountAnimating
-} = createAnimatedMetric()
-
-function syncAnimatedMetrics(): void {
+function syncAnimatedCallCount(): void {
+  if (!isMounted.value || !props.showCallCount || props.summaryLoading || props.summaryError) return
   callCountTarget.value = Math.max(0, props.callCount)
-  totalCountTarget.value = Math.max(0, props.totalCount)
-  successRateTarget.value = Math.min(100, Math.max(0, props.successRate))
-  userCountTarget.value = Math.max(0, props.userCount)
 }
 
 watch(
   [
     () => props.callCount,
-    () => props.totalCount,
-    () => props.successRate,
-    () => props.userCount,
+    () => props.showCallCount,
     () => props.summaryLoading,
     () => props.summaryError
   ],
-  () => {
-    if (!metricsMounted.value || props.summaryLoading || props.summaryError) return
-    syncAnimatedMetrics()
-  }
+  syncAnimatedCallCount
 )
 
 watch(preferredReducedMotion, (value) => {
   if (value !== 'reduce') return
   isCallCountAnimating.value = false
-  isTotalCountAnimating.value = false
-  isSuccessRateAnimating.value = false
-  isUserCountAnimating.value = false
 })
 
 const resolvedDescription = computed(() => props.siteDescription || t('public.home.defaultDescription'))
-const compactCallCount = computed(() => formatCompactCount(Math.round(animatedCallCount.value), locale.value))
-const animatedApiCount = computed(() => Math.round(animatedTotalCount.value))
-const compactUserCount = computed(() => formatCompactCount(Math.round(animatedUserCount.value), locale.value))
-const formattedSuccessRate = computed(() => props.callCount > 0
-  ? `${animatedSuccessRate.value.toLocaleString(locale.value, { maximumFractionDigits: 2 })}%`
-  : '--')
-const metricsStateLoading = computed(() => !metricsMounted.value || props.summaryLoading)
-const uptimeDuration = computed(() => {
+const callCountFormatter = computed(() => new Intl.NumberFormat(locale.value, {
+  notation: 'standard',
+  useGrouping: true,
+  maximumFractionDigits: 0
+}))
+const formattedCallCount = computed(() => callCountFormatter.value.format(Math.round(animatedCallCount.value)))
+const callCountLoading = computed(() => !isMounted.value || props.summaryLoading)
+const callCountLabel = computed(() => {
+  if (callCountLoading.value) return t('common.states.loading')
+  if (props.summaryError) return t('common.states.loadFailed')
+  return t('public.home.processedRequests', { count: callCountFormatter.value.format(props.callCount) })
+})
+const uptimeParts = computed<Intl.NumberFormatPart[]>(() => {
   const days = props.uptimeDays
-  if (days === null) return ''
-  if (days === 0) return t('public.home.uptimeLessThanDay')
+  if (days === null) return []
+  if (days === 0) return [{ type: 'literal', value: t('public.home.uptimeLessThanDay') }]
 
-  const duration = new Intl.NumberFormat(locale.value, {
+  const parts = new Intl.NumberFormat(locale.value, {
     style: 'unit',
     unit: 'day',
     unitDisplay: 'long'
-  }).format(days)
-  return duration
+  }).formatToParts(days)
+
+  const unitIndex = parts.findIndex(part => part.type === 'unit')
+  if (unitIndex > 0 && !/\s$/.test(parts[unitIndex - 1]?.value || '')) {
+    parts.splice(unitIndex, 0, { type: 'literal', value: ' ' })
+  }
+  return parts
 })
 const samplePath = '/v1/yiyan?type=a&id=a1'
 const sampleUrl = computed(() => `${requestUrl.origin}${samplePath}`)
@@ -154,8 +124,8 @@ function createSimulatedLatency(): number {
 }
 
 onMounted(() => {
-  metricsMounted.value = true
-  if (!props.summaryLoading && !props.summaryError) syncAnimatedMetrics()
+  isMounted.value = true
+  syncAnimatedCallCount()
 
   responseLatency.value = createSimulatedLatency()
   responseTimestamp.value = Date.now()
@@ -184,12 +154,47 @@ async function copyRequest(): Promise<void> {
 
     <div class="public-api-intro__layout">
       <div class="public-api-intro__content">
-        <div v-if="uptimeDuration" class="public-api-intro__status-row">
+        <div v-if="uptimeParts.length || showCallCount" class="public-api-intro__status-row">
           <div class="public-api-intro__status" role="status">
-            <UIcon name="i-mdi-clock-outline" class="size-3.5" />
-            <span>{{ $t('public.home.uptimeLabel') }}</span>
-            <span class="public-api-intro__status-separator" aria-hidden="true">·</span>
-            <strong>{{ uptimeDuration }}</strong>
+            <span v-if="uptimeParts.length" class="public-api-intro__uptime">
+              <UIcon name="i-mdi-clock-outline" class="public-api-intro__status-icon" aria-hidden="true" />
+              <span>{{ $t('public.home.uptimeLabel') }}</span>
+              <span class="public-api-intro__uptime-duration">
+                <template v-for="(part, index) in uptimeParts" :key="index">
+                  <strong v-if="part.type === 'integer' || part.type === 'group'" class="public-api-intro__uptime-value">{{ part.value }}</strong>
+                  <span v-else>{{ part.value }}</span>
+                </template>
+              </span>
+            </span>
+            <span
+              v-if="showCallCount"
+              class="public-api-intro__request-count"
+              role="group"
+              :aria-busy="callCountLoading"
+              :aria-label="callCountLabel"
+            >
+              <UIcon name="i-mdi-chart-line" class="public-api-intro__status-icon" aria-hidden="true" />
+              <I18nT
+                keypath="public.home.processedRequests"
+                tag="span"
+                scope="global"
+                class="public-api-intro__request-text"
+                aria-hidden="true"
+              >
+                <template #count>
+                  <span
+                    v-if="callCountLoading"
+                    class="dashboard-skeleton public-api-intro__count-skeleton"
+                  />
+                  <strong v-else-if="summaryError" :title="$t('common.states.loadFailed')">--</strong>
+                  <strong
+                    v-else
+                    class="public-api-intro__count-value"
+                    :class="{ 'is-updating': isCallCountAnimating }"
+                  >{{ formattedCallCount }}</strong>
+                </template>
+              </I18nT>
+            </span>
           </div>
         </div>
 
@@ -214,105 +219,6 @@ async function copyRequest(): Promise<void> {
           >
             {{ $t('public.navigation.catalog') }}
           </UButton>
-        </div>
-
-        <div
-          class="public-api-intro__metrics-shell"
-          :aria-busy="metricsStateLoading"
-        >
-          <dl class="public-api-intro__metrics">
-            <div>
-              <dt>{{ $t('public.home.totalCalls') }}</dt>
-              <dd
-                v-if="metricsStateLoading"
-                class="dashboard-skeleton public-api-intro__metric-skeleton"
-                aria-hidden="true"
-              />
-              <dd v-else-if="summaryError">
-                --
-              </dd>
-              <UTooltip
-                v-else
-                :text="callCount.toLocaleString(locale)"
-                :content="{ side: 'top' }"
-              >
-                <dd
-                  class="public-api-intro__metric-value"
-                  :class="{ 'is-updating': isCallCountAnimating }"
-                >
-                  {{ $t('public.home.callCountValue', { count: compactCallCount }) }}
-                </dd>
-              </UTooltip>
-            </div>
-            <div>
-              <dt>{{ $t('public.home.totalApis') }}</dt>
-              <dd
-                v-if="metricsStateLoading"
-                class="dashboard-skeleton public-api-intro__metric-skeleton"
-                aria-hidden="true"
-              />
-              <dd v-else-if="summaryError">
-                --
-              </dd>
-              <dd
-                v-else
-                class="public-api-intro__metric-value"
-                :class="{ 'is-updating': isTotalCountAnimating }"
-              >
-                {{ $t('public.home.apiCountValue', { count: animatedApiCount }) }}
-              </dd>
-            </div>
-            <div>
-              <dt>{{ $t('public.home.successRate') }}</dt>
-              <dd
-                v-if="metricsStateLoading"
-                class="dashboard-skeleton public-api-intro__metric-skeleton"
-                aria-hidden="true"
-              />
-              <dd v-else-if="summaryError">
-                --
-              </dd>
-              <dd
-                v-else
-                class="public-api-intro__metric-value"
-                :class="{ 'is-updating': isSuccessRateAnimating }"
-              >
-                {{ formattedSuccessRate }}
-              </dd>
-            </div>
-            <div>
-              <dt>{{ $t('public.home.developersServed') }}</dt>
-              <dd
-                v-if="metricsStateLoading"
-                class="dashboard-skeleton public-api-intro__metric-skeleton"
-                aria-hidden="true"
-              />
-              <dd v-else-if="summaryError">
-                --
-              </dd>
-              <UTooltip
-                v-else
-                :text="userCount.toLocaleString(locale)"
-                :content="{ side: 'top' }"
-              >
-                <dd
-                  class="public-api-intro__metric-value"
-                  :class="{ 'is-updating': isUserCountAnimating }"
-                >
-                  {{ $t('public.home.developerCountValue', { count: compactUserCount }) }}
-                </dd>
-              </UTooltip>
-            </div>
-          </dl>
-
-          <p
-            v-if="summaryError && !metricsStateLoading"
-            class="public-api-intro__metrics-error"
-            role="alert"
-          >
-            <UIcon name="i-mdi-alert-circle-outline" class="size-3.5" />
-            <span>{{ $t('common.states.loadFailed') }}</span>
-          </p>
         </div>
       </div>
 
@@ -398,26 +304,32 @@ async function copyRequest(): Promise<void> {
 
 .public-api-intro__status-row {
   display: flex;
-  flex-wrap: wrap;
-  gap: 0.5rem;
+  max-width: 100%;
 }
 
 .public-api-intro__status {
   display: inline-flex;
+  max-width: 100%;
   min-height: 1.75rem;
   align-items: center;
-  gap: 0.5rem;
+  flex-wrap: wrap;
+  gap: 0.375rem 0.875rem;
   border: 1px solid var(--ui-border);
-  border-radius: 999px;
-  padding: 0.25rem 0.75rem;
+  border-radius: 8px;
+  padding: 0.375rem 0.75rem;
   color: var(--ui-text-muted);
   background: var(--ui-bg-elevated);
   font-size: 0.75rem;
 }
 
-.public-api-intro__status .iconify { color: var(--ui-text-highlighted); }
-.public-api-intro__status-separator { color: var(--ui-text-dimmed); }
-.public-api-intro__status strong { color: var(--ui-text-highlighted); font: 650 0.75rem var(--font-code); }
+.public-api-intro__uptime,
+.public-api-intro__request-count { display: inline-flex; align-items: flex-start; gap: 0.375rem; }
+.public-api-intro__uptime { white-space: nowrap; }
+.public-api-intro__request-count { min-width: 0; max-width: 100%; }
+.public-api-intro__request-text { min-width: 0; overflow-wrap: anywhere; }
+.public-api-intro__status-icon { width: 0.875rem; height: 0.875rem; flex-shrink: 0; margin-top: 0.125rem; color: var(--ui-text-highlighted); }
+.public-api-intro__uptime-value { color: var(--ui-text-highlighted); font-weight: 650; font-variant-numeric: tabular-nums; }
+.public-api-intro__request-count strong { margin-inline: 0.2em; color: var(--ui-text-highlighted); font: 650 0.75rem var(--font-code); white-space: nowrap; }
 
 .public-api-intro__title {
   width: 100%;
@@ -446,41 +358,16 @@ async function copyRequest(): Promise<void> {
   margin-top: 1.75rem;
 }
 
-.public-api-intro__metrics-shell {
-  position: relative;
-  width: 100%;
-  min-height: 3.5rem;
-  margin-top: 2rem;
-}
+.public-api-intro__count-value { display: inline-block; transform-origin: left center; font-variant-numeric: tabular-nums; }
+.public-api-intro__count-value.is-updating { color: var(--ui-primary); animation: metric-tick 900ms cubic-bezier(0.22, 1, 0.36, 1); }
 
-.public-api-intro__metrics {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 2.5rem;
-  padding-top: 0.25rem;
-}
-
-.public-api-intro__metrics div { min-width: 4.5rem; }
-.public-api-intro__metrics dt { color: var(--ui-text-muted); font-size: 0.7rem; }
-.public-api-intro__metrics dd { margin-top: 0.25rem; color: var(--ui-text-highlighted); font: 650 1.05rem var(--font-code); }
-.public-api-intro__metric-value { display: inline-block; transform-origin: left center; font-variant-numeric: tabular-nums; }
-.public-api-intro__metric-value.is-updating { color: var(--ui-primary); animation: metric-tick 900ms cubic-bezier(0.22, 1, 0.36, 1); }
-
-.public-api-intro__metric-skeleton {
-  display: block;
-  width: 4.5rem;
-  height: 1.05rem;
-  margin-top: 0.45rem;
+.public-api-intro__count-skeleton {
+  display: inline-block;
+  width: 5rem;
+  height: 0.75rem;
+  margin-inline: 0.2em;
   border-radius: 4px;
-}
-
-.public-api-intro__metrics-error {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.375rem;
-  margin-top: 0.625rem;
-  color: var(--ui-error);
-  font-size: 0.75rem;
+  vertical-align: middle;
 }
 
 .api-request-demo {
@@ -535,14 +422,12 @@ async function copyRequest(): Promise<void> {
   .public-api-intro__status-row + .public-api-intro__title { margin-top: 1.25rem; }
   .public-api-intro__description { margin-top: 1rem; font-size: 0.875rem; line-height: 1.65; }
   .public-api-intro__actions { margin-top: 1.35rem; }
-  .public-api-intro__metrics-shell { margin-top: 1.5rem; }
-  .public-api-intro__metrics { width: 100%; justify-content: space-between; gap: 1rem; }
   .api-request-demo { box-shadow: 0 0 0 8px var(--ui-bg-muted); }
   .api-request-demo pre { height: 12rem; }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .public-api-intro__metric-value.is-updating { animation: none; }
+  .public-api-intro__count-value.is-updating { animation: none; }
 }
 
 @keyframes metric-tick {

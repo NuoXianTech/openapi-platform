@@ -12,6 +12,7 @@
       "introTitle": "Reliable, straightforward public APIs, ready to use",
       "uptimeLabel": "Platform uptime",
       "uptimeLessThanDay": "Less than a day",
+      "processedRequests": "Processed {count} API requests",
       "catalogDescription": "Find APIs by capability, status, and access cost, then inspect the request contract.",
       "popularKicker": "MOST USED",
       "popularTitle": "Popular APIs",

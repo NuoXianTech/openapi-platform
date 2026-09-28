@@ -11,6 +11,7 @@ const basicInformationKeys = [
   'siteUrl',
   'siteImg',
   'startTime',
+  'homeRequestCountEnabled',
   'termsUrl',
   'privacyUrl',
   'icpBeian',
@@ -128,6 +129,15 @@ const fixedTimeInvalid = computed(() => {
           :placeholder="t('admin.system.site.basic.startTime.placeholder')"
           class="w-full sm:w-72"
         />
+      </UFormField>
+      <USeparator />
+      <UFormField
+        name="homeRequestCountEnabled"
+        :label="t('admin.system.site.basic.homeRequestCount.label')"
+        :description="t('admin.system.site.basic.homeRequestCount.description')"
+        class="flex max-sm:flex-col justify-between items-start gap-4"
+      >
+        <USwitch v-model="form.homeRequestCountEnabled" />
       </UFormField>
       <USeparator />
       <UFormField

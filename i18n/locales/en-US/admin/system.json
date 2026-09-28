@@ -30,6 +30,10 @@
             "description": "Optional. When set, the home page displays the service uptime.",
             "placeholder": "Select launch time"
           },
+          "homeRequestCount": {
+            "label": "Home page request count",
+            "description": "Show the total number of API requests processed in the home page status bar."
+          },
           "termsUrl": {
             "label": "Terms of Service URL",
             "description": "Leave empty to hide it. Supports a full URL or internal path."
