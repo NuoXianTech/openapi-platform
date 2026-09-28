@@ -5,7 +5,7 @@ import {
   assertRuntimeConfiguration, assertSupportedNode, loadRuntimeEnvironment,
   resolveRuntimeRoot, runtimeAddress, runtimeUrl
 } from './runtime-config.mjs'
-import { assertDataDirectoryWritable, assertPortAvailable } from './runtime-checks.mjs'
+import { assertPgliteDataDirectory, assertPortAvailable } from './runtime-checks.mjs'
 
 try {
   assertSupportedNode()
@@ -20,7 +20,7 @@ try {
   const address = runtimeAddress(config.env)
   process.env.NITRO_HOST = address.host
   process.env.NITRO_PORT = String(address.port)
-  if (!config.env.DATABASE_URL?.trim()) assertDataDirectoryWritable(config.dataDir)
+  if (!config.env.DATABASE_URL?.trim()) assertPgliteDataDirectory(path.join(config.dataDir, 'pglite'))
   await assertPortAvailable(address)
   process.chdir(root)
   console.log(`[start] Configuration: ${config.envFile}`)

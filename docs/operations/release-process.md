@@ -61,6 +61,7 @@ Git Tag 必须：
    ```
 
 7. 确认构建后集成测试已经实际执行 `.output/server/migrate.mjs`。
+   镜像发布工作流同样运行完整 Platform 产物测试，并在 amd64/arm64 各自的原生 Runner 上加载镜像，使用临时数据卷验证首次自动迁移、健康/就绪检查及保留数据卷的重启。检查通过后推送刚验证的本地镜像，不重新构建。
 8. 执行 [Platform 与 Service 集成测试](./service-integration-testing.md)。
 9. 按 [生产就绪清单](./production-readiness.md) 和[数据库迁移与版本升级](./database-migrations.md)完成备份、故障和回滚准备。
 

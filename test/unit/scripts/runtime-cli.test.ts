@@ -88,4 +88,23 @@ describe('startup diagnostics', () => {
       started: true, entry: join(root, '.output/server/index.mjs'), production: 'production', data: join(root, '.data'), overridden: true
     })
   })
+
+  it('reports an invalid PGlite child path in both doctor JSON and startup', () => {
+    const root = fixture()
+    fakeBuild(root)
+    configuration(root, 3000)
+    mkdirSync(join(root, '.data'))
+    writeFileSync(join(root, '.data/pglite'), 'not a directory')
+    const doctor = spawnSync(process.execPath, [join(root, 'scripts/doctor.mjs'), '--json'], {
+      cwd: tmpdir(), env: env(), encoding: 'utf8', windowsHide: true, timeout: 10_000
+    })
+    const databaseCheck = JSON.parse(doctor.stdout).checks.find((check: { name: string }) => check.name === 'database')
+    expect(doctor.status).toBe(1)
+    expect(databaseCheck.status).toBe('error')
+    expect(databaseCheck.message).toContain('not a directory')
+    const startup = run(root)
+    expect(startup.status).toBe(1)
+    expect(startup.stderr).toContain('not a directory')
+    expect(startup.stdout).not.toContain('"started":true')
+  })
 })

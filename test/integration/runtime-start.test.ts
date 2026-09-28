@@ -77,6 +77,30 @@ afterAll(async () => {
 })
 
 describe('standalone runtime commands', () => {
+  it('rejects concurrent startup on another port and migration against the running database', async () => {
+    await start(unrelated)
+    try {
+      const probe = createServer()
+      await new Promise<void>(done => probe.listen(0, '127.0.0.1', done))
+      const alternatePort = (probe.address() as { port: number }).port
+      await new Promise<void>(done => probe.close(() => done()))
+      for (const script of ['start.mjs', 'index.mjs', 'migrate.mjs']) {
+        const result = spawnSync(process.execPath, [join(release, 'server', script)], {
+          cwd: unrelated, env: {
+            ...environment(), NITRO_PORT: String(alternatePort), NITRO_HOST: '127.0.0.1',
+            PLATFORM_DATA_DIR: join(release, 'persistent-data'),
+            NUXT_AUTH_SECRET: 'a'.repeat(64), NUXT_API_KEY_SECRET: 'b'.repeat(64)
+          },
+          windowsHide: true, encoding: 'utf8', timeout: 15_000
+        })
+        expect(result.status, result.stderr).toBe(1)
+        expect(result.stderr).toContain('PGlite data directory is locked')
+      }
+      const response = await fetch(`http://127.0.0.1:${port}/api/ready`)
+      expect(response.status).toBe(200)
+    } finally { await stop() }
+  }, 45_000)
+
   it('loads traced database drivers for diagnostics in a standalone release', () => {
     const code = `
       const checks = await import(process.argv[1]);

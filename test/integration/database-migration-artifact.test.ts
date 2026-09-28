@@ -1,7 +1,7 @@
 import { access, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
-import { spawn } from 'node:child_process'
+import { spawn, type ChildProcess } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 import { PGlite } from '@electric-sql/pglite'
 import { afterAll, describe, expect, it } from 'vitest'
@@ -14,8 +14,19 @@ const migrationsDir = resolve(projectRoot, '.output/server/db/migrations/postgre
 const pgliteDataDir = join(testWorkingDirectory, '.data', 'pglite')
 const envFile = join(testWorkingDirectory, '.env')
 await writeFile(envFile, 'DATABASE_URL=\n')
+let migrationProcess: ChildProcess | undefined
 
-afterAll(() => rm(testWorkingDirectory, { recursive: true, force: true }))
+afterAll(async () => {
+  if (migrationProcess && migrationProcess.exitCode === null && migrationProcess.signalCode === null) {
+    const active = migrationProcess
+    await new Promise<void>(done => {
+      active.once('exit', () => done())
+      active.kill('SIGTERM')
+    })
+  }
+  if (!resolve(testWorkingDirectory).startsWith(resolve(tmpdir(), 'openapi-artifact-migration-workspace-'))) throw new Error('Unexpected cleanup path')
+  await rm(testWorkingDirectory, { recursive: true, force: true })
+})
 
 function runArtifactMigration() {
   return new Promise<{ stderr: string, stdout: string }>((resolveProcess, reject) => {
@@ -32,6 +43,7 @@ function runArtifactMigration() {
       },
       stdio: ['ignore', 'pipe', 'pipe']
     })
+    migrationProcess = child
 
     let stdout = ''
     let stderr = ''
@@ -39,6 +51,7 @@ function runArtifactMigration() {
     child.stderr.setEncoding('utf8').on('data', chunk => (stderr += chunk))
     child.once('error', reject)
     child.once('exit', (code, signal) => {
+      migrationProcess = undefined
       if (code === 0 && signal === null) {
         resolveProcess({ stderr, stdout })
         return
@@ -76,6 +89,7 @@ describe('built deployment artifact', () => {
       access(artifactRunner),
       access(resolve(projectRoot, '.output/server/start.mjs')),
       access(resolve(projectRoot, '.output/server/doctor.mjs')),
+      access(resolve(projectRoot, '.output/server/pglite-client.mjs')),
       access(resolve(projectRoot, '.output/server/runtime-config.mjs')),
       access(resolve(projectRoot, '.output/server/runtime-checks.mjs')),
       access(resolve(process.cwd(), '.output/server/database-migrator.mjs')),
@@ -87,12 +101,12 @@ describe('built deployment artifact', () => {
 
     const journal = JSON.parse(await readFile(resolve(migrationsDir, 'meta/_journal.json'), 'utf8'))
     const client = new PGlite(pgliteDataDir)
-    await client.waitReady
-    const result = await client.query<{ count: number }>(
-      'select count(*)::int as count from drizzle.__drizzle_migrations'
-    )
-    await client.close()
-
-    expect(result.rows[0]?.count).toBe(journal.entries.length)
-  })
+    try {
+      await client.waitReady
+      const result = await client.query<{ count: number }>(
+        'select count(*)::int as count from drizzle.__drizzle_migrations'
+      )
+      expect(result.rows[0]?.count).toBe(journal.entries.length)
+    } finally { await client.close() }
+  }, 30_000)
 })

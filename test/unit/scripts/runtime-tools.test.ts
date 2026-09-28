@@ -9,7 +9,7 @@ import {
 } from '../../../scripts/runtime-config.mjs'
 import { resolvePgliteDataDir as applicationDataDir } from '../../../server/db/client'
 import { resolvePgliteDataDir as migrationDataDir } from '../../../scripts/database-migrator.mjs'
-import { assertDataDirectoryWritable } from '../../../scripts/runtime-checks.mjs'
+import { assertDataDirectoryWritable, assertPgliteDataDirectory } from '../../../scripts/runtime-checks.mjs'
 
 const directories: string[] = []
 function temporary() {
@@ -96,5 +96,23 @@ describe('shared runtime paths and precedence', () => {
   it('fails promptly for an unavailable drive or filesystem root', () => {
     vi.spyOn(fs, 'existsSync').mockReturnValue(false)
     expect(() => assertDataDirectoryWritable(resolve('missing-drive/data'))).toThrow('no accessible parent')
+  })
+
+  it('checks the actual database path and leaves missing paths untouched', () => {
+    const root = temporary()
+    const missing = join(root, 'new', 'pglite')
+    expect(() => assertPgliteDataDirectory(missing)).not.toThrow()
+    expect(existsSync(missing)).toBe(false)
+    const file = join(root, 'pglite')
+    writeFileSync(file, 'not a directory')
+    expect(() => assertPgliteDataDirectory(file)).toThrow('not a directory')
+  })
+
+  it('rejects incomplete existing data without recreating missing directories', () => {
+    const root = temporary()
+    writeFileSync(join(root, 'PG_VERSION'), '18')
+    expect(() => assertPgliteDataDirectory(root)).toThrow('pg_notify')
+    expect(existsSync(join(root, 'pg_notify'))).toBe(false)
+    expect(readFileSync(join(root, 'PG_VERSION'), 'utf8')).toBe('18')
   })
 })

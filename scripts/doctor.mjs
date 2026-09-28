@@ -6,7 +6,7 @@ import {
   resolveRuntimeRoot, runtimeAddress, runtimeConfigurationErrors, runtimeUrl
 } from './runtime-config.mjs'
 import {
-  assertDataDirectoryWritable, isPortAvailable, checkPostgres, checkRedis, checkReadiness
+  assertPgliteDataDirectory, isPortAvailable, checkPostgres, checkRedis, checkReadiness
 } from './runtime-checks.mjs'
 
 export async function diagnose(root) {
@@ -40,8 +40,9 @@ export async function diagnose(root) {
       } catch { record('database', 'error', 'PostgreSQL connection failed; check the URL, credentials, TLS, and network') }
     } else {
       try {
-        assertDataDirectoryWritable(config.dataDir)
-        record('database', 'ok', `PGlite: ${path.join(config.dataDir, 'pglite')} (writable; no database opened)`)
+        const databaseDir = path.join(config.dataDir, 'pglite')
+        assertPgliteDataDirectory(databaseDir)
+        record('database', 'ok', `PGlite: ${databaseDir} (path and basic structure checked; no database opened)`)
       } catch (error) { record('database', 'error', error.message) }
     }
     if (config.env.NUXT_REDIS_URL?.trim()) {

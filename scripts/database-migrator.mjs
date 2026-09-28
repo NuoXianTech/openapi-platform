@@ -1,6 +1,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
-import { PGlite } from '@electric-sql/pglite'
+import { createHash } from 'node:crypto'
+import { LockedPGlite } from './pglite-client.mjs'
 import { drizzle as drizzlePglite } from 'drizzle-orm/pglite'
 import { migrate as migratePglite } from 'drizzle-orm/pglite/migrator'
 import { drizzle as drizzlePostgres } from 'drizzle-orm/postgres-js'
@@ -67,6 +68,7 @@ function inspectMigrationsFolder(folder) {
   }
 
   const tags = new Set()
+  const migrations = []
   for (const [position, entry] of journal.entries.entries()) {
     if (!entry || entry.idx !== position || typeof entry.tag !== 'string' || !entry.tag) {
       throw new Error(`Migration journal at ${journalPath} has an invalid entry at index ${position}.`)
@@ -74,18 +76,33 @@ function inspectMigrationsFolder(folder) {
     if (tags.has(entry.tag)) {
       throw new Error(`Migration journal at ${journalPath} contains duplicate tag ${entry.tag}.`)
     }
+    if (!Number.isSafeInteger(entry.when) || entry.when < 0
+      || (position > 0 && entry.when <= journal.entries[position - 1].when)) {
+      throw new Error(`Migration journal at ${journalPath} has invalid or unordered timestamps.`)
+    }
 
     const migrationPath = path.join(folder, `${entry.tag}.sql`)
     if (!fs.existsSync(migrationPath) || fs.statSync(migrationPath).size === 0) {
       throw new Error(`Migration file is missing or empty: ${migrationPath}`)
     }
     tags.add(entry.tag)
+    const sql = fs.readFileSync(migrationPath, 'utf8')
+    const lf = sql.replace(/\r\n/g, '\n')
+    migrations.push({
+      tag: entry.tag, when: entry.when,
+      // Drizzle stores the raw file hash. Git may convert line endings between
+      // checkouts, so recognize both forms without rewriting migration files.
+      hashes: new Set([sql, lf, lf.replace(/\n/g, '\r\n')].map(content => (
+        createHash('sha256').update(content).digest('hex')
+      )))
+    })
   }
 
   return {
     path: folder,
     count: journal.entries.length,
-    latestTag: journal.entries.at(-1).tag
+    latestTag: journal.entries.at(-1).tag,
+    migrations
   }
 }
 
@@ -195,7 +212,21 @@ async function ensureDatabaseExists(databaseUrl) {
   }
 }
 
-async function migratePostgresOnce(databaseUrl, timeZone, migrationsFolder) {
+async function verifyMigrationHistory(query, migrationSet) {
+  const tables = await query("select to_regclass('drizzle.__drizzle_migrations') as name")
+  if (!tables[0]?.name) return
+  const rows = await query('select hash, created_at from drizzle.__drizzle_migrations order by created_at, id')
+  for (const [index, row] of rows.entries()) {
+    const expected = migrationSet.migrations[index]
+    if (!expected || Number(row.created_at) !== expected.when || !expected.hashes.has(row.hash)) {
+      const error = new Error('Database migration history does not match this release. Check the database target and release version; restore the matching immutable migration files or use a verified data migration. No migrations were applied.')
+      error.code = 'MIGRATION_HISTORY_MISMATCH'
+      throw error
+    }
+  }
+}
+
+async function migratePostgresOnce(databaseUrl, timeZone, migrationSet) {
   const client = postgres(databaseUrl, { max: 1, onnotice: handlePostgresNotice })
   const database = drizzlePostgres(client)
   let hasMigrationLock = false
@@ -204,8 +235,9 @@ async function migratePostgresOnce(databaseUrl, timeZone, migrationsFolder) {
     await client`select set_config('TimeZone', ${timeZone}, false)`
     await client`SELECT pg_advisory_lock(hashtext(${MIGRATION_ADVISORY_LOCK_KEY}))`
     hasMigrationLock = true
+    await verifyMigrationHistory(query => client.unsafe(query), migrationSet)
     await migratePostgres(database, {
-      migrationsFolder,
+      migrationsFolder: migrationSet.path,
       migrationsSchema: 'drizzle',
       migrationsTable: '__drizzle_migrations'
     })
@@ -219,15 +251,16 @@ async function migratePostgresOnce(databaseUrl, timeZone, migrationsFolder) {
   }
 }
 
-async function migratePgliteOnce(dataDir, timeZone, migrationsFolder) {
+async function migratePgliteOnce(dataDir, timeZone, migrationSet) {
   ensurePgliteDataDir(dataDir)
-  const client = new PGlite(dataDir)
-  await client.waitReady
+  const client = new LockedPGlite(dataDir)
 
   try {
+    await client.waitReady
     await client.query('select set_config($1, $2, false)', ['TimeZone', timeZone])
+    await verifyMigrationHistory(async query => (await client.query(query)).rows, migrationSet)
     await migratePglite(drizzlePglite(client), {
-      migrationsFolder,
+      migrationsFolder: migrationSet.path,
       migrationsSchema: 'drizzle',
       migrationsTable: '__drizzle_migrations'
     })
@@ -257,15 +290,15 @@ export async function runDatabaseMigrations(options = {}) {
   console.log(`[db:migrate] Migration set: ${migrationSet.latestTag} (${migrationSet.count} file(s))`)
 
   if (config.driver === 'pglite') {
-    await migratePgliteOnce(config.pgliteDataDir, config.timeZone, migrationSet.path)
+    await migratePgliteOnce(config.pgliteDataDir, config.timeZone, migrationSet)
   } else {
     try {
-      await migratePostgresOnce(config.databaseUrl, config.timeZone, migrationSet.path)
+      await migratePostgresOnce(config.databaseUrl, config.timeZone, migrationSet)
     } catch (error) {
       if (getSqlState(error) !== '3D000') throw error
 
       await ensureDatabaseExists(config.databaseUrl)
-      await migratePostgresOnce(config.databaseUrl, config.timeZone, migrationSet.path)
+      await migratePostgresOnce(config.databaseUrl, config.timeZone, migrationSet)
     }
   }
 

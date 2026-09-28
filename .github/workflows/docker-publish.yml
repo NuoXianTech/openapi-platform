@@ -116,6 +116,11 @@ jobs:
           OPENAPI_SERVICE_REPO: ${{ github.workspace }}/openapi-service
         run: pnpm test:api-service
 
+      - name: Build Platform and test the deployment artifact
+        run: |
+          pnpm build
+          pnpm test:integration
+
   build:
     name: Build image (${{ matrix.arch }})
     needs: quality
@@ -167,19 +172,69 @@ jobs:
             type=semver,pattern={{version}}
             type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
 
-      - name: Build and push architecture image
+      - name: Build architecture image for local verification
         uses: docker/build-push-action@v7
         with:
           context: .
           file: ./Dockerfile
           platforms: ${{ matrix.platform }}
-          push: true
+          load: true
+          push: false
           tags: ${{ steps.metadata.outputs.tags }}
           labels: ${{ steps.metadata.outputs.labels }}
           cache-from: type=gha,scope=openapi-platform-${{ matrix.arch }}
           cache-to: type=gha,mode=max,scope=openapi-platform-${{ matrix.arch }}
           provenance: false
           sbom: false
+
+      - name: Verify image startup, migrations and restart
+        shell: bash
+        env:
+          IMAGE_TAGS_JSON: ${{ steps.metadata.outputs.json }}
+        run: |
+          set -euo pipefail
+          image="$(jq -r '.tags[0]' <<< "$IMAGE_TAGS_JSON")"
+          container="platform-smoke-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          trap 'docker rm -fv "$container" >/dev/null 2>&1 || true' EXIT
+
+          # Isolated, disposable CI configuration; never use deployment secrets.
+          docker run -d --name "$container" \
+            -p 127.0.0.1::3000 -v /app/.data \
+            -e NUXT_AUTH_SECRET=ci-image-auth-secret-0123456789abcdef \
+            -e NUXT_API_KEY_SECRET=0123456789abcdef0123456789abcdef \
+            "$image"
+
+          wait_ready() {
+            local port
+            port="$(docker port "$container" 3000/tcp | cut -d: -f2)"
+            for attempt in $(seq 1 60); do
+              if [[ "$(docker inspect -f '{{.State.Running}}' "$container")" != true ]]; then
+                break
+              fi
+              if curl -fsS --max-time 2 "http://127.0.0.1:${port}/api/ready" | jq -e '.ready == true' >/dev/null; then
+                curl -fsS --max-time 5 "http://127.0.0.1:${port}/api/health" | jq -e '.ok == true' >/dev/null
+                return 0
+              fi
+              sleep 2
+            done
+            docker logs "$container" 2>&1 | sed -E 's/(initial password: ).*/\1[redacted]/'
+            return 1
+          }
+
+          wait_ready
+          docker stop --time 30 "$container"
+          docker start "$container"
+          wait_ready
+
+      - name: Push the verified image
+        shell: bash
+        env:
+          IMAGE_TAGS_JSON: ${{ steps.metadata.outputs.json }}
+        run: |
+          set -euo pipefail
+          while IFS= read -r tag; do
+            docker push "$tag"
+          done < <(jq -r '.tags[]' <<< "$IMAGE_TAGS_JSON")
 
   merge:
     name: Publish multi-platform image

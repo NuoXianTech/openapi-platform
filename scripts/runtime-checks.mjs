@@ -16,6 +16,28 @@ export function assertDataDirectoryWritable(dataDir) {
   }
 }
 
+export function assertPgliteDataDirectory(dataDir) {
+  assertDataDirectoryWritable(dataDir)
+  if (!fs.existsSync(dataDir)) return
+  const entries = fs.readdirSync(dataDir).filter(name => name !== '.openapi-lock')
+  if (entries.length === 0) return
+  const requiredDirectories = [
+    'base', 'global', 'pg_wal', 'pg_xact', 'pg_multixact', 'pg_subtrans',
+    'pg_notify', 'pg_serial', 'pg_snapshots', 'pg_twophase', 'pg_tblspc',
+    'pg_replslot', 'pg_dynshmem', 'pg_commit_ts', 'pg_logical', 'pg_stat'
+  ]
+  const missing = []
+  for (const name of ['PG_VERSION', 'global/pg_control', ...requiredDirectories]) {
+    const target = path.join(dataDir, name)
+    const stat = fs.statSync(target, { throwIfNoEntry: false })
+    const directory = requiredDirectories.includes(name)
+    if (!stat || (directory ? !stat.isDirectory() : !stat.isFile() || stat.size === 0)) missing.push(name)
+  }
+  if (missing.length) {
+    throw new Error(`PGlite directory is incomplete: ${dataDir}. Missing or invalid: ${missing.join(', ')}. Stop the application and verify a complete backup; no database files were repaired or replaced.`)
+  }
+}
+
 export async function isPortAvailable({ host, port }) {
   return await new Promise((resolve, reject) => {
     const server = createServer()

@@ -2,7 +2,7 @@ import { mkdirSync } from 'node:fs'
 import { resolve } from 'node:path'
 import postgres from 'postgres'
 import { drizzle as drizzlePostgres } from 'drizzle-orm/postgres-js'
-import { PGlite } from '@electric-sql/pglite'
+import { LockedPGlite } from '../../scripts/pglite-client.mjs'
 import { drizzle as drizzlePglite } from 'drizzle-orm/pglite'
 import * as schema from './schema'
 import { resolvePgliteDataDir as resolveDataDir } from '../../scripts/runtime-config.mjs'
@@ -12,7 +12,7 @@ interface CreatePostgresClientOptions {
 }
 
 type PostgresClient = ReturnType<typeof postgres>
-type PgliteClient = PGlite
+type PgliteClient = LockedPGlite
 export type DatabaseDriver = 'postgres' | 'pglite'
 
 function handlePostgresNotice(notice: postgres.Notice) {
@@ -68,7 +68,7 @@ export function ensurePgliteDataDir(dataDir?: string) {
 function createPgliteClient() {
   const dataDir = resolvePgliteDataDir()
   ensurePgliteDataDir(dataDir)
-  return new PGlite(dataDir)
+  return new LockedPGlite(dataDir)
 }
 
 function createDatabase(client: PostgresClient) {

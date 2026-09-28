@@ -15,7 +15,8 @@ const databaseMigrationsDir = 'server/db/migrations/postgresql'
 const runtimeScripts = [
   'scripts/migrate.mjs', 'scripts/database-migrator.mjs',
   'scripts/start.mjs', 'scripts/doctor.mjs',
-  'scripts/runtime-config.mjs', 'scripts/runtime-checks.mjs'
+  'scripts/runtime-config.mjs', 'scripts/runtime-checks.mjs',
+  'scripts/pglite-client.mjs'
 ]
 const databaseMigratorModule = resolve('scripts/database-migrator.mjs')
 const deploymentPackage = {
@@ -100,7 +101,7 @@ export default defineNuxtConfig({
     externals: {
       // This module lives outside server/, so Nitro otherwise emits a broken
       // relative import for it from .nuxt/dev on Windows.
-      inline: [databaseMigratorModule, resolve('scripts/runtime-config.mjs')]
+      inline: [databaseMigratorModule, resolve('scripts/runtime-config.mjs'), resolve('scripts/runtime-checks.mjs'), resolve('scripts/pglite-client.mjs')]
     },
     compressPublicAssets: {
       gzip: true,

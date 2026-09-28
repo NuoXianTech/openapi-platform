@@ -158,6 +158,7 @@ jobs:
           grep -Fxq "${package_name}/server/doctor.mjs" "$contents_file"
           grep -Fxq "${package_name}/server/runtime-config.mjs" "$contents_file"
           grep -Fxq "${package_name}/server/runtime-checks.mjs" "$contents_file"
+          grep -Fxq "${package_name}/server/pglite-client.mjs" "$contents_file"
           grep -Fxq "${package_name}/server/migrate.mjs" "$contents_file"
           grep -Fxq "${package_name}/server/database-migrator.mjs" "$contents_file"
           grep -Fxq "${package_name}/server/db/migrations/postgresql/meta/_journal.json" "$contents_file"
