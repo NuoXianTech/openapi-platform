@@ -379,9 +379,6 @@ async function copyRequest(): Promise<void> {
   border: 1px solid var(--ui-border);
   border-radius: 12px;
   background: var(--ui-bg-elevated);
-  box-shadow:
-    0 0 0 16px var(--ui-bg-muted),
-    0 20px 48px -42px color-mix(in oklab, var(--brand-ink) 32%, transparent);
 }
 
 .api-request-demo__header,
@@ -422,7 +419,6 @@ async function copyRequest(): Promise<void> {
   .public-api-intro__status-row + .public-api-intro__title { margin-top: 1.25rem; }
   .public-api-intro__description { margin-top: 1rem; font-size: 0.875rem; line-height: 1.65; }
   .public-api-intro__actions { margin-top: 1.35rem; }
-  .api-request-demo { box-shadow: 0 0 0 8px var(--ui-bg-muted); }
   .api-request-demo pre { height: 12rem; }
 }
 
