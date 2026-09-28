@@ -11,14 +11,27 @@ export default defineAdminEventHandler(async (event, admin) => {
   const body = await readZodBody(event, adminUpdateUpstreamSchema)
   const result = await platformUpstreamService.updateAndPublish(id, body, admin.id)
   const updated = result.upstream
-  await addRequestOperationLog(event, {
-    userId: admin.id,
-    actor: admin.username,
-    action: 'admin.platform.upstream.update',
-    resourceType: 'upstream-service',
-    resourceId: id,
-    detail: { patch: body }
-  })
+  const { serviceToken, ...patch } = body
+  if (Object.keys(patch).length > 0) {
+    await addRequestOperationLog(event, {
+      userId: admin.id,
+      actor: admin.username,
+      action: 'admin.platform.upstream.update',
+      resourceType: 'upstream-service',
+      resourceId: id,
+      detail: { patch }
+    })
+  }
+  if (serviceToken !== undefined) {
+    await addRequestOperationLog(event, {
+      userId: admin.id,
+      actor: admin.username,
+      action: 'admin.platform.service.token.update',
+      resourceType: 'upstream-service',
+      resourceId: id,
+      detail: { updated: true }
+    })
+  }
   return {
     ...toPlatformUpstreamSummary(updated),
     revision: result.revision

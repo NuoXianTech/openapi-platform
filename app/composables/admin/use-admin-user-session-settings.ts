@@ -1,3 +1,4 @@
+import { computed, getCurrentScope, onScopeDispose, reactive, ref, watch } from 'vue'
 import { SUPPORTED_OAUTH_PROVIDERS } from '#shared/types/oauth'
 import type { AdminSettingsKey } from '~/composables/admin/use-admin-settings-page'
 import { useAdminSettingsPage } from '~/composables/admin/use-admin-settings-page'
@@ -71,6 +72,9 @@ export function useAdminUserSessionSettings() {
   const oauthPolicyKeys = ['oauthForceBinding'] as const satisfies readonly AdminSettingsKey[]
   const oauthPolicySection = settings.createSection(oauthPolicyKeys)
   const isOauthSaving = ref(false)
+  let disposed = false
+  if (getCurrentScope()) onScopeDispose(() => { disposed = true })
+  const baselines = reactive<Record<string, Pick<AdminOauthProviderForm, 'clientId' | 'isEnabled'>>>({})
 
   const registrationModeItems = computed(() => [
     { label: t('admin.system.session.registration.mode.options.open'), value: 'open' },
@@ -87,45 +91,59 @@ export function useAdminUserSessionSettings() {
     return forms[provider] ?? (forms[provider] = createProviderForm())
   }
 
-  watch(items, (list) => {
+  function acceptProviders(list: AdminOauthProviderItem[], submitted?: Map<string, AdminOauthProviderForm>) {
     for (const item of list) {
-      Object.assign(getForm(item.provider), {
-        clientId: item.clientId || '',
-        clientSecret: '',
-        isEnabled: item.isEnabled
-      })
+      const form = getForm(item.provider)
+      const expected = submitted?.get(item.provider) ?? baselines[item.provider] ?? createProviderForm()
+      if (form.clientId === expected.clientId) form.clientId = item.clientId || ''
+      if (form.isEnabled === expected.isEnabled) form.isEnabled = item.isEnabled
+      const sent = submitted?.get(item.provider)
+      if (sent && form.clientSecret === sent.clientSecret) form.clientSecret = ''
+      baselines[item.provider] = { clientId: item.clientId || '', isEnabled: item.isEnabled }
     }
-  }, { immediate: true })
+  }
+  watch(items, list => acceptProviders(list), { immediate: true, flush: 'sync' })
 
   const changedProviderCount = computed(() => items.value.filter((item) => {
     const form = getForm(item.provider)
-    return form.clientId !== item.clientId
+    return form.clientId !== baselines[item.provider]?.clientId
       || form.clientSecret.length > 0
-      || form.isEnabled !== item.isEnabled
+      || form.isEnabled !== baselines[item.provider]?.isEnabled
   }).length)
   const oauthChangedCount = computed(() => changedProviderCount.value + oauthPolicySection.changedCount.value)
   const isOauthDirty = computed(() => oauthChangedCount.value > 0)
-  const isOauthReady = computed(() => !providers.loading.value && items.value.length === SUPPORTED_OAUTH_PROVIDERS.length)
+  const isOauthReady = computed(() => !disposed && !settings.loading.value && !settings.saving.value && !providers.loading.value && items.value.length === SUPPORTED_OAUTH_PROVIDERS.length)
 
   async function saveOauthSettings(): Promise<void> {
     if (!isOauthReady.value || !isOauthDirty.value || isOauthSaving.value) return
     isOauthSaving.value = true
+    const submittedProviders = new Map(items.value.map(item => [item.provider, { ...getForm(item.provider) }]))
     try {
-      await $fetch('/api/admin/oauth-providers/update-all', {
-        method: 'PUT',
-        body: {
-          oauthForceBinding: settings.form.oauthForceBinding,
-          providers: items.value.map(item => buildProviderUpdate(item.provider, getForm(item.provider)))
-        }
+      const result = await settings.saveWith({
+        keys: oauthPolicyKeys,
+        successKey: 'admin.system.session.oauth.feedback.saved',
+        failureKey: 'admin.system.session.oauth.feedback.saveFailed',
+        request: submitted => $fetch<{
+          oauthForceBinding: boolean
+          providers: Array<Pick<AdminOauthProviderItem, 'provider' | 'clientId' | 'clientSecret' | 'isEnabled'>>
+        }>('/api/admin/oauth-providers/update-all', {
+          method: 'PUT',
+          body: {
+            oauthForceBinding: submitted.oauthForceBinding,
+            providers: items.value.map(item => buildProviderUpdate(item.provider, submittedProviders.get(item.provider)!))
+          }
+        })
       })
-      settings.commit(oauthPolicyKeys)
+      if (!result || disposed) return
+      const updated = items.value.map(item => ({ ...item, ...result.providers.find(provider => provider.provider === item.provider) }))
+      acceptProviders(updated, submittedProviders)
+      providers.data.value = updated
+      // Start a new read to supersede any older in-flight refresh. Its failure
+      // cannot turn the accepted mutation into another save attempt.
       await providers.refresh()
-      toast.add({ title: t('admin.system.session.oauth.feedback.saved'), color: 'success' })
-    } catch (error) {
-      toast.add({
-        title: parseFetchError(error, t('admin.system.session.oauth.feedback.saveFailed')),
-        color: 'error'
-      })
+      if (!disposed && providers.error.value) {
+        toast.add({ title: parseFetchError(providers.error.value, t('common.feedback.loadFailed')), color: 'error' })
+      }
     } finally {
       isOauthSaving.value = false
     }

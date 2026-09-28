@@ -8,7 +8,7 @@ import { parseTrustedProxyCidrs } from '#shared/utils/proxy-cidrs'
 import type { AdminSettingsKey } from '~/composables/admin/use-admin-settings-page'
 import { useAdminSettingsPage } from '~/composables/admin/use-admin-settings-page'
 
-const { form, createSection, save, reset } = useAdminSettingsPage()
+const { form, createSection, save } = useAdminSettingsPage()
 const { t } = useI18n()
 
 const inlineNoticeUi = {
@@ -149,13 +149,13 @@ function normalizeTrustedCidrs(): void {
 }
 
 async function saveNetworkSettings(): Promise<void> {
+  let saved: boolean
   if (form.clientIpSource === 'direct' && !environmentManaged.value) {
-    await save(['clientIpSource'])
-    reset(['trustedProxyCidrs', 'clientIpForwardedHops'])
+    saved = await save(['clientIpSource'], { resetKeys: ['trustedProxyCidrs', 'clientIpForwardedHops'] })
   } else {
-    await networkSection.save()
+    saved = await networkSection.save()
   }
-  await refreshStatus()
+  if (saved) await refreshStatus()
 }
 
 onMounted(() => {
