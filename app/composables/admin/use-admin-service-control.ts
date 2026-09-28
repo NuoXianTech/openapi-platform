@@ -102,10 +102,12 @@ export function useAdminServiceControl(upstreamId: Readonly<Ref<string>>) {
     const startedGeneration = generation
     refreshError.value = null
     try {
-      await Promise.all([
+      const results = await Promise.all([
         ...(scope !== 'upstreams' ? [resource.refresh()] : []),
         ...(scope !== 'service' ? [upstreamResource.refresh()] : [])
       ])
+      const failure = results.find(result => result?.status === 'error')
+      if (failure?.status === 'error') throw failure.error
     } catch (error: unknown) {
       // A completed mutation stays completed even if the subsequent read fails.
       if (!disposed.value && startedGeneration === generation) refreshError.value = error

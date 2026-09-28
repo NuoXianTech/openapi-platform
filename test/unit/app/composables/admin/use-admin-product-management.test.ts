@@ -89,10 +89,10 @@ describe('Product and Version management', () => {
     expect(management.controls.value.disabled).toBe(false)
   })
 
-  it('retains successful save status when refresh rejects', async () => {
+  it('retains successful save status when refresh returns an error', async () => {
     const { management, resource } = setup()
     management.openEditProduct(product)
-    resource.refresh.mockRejectedValueOnce(new Error('read failed'))
+    resource.refresh.mockResolvedValueOnce({ status: 'error', error: new Error('read failed') })
     await expect(management.saveProduct(values)).resolves.toBe(true)
     expect(management.modalOpen.value).toBe(false)
     expect(toast.mock.calls.map(call => call[0].color)).toEqual(['success', 'error'])
@@ -174,7 +174,7 @@ describe('Product and Version management', () => {
 
   it('does not replay a successful deletion when refresh fails', async () => {
     const { management, resource } = setup()
-    resource.refresh.mockRejectedValueOnce(new Error('read failed'))
+    resource.refresh.mockResolvedValueOnce({ status: 'error', error: new Error('read failed') })
     const deleting = management.removeProduct(product)
     await dialog.options.onConfirm()
     await dialog.options.onConfirm()

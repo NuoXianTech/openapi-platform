@@ -1,15 +1,13 @@
 import type { AsyncDataRequestStatus } from '#app'
 import {
-  computed,
-  getCurrentScope,
   onMounted,
-  onScopeDispose,
   reactive,
   ref,
   watch,
   type ComputedRef,
   type Ref
 } from 'vue'
+import { usePrivateResource, type PrivateReadResult } from '~/composables/dashboard/use-private-resource'
 import { DEFAULT_PAGE_SIZE } from '~/constants/pagination'
 
 export interface PrivatePagedPagination {
@@ -42,9 +40,9 @@ interface UsePrivatePagedListReturn<TFilters, TItem> {
   status: Ref<AsyncDataRequestStatus>
   loading: ComputedRef<boolean>
   error: Ref<unknown>
-  refresh: () => Promise<void>
-  applyFilters: () => Promise<void>
-  reset: () => Promise<void>
+  refresh: () => Promise<PrivateReadResult<{ items: TItem[], total: number }>>
+  applyFilters: () => Promise<PrivateReadResult<{ items: TItem[], total: number }>>
+  reset: () => Promise<PrivateReadResult<{ items: TItem[], total: number }>>
 }
 
 /**
@@ -80,15 +78,27 @@ export function usePrivatePagedList<
   const pageSize = externalPageSize ?? ref(defaultPageSize)
   const items = ref<TItem[]>([]) as Ref<TItem[]>
   const total = ref(0)
-  const status = ref<AsyncDataRequestStatus>(immediate ? 'pending' : 'idle')
-  const error = ref<unknown>(null)
-
-  const loading = computed(() => status.value === 'pending')
-
-  // 请求序号：并发 / 快慢乱序时只采用最新一次请求的结果，避免旧响应覆盖新数据。
-  let requestSeq = 0
+  const resource = usePrivateResource<{ items: TItem[], total: number }>({
+    path,
+    defaultData: () => ({ items: [], total: 0 }),
+    immediate: false,
+    timeoutMs,
+    resetOnError: true,
+    query: () => {
+      const limit = pageSize.value
+      const offset = (page.value - 1) * limit
+      return buildQuery ? buildQuery(filters, { page: page.value, limit, offset }) : { ...filters, limit, offset }
+    },
+    validate(value) {
+      const result = value as { items?: unknown, total?: unknown } | null
+      if (!result || !Array.isArray(result.items) || !Number.isFinite(result.total)) {
+        throw new TypeError(`Invalid paged response from ${path}`)
+      }
+    }
+  })
+  const { status, loading, error } = resource
+  status.value = immediate ? 'pending' : 'idle'
   let skipNextPageRefresh = false
-  let activeController: AbortController | null = null
 
   function resetPageWithoutAutoRefresh() {
     if (page.value === 1) return
@@ -96,64 +106,39 @@ export function usePrivatePagedList<
     page.value = 1
   }
 
-  async function refresh(): Promise<void> {
-    const seq = ++requestSeq
-    activeController?.abort()
-    const controller = new AbortController()
-    activeController = controller
-    status.value = 'pending'
-    error.value = null
-    const limit = pageSize.value
-    const offset = (page.value - 1) * limit
-    const query = buildQuery
-      ? buildQuery(filters, { page: page.value, limit, offset })
-      : { ...filters, limit, offset }
-    try {
-      const result = await $fetch<{ items: TItem[], total: number }>(path, {
-        query,
-        signal: controller.signal,
-        timeout: timeoutMs
-      })
-      if (seq !== requestSeq) return
-      if (!Array.isArray(result.items) || !Number.isFinite(result.total)) {
-        throw new TypeError(`Invalid paged response from ${path}`)
-      }
-
-      // 删除当前页最后一条数据、筛选结果收缩等场景可能令页码越界。
-      // 服务端分页不能像客户端切片那样自行回收到末页，因此在这里统一修正并重拉。
-      const lastPage = Math.max(1, Math.ceil(result.total / pageSize.value))
-      if (page.value > lastPage) {
-        skipNextPageRefresh = true
-        page.value = lastPage
-        await refresh()
-        return
-      }
-
-      items.value = result.items
-      total.value = result.total
-      status.value = 'success'
-    } catch (err) {
-      if (seq !== requestSeq) return
+  async function refresh(): Promise<PrivateReadResult<{ items: TItem[], total: number }>> {
+    const result = await resource.refresh()
+    if (resource.disposed.value) return { status: 'disposed' }
+    if (result.status === 'error') {
+      if (error.value !== result.error || status.value !== 'error') return { status: 'superseded' }
       items.value = []
       total.value = 0
-      error.value = err
-      status.value = 'error'
-    } finally {
-      if (seq === requestSeq && activeController === controller) {
-        activeController = null
-      }
+      return result
     }
+    if (result.status !== 'success') return result
+    if (resource.data.value !== result.data || status.value !== 'success') return { status: 'superseded' }
+    const lastPage = Math.max(1, Math.ceil(result.data.total / pageSize.value))
+    if (page.value > lastPage) {
+      skipNextPageRefresh = true
+      page.value = lastPage
+      return refresh()
+    }
+    items.value = result.data.items
+    total.value = result.data.total
+    return result
   }
 
   async function applyFilters() {
+    if (resource.disposed.value) return { status: 'disposed' } as const
     resetPageWithoutAutoRefresh()
-    await refresh()
+    return refresh()
   }
 
   async function reset() {
+    if (resource.disposed.value) return { status: 'disposed' } as const
     Object.assign(filters, defaultFilters)
     resetPageWithoutAutoRefresh()
-    await refresh()
+    return refresh()
   }
 
   watch(page, () => {
@@ -173,15 +158,6 @@ export function usePrivatePagedList<
     // onMounted 天然只在客户端触发，保证私有数据不在 SSR 阶段拉取 / 落入 HTML。
     onMounted(() => { void refresh() })
   }
-
-  if (getCurrentScope()) {
-    onScopeDispose(() => {
-      requestSeq += 1
-      activeController?.abort()
-      activeController = null
-    })
-  }
-
   return {
     filters,
     page,

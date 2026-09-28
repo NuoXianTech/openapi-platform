@@ -143,9 +143,9 @@ describe('endpoint selection and feedback', () => {
     expect(page.settingsState('one').error).toBeNull()
   })
 
-  it('does not convert saved settings to failure when refresh rejects', async () => {
+  it('does not convert saved settings to failure when refresh returns an error', async () => {
     const { page, rowState } = setup([endpoint('one', 'live')])
-    refreshCatalog.mockRejectedValueOnce(new Error('read failed'))
+    refreshCatalog.mockResolvedValueOnce({ status: 'error', error: new Error('read failed') })
     await expect(page.saveSettings('one', { name: 'Edited' })).resolves.toBe(true)
     expect(rowState('one').feedback?.color).toBe('warning')
     expect(page.catalogFeedback.value?.color).toBe('error')
@@ -580,17 +580,17 @@ describe('catalog operation admission and lifecycle', () => {
     })
   })
 
-  it('uses publication outcomes to clear earlier pending results in a batch', async () => {
+  it('keeps earlier pending results when a different Endpoint is directly applied', async () => {
     const { page, rowState } = setup([endpoint('one', 'disabled'), endpoint('two', 'disabled')])
     fetchMock.mockResolvedValueOnce({ revision: null })
       .mockResolvedValueOnce({ revision: { id: 'revision-2' } })
     page.selectAllEndpoints(true)
     await page.bulkSetEnabled(true)
     expect(rowState('one').feedback).toEqual({
-      message: 'admin.apis.routing.catalog.feedback.changesApplied', color: 'success'
+      message: 'admin.apis.routing.catalog.feedback.savedPending', color: 'warning'
     })
     expect(page.bulkFeedback.value).toEqual({
-      message: 'admin.apis.routing.catalog.bulk.completed:{"succeeded":2,"failed":0,"pending":0}', color: 'success'
+      message: 'admin.apis.routing.catalog.bulk.completed:{"succeeded":2,"failed":0,"pending":1}', color: 'warning'
     })
   })
 })

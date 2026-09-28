@@ -256,7 +256,7 @@ describe('Service control', () => {
   it('preserves a completed save outcome while separately exposing a read failure', async () => {
     const { control, service } = setup()
     const error = new Error('Read failed')
-    service.refresh.mockRejectedValueOnce(error)
+    service.refresh.mockResolvedValueOnce({ status: 'error', error: error })
     await expect(control.saveConfiguration(payload)).resolves.toBe(true)
     expect(control.configurationFeedback.value?.color).toBe('success')
     expect(control.loadError.value).toBe(error)

@@ -2,6 +2,7 @@ import { computed, getCurrentScope, onScopeDispose, ref, watch } from 'vue'
 import type { PlatformUpstreamTarget } from '#shared/types/platform'
 import { parseFetchError } from '~/utils/client-error'
 import { useConfirmedOperation } from '~/composables/use-confirmed-operation'
+import type { PrivateReadResult } from '~/composables/dashboard/use-private-resource'
 
 export interface TargetFormValues {
   baseUrl: string
@@ -17,7 +18,7 @@ const feedbackKeys = {
 } as const
 
 export function useAdminTargetOperations(options: {
-  refresh: () => Promise<void>
+  refresh: () => Promise<PrivateReadResult> | Promise<void>
   isBlocked: () => boolean
   context?: () => unknown
 }) {
@@ -39,7 +40,8 @@ export function useAdminTargetOperations(options: {
     const startedGeneration = generation
     toast.add({ title: t(feedbackKeys[action].success), color: 'success' })
     try {
-      await options.refresh()
+      const result = await options.refresh()
+      if (result?.status === 'error') throw result.error
     } catch (error: unknown) {
       // The mutation succeeded. A read failure must not invite another mutation.
       if (!disposed.value && generation === startedGeneration) {

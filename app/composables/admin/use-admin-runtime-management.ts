@@ -41,7 +41,9 @@ export function useAdminRuntimeManagement() {
   async function refreshResources() {
     if (disposed.value) return
     try {
-      await Promise.all([runtimeResource.refresh(), revisionsResource.refresh()])
+      const results = await Promise.all([runtimeResource.refresh(), revisionsResource.refresh()])
+      const failure = results.find(result => result?.status === 'error')
+      if (failure?.status === 'error') throw failure.error
     } catch (error: unknown) {
       if (!disposed.value) toast.add({ title: parseFetchError(error, t('common.feedback.loadFailed')), color: 'error' })
     }

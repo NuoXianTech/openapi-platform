@@ -21,7 +21,7 @@ import {
   persistServiceOpenApi,
   readStoredServiceEndpoints
 } from '~~/server/services/platform-service-openapi-service'
-import { applyPlatformRevision } from '~~/server/services/platform-endpoint-publication-service'
+import { refreshPlatformRevision } from '~~/server/services/platform-endpoint-publication-service'
 import { platformEndpointService } from '~~/server/services/platform-endpoint-service'
 import { upstreamServiceTokenService } from '~~/server/services/upstream-service-token-service'
 import { canonicalJson } from '~~/server/utils/canonical-json'
@@ -461,7 +461,7 @@ async function performPlatformServiceDiscovery(upstreamServiceId: string) {
     refreshed.targets,
     refreshed.connection
   )
-    ? (await applyPlatformRevision(null)).revision
+    ? (await refreshPlatformRevision(null)).revision
     : null
   return {
     ...await buildServiceControlView(

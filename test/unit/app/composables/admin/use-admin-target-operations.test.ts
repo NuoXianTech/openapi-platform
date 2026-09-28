@@ -243,7 +243,7 @@ describe('Target operations', () => {
 
   it.each(['save', 'toggle', 'remove'] as const)('keeps successful %s distinct from refresh failure', async (action) => {
     const { operations } = setup()
-    refresh.mockRejectedValueOnce(new Error('Read failed'))
+    refresh.mockResolvedValueOnce({ status: 'error', error: new Error('Read failed') })
     const operation = action === 'save'
       ? operations.save('upstream-1', target, values)
       : operations[action](target)

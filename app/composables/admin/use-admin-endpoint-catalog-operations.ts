@@ -8,6 +8,7 @@ import type {
 } from '#shared/types/platform'
 import type { ServiceConfigurationView } from '#shared/types/service-control'
 import { parseFetchError } from '~/utils/client-error'
+import type { PrivateReadResult } from '~/composables/dashboard/use-private-resource'
 
 interface EndpointFeedback {
   message: string
@@ -45,9 +46,9 @@ export function useAdminEndpointCatalogOperations(options: {
   catalog: Readonly<Ref<PlatformEndpointCatalog>>
   visibleServices: Readonly<Ref<PlatformEndpointCatalogService[]>>
   canApply: Readonly<Ref<boolean>>
-  refresh: () => Promise<void>
+  refresh: () => Promise<PrivateReadResult>
 }) {
-  const { catalog, visibleServices, canApply, refresh } = options
+  const { catalog, visibleServices, canApply, refresh: readCatalog } = options
   const { t } = useI18n()
   const confirm = useConfirmDialog()
   const disposed = ref(false)
@@ -147,13 +148,6 @@ export function useAdminEndpointCatalogOperations(options: {
     successKey: PublicationSuccessKey
   ): PublicationOutcome {
     const runtimeUpdated = Boolean(result.revision)
-    if (runtimeUpdated) {
-      for (const entry of endpointResults.value.values()) {
-        if (!entry.pending) continue
-        entry.pending = false
-        entry.feedback = { message: t('admin.apis.routing.catalog.feedback.changesApplied'), color: 'success' }
-      }
-    }
     const identity = endpointIdentity(item)
     if (!item.route) routeIdentities.value.set(result.route.id, identity)
     endpointResults.value.set(identity, {
@@ -178,7 +172,7 @@ export function useAdminEndpointCatalogOperations(options: {
             : t('admin.apis.routing.catalog.feedback.serviceDiscovered'),
           color: result.connection.lastDiscoveryError ? 'warning' : 'success'
         }
-        await refresh()
+        await refreshAfterPublication()
       }
       return result.connection.lastDiscoveryError ? 'partial' as const : true
     } catch (error: unknown) {
@@ -187,7 +181,7 @@ export function useAdminEndpointCatalogOperations(options: {
           message: parseFetchError(error, t('admin.apis.routing.serviceControl.discoveryFailed')),
           color: 'error'
         }
-        await refresh()
+        await refreshAfterPublication()
       }
       return false
     } finally {
@@ -215,7 +209,6 @@ export function useAdminEndpointCatalogOperations(options: {
         }
       }
       await Promise.all(Array.from({ length: Math.min(4, queue.length) }, worker))
-      await refresh()
       const partial = results.filter(result => result === 'partial').length
       const failed = results.filter(result => result === false).length
       catalogFeedback.value = {
@@ -224,6 +217,7 @@ export function useAdminEndpointCatalogOperations(options: {
         }),
         color: failed > 0 ? 'error' : partial > 0 ? 'warning' : 'success'
       }
+      await refreshAfterPublication()
     } finally {
       discoveringAll.value = false
     }
@@ -255,7 +249,7 @@ export function useAdminEndpointCatalogOperations(options: {
         description: t(runtimeUpdated ? 'admin.apis.routing.feedback.runtimeUpdated' : 'admin.apis.routing.catalog.feedback.runtimeUnchanged'),
         color: runtimeUpdated ? 'success' : 'warning'
       }
-      await refresh()
+      await refreshAfterPublication()
     } catch (error: unknown) {
       const blockedBy = blockingUpstreamName(error)
       catalogFeedback.value = {
@@ -263,7 +257,7 @@ export function useAdminEndpointCatalogOperations(options: {
         description: blockedBy ? t('admin.apis.routing.catalog.feedback.applyBlockedBy', { upstream: blockedBy }) : undefined,
         color: 'error'
       }
-      await refresh()
+      await refreshAfterPublication()
     } finally {
       applying.value = false
     }
@@ -384,7 +378,7 @@ export function useAdminEndpointCatalogOperations(options: {
         const outcome = await setEndpointEnabled(service, item, enabled, false)
         if (outcome !== 'failed') {
           succeeded += 1
-          pending = outcome === 'pending' ? pending + 1 : 0
+          if (outcome === 'pending') pending += 1
           selectedKeys.value.delete(item.key)
         }
         bulkProgress.value.completed += 1
@@ -393,7 +387,7 @@ export function useAdminEndpointCatalogOperations(options: {
         message: t('admin.apis.routing.catalog.bulk.completed', { succeeded, failed: candidates.length - succeeded, pending }),
         color: succeeded < candidates.length ? 'error' : pending > 0 ? 'warning' : 'success'
       }
-      await refresh()
+      await refreshAfterPublication()
     } finally {
       bulkRunning.value = false
     }
@@ -402,7 +396,8 @@ export function useAdminEndpointCatalogOperations(options: {
   async function refreshAfterPublication() {
     if (disposed.value) return
     try {
-      await refresh()
+      const result = await readCatalog()
+      if (result?.status === 'error') throw result.error
     } catch (error: unknown) {
       if (!disposed.value) catalogFeedback.value = { message: parseFetchError(error, t('common.feedback.loadFailed')), color: 'error' }
     }

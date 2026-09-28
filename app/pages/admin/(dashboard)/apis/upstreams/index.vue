@@ -88,10 +88,11 @@ function openTarget(upstream: PlatformUpstream, target: PlatformUpstreamTarget |
 }
 
 async function refreshUpstreams() {
-  await resource.refresh()
-  if (targetUpstream.value) {
+  const result = await resource.refresh()
+  if (result.status === 'success' && targetUpstream.value) {
     targetUpstream.value = upstreams.value.find(item => item.id === targetUpstream.value?.id) ?? null
   }
+  return result
 }
 
 async function updateUpstreamStatus(upstream: PlatformUpstream) {

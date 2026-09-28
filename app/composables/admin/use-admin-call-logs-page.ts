@@ -130,8 +130,9 @@ export function useAdminCallLogsPage(options: UseAdminCallLogsPageOptions = {}) 
   })
 
   async function applyListFilters() {
-    await list.applyFilters()
+    const result = await list.applyFilters()
     await listState.syncQuery()
+    return result
   }
 
   const keywordApply = useDebouncedListKeyword(

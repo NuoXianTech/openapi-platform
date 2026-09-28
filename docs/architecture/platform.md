@@ -99,7 +99,7 @@ Target 操作还绑定当前 Upstream 上下文，切换详情后旧确认回调
 
 Revision 是 Gateway 的安全运行边界，不是管理员必须手工编排的日常步骤。生成 Revision 时 Platform：
 
-1. 读取全部可发布配置。
+1. 按发布范围选择 Route：显式应用全部读取期望配置，自动刷新沿用活动 Revision 的已应用配置，单个 Endpoint 直接发布仅替换指定 Route。
 2. 校验 Route 冲突、引用完整性和治理约束。
 3. 生成规范化 JSON payload。
 4. 计算 SHA-256 checksum。
@@ -108,6 +108,8 @@ Revision 是 Gateway 的安全运行边界，不是管理员必须手工编排�
 7. 通知 Gateway 刷新运行时缓存；数据库短暂不可用时最多使用 60 秒的上一个有效快照，超过窗口返回 `503 ROUTING_RUNTIME_UNAVAILABLE`，不伪装成 404。
 
 Route 行保存期望状态，活动 Revision 保存实际流量状态。接口目录的保存与“应用全部变更”分为两个事务：前者只更新控制面，后者校验完整配置并生成/复用快照；冲突校验或引用校验失败时，应用动作回滚，活动流量继续使用旧快照。其他需要立即生效的 Platform 管理对象仍使用单事务自动发布。
+
+Revision 的 `appliedRoutes` 保存最近明确应用的 Route 配置，包括因 Target 未就绪、Product / Version / Upstream 暂不可用而不能执行的 Route；`routes` 只保存当前可执行集合。自动刷新叠加当前分组、版本治理和基础设施状态，不读取待应用的 Route 启停或治理草稿。发现依据已应用的公开 Route 和当前契约维护支撑 Route；因此待停用的公开接口在明确应用前仍有完整支撑能力。回滚后继续以所激活 Revision 的已应用配置为基线。旧 Revision 缺少 `appliedRoutes` 时以其 `routes` 为基线，原 payload 和 checksum 不改写。去重同时比较已应用配置和可执行配置，确保未就绪 Route 的显式应用也可审计。
 
 Service 发现和配置同步包含对 Target 的网络调用，不能纳入数据库事务。它们采用显式可重试语义：网络结果先按 Target 记录，健康 Target 可先刷新运行快照，失败 Target 标记为 degraded/error；只有全部 Target 都失败时才向调用方返回整体错误。相同配置和相同 Revision 均保持幂等。
 
@@ -222,6 +224,8 @@ Route 可以声明：
 付费调用采用“预留—请求—结算”流程。只有成功结果扣除积分；验证失败、网络失败、超时和业务失败会释放预留。重复结算必须保持幂等，余额变化必须有可审计流水。
 
 ## 10. 数据与后台任务
+
+私有读取统一由 `use-private-resource.ts` 管理请求序号、取消、作用域关闭和错误状态，只在客户端挂载后读取，使用本地 ref，不进入 Nuxt SSR payload。`refresh` 返回 `success`、`error`、`superseded` 或 `disposed`，调用方据此决定是否展示读取错误或更新编辑上下文；读取失败不会把已完成的写操作改报失败。作用域关闭后保留的刷新方法不再发起请求，也不接纳旧响应。`use-private-paged-list.ts` 复用该生命周期，只负责查询、响应校验和末页修正，修正后的最终读取结果返回给调用方。详情失败保留已有数据，分页失败清空旧列表。
 
 系统设置编辑由 `use-admin-settings-page.ts` 管理已发送快照、当前草稿和已保存基线。
 普通保存与 OAuth 批量保存共用操作准入和结果接纳；成功响应更新基线，仅回写提交后未继续编辑的字段。

@@ -152,7 +152,7 @@ describe('Runtime management', () => {
 
   it('does not replay an activation after a refresh failure', async () => {
     const { management, runtime } = setup()
-    runtime.refresh.mockRejectedValueOnce(new Error('read failed'))
+    runtime.refresh.mockResolvedValueOnce({ status: 'error', error: new Error('read failed') })
     fetchMock.mockResolvedValue({})
     const activating = management.activateRevision(revision)
     await dialog.options.onConfirm()

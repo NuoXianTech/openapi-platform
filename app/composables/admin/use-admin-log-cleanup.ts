@@ -1,10 +1,11 @@
 import { ref, type Ref } from 'vue'
+import type { PrivateReadResult } from '~/composables/dashboard/use-private-resource'
 
 interface UseAdminLogCleanupOptions {
   endpoint: string
   total: Ref<number>
-  applyFilters: () => Promise<void>
-  refresh: () => Promise<void>
+  applyFilters: () => Promise<PrivateReadResult>
+  refresh: () => Promise<PrivateReadResult>
   buildFilters: () => Record<string, unknown>
 }
 
@@ -28,7 +29,11 @@ export function useAdminLogCleanup(options: UseAdminLogCleanupOptions) {
   const pendingFilters = ref<Record<string, unknown>>({})
 
   async function openCleanup() {
-    await options.applyFilters()
+    const result = await options.applyFilters()
+    if (result.status !== 'success') {
+      if (result.status === 'error') toast.add({ title: parseFetchError(result.error, t('common.feedback.loadFailed')), color: 'error' })
+      return
+    }
 
     if (options.total.value === 0) {
       toast.add({ title: t('admin.logs.cleanup.noMatching'), color: 'neutral' })
@@ -69,7 +74,8 @@ export function useAdminLogCleanup(options: UseAdminLogCleanupOptions) {
         color: 'success'
       })
       try {
-        await options.refresh()
+        const refreshed = await options.refresh()
+        if (refreshed?.status === 'error') throw refreshed.error
       } catch (error) {
         console.error('failed to refresh logs after cleanup', { endpoint: options.endpoint, error })
       }

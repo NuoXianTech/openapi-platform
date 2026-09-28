@@ -288,9 +288,8 @@ async function synchronizeEndpointSupportRoutes(input: {
   const endpoints = input.endpoints.filter(endpoint => !endpoint.system)
   const publicEndpoints = endpoints.filter(endpoint => !endpoint.support)
   const supportEndpoints = endpoints.filter(endpoint => endpoint.support)
-  const activePublicRoutes = routes.filter(binding => (
+  const publicRoutes = routes.filter(binding => (
     !binding.route.isSupportRoute
-    && binding.route.state === 'active'
     && publicEndpoints.some(endpoint => routeMatchesEndpoint(binding, endpoint))
   ))
   const handledSupportRouteIds = new Set<string>()
@@ -302,10 +301,15 @@ async function synchronizeEndpointSupportRoutes(input: {
       endpoint
     }).slug
     const versionName = endpointDefaultVersion(endpoint.path)
-    const groupedPublicRoutes = activePublicRoutes.filter(binding => (
+    const groupedRoutes = publicRoutes.filter(binding => (
       binding.product.slug === productSlug
       && binding.version.version === versionName
     ))
+    const activeRoutes = groupedRoutes.filter(binding => binding.route.state === 'active')
+    // Keep a disabled support definition even when the public Route has a
+    // pending disable. Publication can still derive support for its applied form.
+    const groupedPublicRoutes = activeRoutes.length ? activeRoutes : groupedRoutes
+    const state = activeRoutes.length ? 'active' as const : 'disabled' as const
     const candidates = routes.filter(binding => (
       binding.route.isSupportRoute
       && endpointBelongsToProduct({
@@ -380,7 +384,7 @@ async function synchronizeEndpointSupportRoutes(input: {
           rateLimitPerMinute: 0,
           rateLimitPerHour: 0,
           rateLimitPerDay: 0,
-          state: 'active'
+          state
         }),
         {
           transaction: input.transaction
@@ -406,7 +410,7 @@ async function synchronizeEndpointSupportRoutes(input: {
       timeoutMs: 10_000,
       maxRequestBytes: 1024 * 1024,
       maxResponseBytes: 10 * 1024 * 1024,
-      state: 'active'
+      state
     }, {
       isSupportRoute: true,
       transaction: input.transaction
@@ -659,6 +663,11 @@ export const platformEndpointService = {
         })
         return {
           value: { route, created: !existing },
+          applyRouteIds: [...new Set([
+            route.id,
+            ...existingRoutes.filter(binding => binding.route.upstreamServiceId === upstream.id && routeMatchesEndpoint(binding, endpoint))
+              .map(binding => binding.route.id)
+          ])],
           publishRouting: options.publishRouting !== false
         }
       }
@@ -741,6 +750,7 @@ export const platformEndpointService = {
         }
         return {
           value: route,
+          applyRouteIds: [route.id],
           publishRouting: options.publishRouting !== false
         }
       })

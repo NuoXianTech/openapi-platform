@@ -71,8 +71,9 @@ export function useAdminProductManagement() {
   async function refreshProducts() {
     if (disposed.value) return
     try {
-      await resource.refresh()
-      if (!disposed.value) reconcileEditors()
+      const result = await resource.refresh()
+      if (result?.status === 'error') throw result.error
+      if (!disposed.value && result?.status === 'success') reconcileEditors()
     } catch (error: unknown) {
       if (!disposed.value) toast.add({ title: parseFetchError(error, t('common.feedback.loadFailed')), color: 'error' })
     }

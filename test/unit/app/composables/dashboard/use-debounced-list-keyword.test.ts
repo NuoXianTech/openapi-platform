@@ -7,6 +7,14 @@ afterEach(() => {
 })
 
 describe('useDebouncedListKeyword', () => {
+  it('preserves the explicit read outcome for manual filtering', async () => {
+    const outcome = { status: 'error', error: new Error('read failed') }
+    const scope = effectScope()
+    const keyword = scope.run(() => useDebouncedListKeyword(ref('logs'), async () => outcome))!
+    await expect(keyword.applyNow()).resolves.toBe(outcome)
+    scope.stop()
+  })
+
   it('applies changed keywords after the debounce interval', async () => {
     vi.useFakeTimers()
     const keyword = ref('')

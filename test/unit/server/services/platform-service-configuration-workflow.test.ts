@@ -13,12 +13,12 @@ const context = vi.hoisted(() => ({ database: null as unknown }))
 vi.mock('~~/server/db/client', () => ({ get db() { return context.database } }))
 vi.mock('~~/server/services/platform-endpoint-publication-service', async (original) => ({
   ...await original<typeof import('~~/server/services/platform-endpoint-publication-service')>(),
-  applyPlatformRevision: vi.fn(async () => ({ revision: { id: 'published', sequence: 1 } }))
+  refreshPlatformRevision: vi.fn(async () => ({ revision: { id: 'published', sequence: 1 } }))
 }))
 const { platformUpstreamService } = await import('~~/server/services/platform-upstream-service')
 const { synchronizePlatformServiceConfiguration, updatePlatformServiceConfiguration } = await import('~~/server/services/platform-service-configuration-service')
 const { serviceControlClient } = await import('~~/server/utils/service-control-client')
-const { applyPlatformRevision } = await import('~~/server/services/platform-endpoint-publication-service')
+const { refreshPlatformRevision } = await import('~~/server/services/platform-endpoint-publication-service')
 const { discoverPlatformService } = await import('~~/server/services/platform-service-discovery-service')
 let client: PGlite
 let database: ReturnType<typeof drizzle<typeof schema>>
@@ -115,7 +115,7 @@ describe('configuration result acceptance', () => {
     const [current] = await database.select().from(schema.upstreamTargets).where(eq(schema.upstreamTargets.id, target.id))
     expect(current!.configurationState).toBeNull()
     expect(isServiceTargetReady(current!, { configurationRevision: 1, configurationHash: hash })).toBe(false)
-    expect(applyPlatformRevision).not.toHaveBeenCalled()
+    expect(refreshPlatformRevision).not.toHaveBeenCalled()
   })
 
   it('accepts a fresh save after its own revision and Target state reset', async () => {
@@ -136,6 +136,6 @@ describe('configuration result acceptance', () => {
     const result = await synchronizePlatformServiceConfiguration(upstream.id)
     expect(result.status).toBe('partial')
     expect(result.targets.map(target => target.configurationStatus).sort()).toEqual(['error', 'synced'])
-    expect(applyPlatformRevision).toHaveBeenCalledOnce()
+    expect(refreshPlatformRevision).toHaveBeenCalledOnce()
   })
 })

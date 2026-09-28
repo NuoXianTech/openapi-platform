@@ -14,11 +14,17 @@ export interface PlatformPublication {
   revision: { id: string, sequence: number }
 }
 
-/** 只重新发布运行快照，不改动可发布配置。 */
+/** 显式应用全部期望 Route 配置，生成或复用运行快照。 */
 export async function applyPlatformRevision(
   createdBy: number | null
 ): Promise<PlatformPublication> {
   const revision = await routingRevisionService.publish(createdBy)
+  return { revision: { id: revision.id, sequence: revision.sequence } }
+}
+
+/** Refresh infrastructure/governance without applying pending Endpoint edits. */
+export async function refreshPlatformRevision(createdBy: number | null): Promise<PlatformPublication> {
+  const revision = await routingRevisionService.publish(createdBy, { scope: { kind: 'applied' } })
   return { revision: { id: revision.id, sequence: revision.sequence } }
 }
 
@@ -31,6 +37,7 @@ export async function applyPlatformMutation<T>(
   mutate: (tx: DatabaseTransaction) => Promise<{
     value: T
     publishRouting?: boolean
+    applyRouteIds?: readonly string[]
   }>
 ) {
   const committed = await db.transaction(async (tx: DatabaseTransaction) => {
@@ -38,7 +45,12 @@ export async function applyPlatformMutation<T>(
     const mutation = await mutate(tx)
     const revision = mutation.publishRouting === false
       ? null
-      : await routingRevisionService.publish(createdBy, { tx })
+      : await routingRevisionService.publish(createdBy, {
+          tx,
+          scope: mutation.applyRouteIds
+            ? { kind: 'routes', routeIds: mutation.applyRouteIds }
+            : { kind: 'applied' }
+        })
     return { ...mutation, revision }
   })
   if (committed.publishRouting !== false) {

@@ -36,7 +36,7 @@ import {
   decryptStoredSecret,
   encryptStoredSecret
 } from '~~/server/utils/stored-secret'
-import { applyPlatformRevision } from '~~/server/services/platform-endpoint-publication-service'
+import { refreshPlatformRevision } from '~~/server/services/platform-endpoint-publication-service'
 
 const CONFIGURATION_SYNC_CONCURRENCY = 8
 const MAX_CONFIGURATION_REVISION = 2_147_483_647
@@ -309,7 +309,7 @@ async function publishRoutableConfigurationTargets(
   // Named apart from result.revision: that one is the Service configuration
   // revision, this one is the routing snapshot sequence. Spreading both
   // under one key silently dropped the configuration revision.
-  const { revision } = await applyPlatformRevision(null)
+  const { revision } = await refreshPlatformRevision(null)
   return { routingRevision: revision }
 }
 
