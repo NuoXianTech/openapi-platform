@@ -65,7 +65,7 @@ Git Tag 必须：
 8. 执行 [Platform 与 Service 集成测试](./service-integration-testing.md)。
 9. 按 [生产就绪清单](./production-readiness.md) 和[数据库迁移与版本升级](./database-migrations.md)完成备份、故障和回滚准备。
 
-当前开发线的唯一 `0000` 与旧 `0.1.0`、`0.1.1` 迁移链不兼容。Release Notes 必须明确要求重建 PostgreSQL 数据库或 PGlite 数据目录，并说明必要数据的导出/导入方案。
+`0.1.4` 的唯一 `0000` 与 `0.1.3` 及更早正式版本的迁移历史不兼容。Release Notes 必须明确要求使用新 PostgreSQL 数据库或新 PGlite 数据目录，并说明必要数据的导出/导入方案。`0.1.4` 发布后该基线冻结，后续 Schema 变更只能追加迁移。
 
 ## 5. 准备 Release PR
 
@@ -83,6 +83,7 @@ git switch -c release/v0.1.0
 - `package.json` 版本。
 - 锁文件中的根包版本（如果存在）。
 - Release Notes 草稿。
+- 在 `docs/releases/vX.Y.Z.md` 保存该版本的升级说明；Tag 工作流将其放在自动生成的提交记录之前。
 - 数据库、运行配置和回滚说明。
 
 提交并创建 Pull Request：

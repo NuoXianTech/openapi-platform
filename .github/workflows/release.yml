@@ -199,6 +199,12 @@ jobs:
           fi
 
           {
+            notes_file="docs/releases/${RELEASE_TAG}.md"
+            if [[ -f "$notes_file" ]]; then
+              cat "$notes_file"
+              echo
+              echo
+            fi
             echo "## Changes"
             echo
             git log "$commit_range" --first-parent \
