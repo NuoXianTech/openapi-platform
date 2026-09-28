@@ -21,7 +21,7 @@ import {
 } from '~~/server/errors/gateway-error'
 import {
   initializeGatewayStatistics,
-  persistGatewayBillingOutcome,
+  prepareGatewayBillingResponse,
   releaseGatewayBillingReservation
 } from '~~/server/services/dynamic-gateway-billing-service'
 import {
@@ -313,13 +313,15 @@ export const dynamicGatewayService = {
           if (tracked) tracked.responseSize = receivedBytes
         }
       })
-      let upstreamStatus = 502
       proxyStarted = true
       const response = await sendProxy(event, targetUrl.toString(), {
-        fetch: proxyFetch,
+        fetch: async (request, init) => prepareGatewayBillingResponse(
+          event,
+          await proxyFetch(request, init),
+          abortController!.signal
+        ),
         sendStream: true,
         onResponse: (_proxyEvent, upstreamResponse) => {
-          upstreamStatus = upstreamResponse.status
           if ([502, 503, 504].includes(upstreamResponse.status)) {
             // Retry guidance is a Platform-owned field; the upstream copy is
             // stripped by the response sanitizer and cannot override it.
@@ -336,11 +338,6 @@ export const dynamicGatewayService = {
           signal: abortController.signal
         }
       })
-      try {
-        await persistGatewayBillingOutcome(event, upstreamStatus)
-      } catch (error) {
-        throw new BillingPersistenceError(error)
-      }
       return { matched: true, response }
     } catch (caughtError) {
       let error = caughtError

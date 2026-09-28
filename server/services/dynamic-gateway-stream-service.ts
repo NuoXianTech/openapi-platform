@@ -77,9 +77,10 @@ export function createGatewayRequestBody(
 export async function limitGatewayUpstreamResponse(
   response: Response,
   maximumBytes: number,
-  onBytes?: (receivedBytes: number) => void
+  onBytes?: (receivedBytes: number) => void,
+  allowCaching = true
 ): Promise<Response> {
-  const headers = sanitizeGatewayResponseHeaders(response.headers)
+  const headers = sanitizeGatewayResponseHeaders(response.headers, allowCaching)
   if (!response.body) {
     onBytes?.(0)
     return new Response(null, {

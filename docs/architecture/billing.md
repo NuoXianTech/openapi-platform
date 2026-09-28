@@ -15,7 +15,7 @@
 1. 动态 Gateway 从活动 Routing Revision 解析 Route、Upstream 和 Target，并读取 Route 的治理字段。
 2. Gateway 检查 Route 状态、API Key、Scope、IP 和限流。付费请求在同一事务内通过用户行锁检查可用余额、预占 API Key 积分配额并创建 `active` 预留。
 3. Gateway 使用 Service Token 调用 Upstream；具体业务逻辑在 Service 执行。
-4. 符合结算条件的上游响应必须先把预留改为 `pending` 才能返回；失败响应则原子恢复 API Key 配额并删除预留。成功结果无法持久化时返回 `503 BILLING_UNAVAILABLE`，避免成功调用逃逸扣费。
+4. 付费成功响应先按实际字节累计校验 `maxResponseBytes`，在该上限内完整缓冲，再把预留改为 `pending`，最后才向客户端发送响应头和正文；免费响应继续流式转发。失败响应则原子恢复 API Key 配额并删除预留。成功结果无法持久化时返回 `503 BILLING_UNAVAILABLE`，避免成功调用逃逸扣费。付费响应的首字节延迟包含完整上游接收和持久化耗时，单个响应的缓冲量受 Route 大小上限约束。
 5. `server/plugins/api-call-stats.ts` 在响应发出后记录 `api_calls`、更新 `api_call_stats`，关联调用日志并尝试立即结算。
 6. `creditService.finalizeReservation` 在同一事务内扣减余额、写入 `credit_transactions`、更新 `api_calls.credits_cost` 并删除预留。事务按 `creditReservationId` 幂等；即使进程在调用日志写入前退出，后台任务也能先完成扣费，再安全补挂调用日志。
 7. `server/plugins/credit-reservations-retry.ts` 每 30 秒在 Redis lease 下扫描到期的 `pending` 预留并退避重试；达到上限后进入 `dead_letter`。未配置 Redis 的单实例使用进程内 lease 回退。

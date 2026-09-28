@@ -45,7 +45,10 @@ const BLOCKED_RESPONSE_HEADERS = new Set([
   'x-permitted-cross-domain-policies'
 ])
 
-export function sanitizeGatewayResponseHeaders(source: Headers): Headers {
+export function sanitizeGatewayResponseHeaders(
+  source: Headers,
+  allowCaching = true
+): Headers {
   const headers = new Headers()
   for (const [name, value] of source) {
     const normalized = name.toLowerCase()
@@ -56,7 +59,19 @@ export function sanitizeGatewayResponseHeaders(source: Headers): Headers {
       || normalized.startsWith('x-ratelimit-')
     ) continue
     if (normalized.startsWith('access-control-')) continue
+    if (!allowCaching && (
+      normalized === 'cache-control'
+      || normalized.endsWith('-cache-control')
+      || normalized === 'surrogate-control'
+      || normalized === 'expires'
+      || normalized === 'age'
+    )) continue
     headers.append(name, value)
+  }
+  if (!allowCaching) {
+    headers.set('cache-control', 'private, no-store')
+    headers.set('cdn-cache-control', 'no-store')
+    headers.set('surrogate-control', 'no-store')
   }
   return headers
 }

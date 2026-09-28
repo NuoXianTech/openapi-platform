@@ -2,6 +2,7 @@ import type { H3Event } from 'h3'
 import { getHeader, getRequestURL } from 'h3'
 import type { ResolvedDynamicRoute } from '~~/server/services/routing-runtime-service'
 import { creditService } from '~~/server/services/credit-service'
+import { BillingPersistenceError } from '~~/server/errors/gateway-error'
 import { shouldChargeGatewayCall } from '~~/server/utils/gateway-billing'
 import { getAppEventContext } from '~~/server/utils/event-context'
 import { toNullableNonNegativeInteger } from '~~/server/utils/number'
@@ -48,7 +49,7 @@ export function initializeGatewayStatistics(
   }
 }
 
-export async function persistGatewayBillingOutcome(
+async function persistGatewayBillingOutcome(
   event: H3Event,
   statusCode: number
 ): Promise<void> {
@@ -70,6 +71,40 @@ export async function persistGatewayBillingOutcome(
     reservation.userId
   )
   if (!marked) throw new Error('Billing reservation is no longer active')
+}
+
+/** Buffer only paid successful responses, after the streaming size limiter.
+ * No success bytes may escape before a durable settlement intent exists. */
+export async function prepareGatewayBillingResponse(
+  event: H3Event,
+  response: Response,
+  signal: AbortSignal
+): Promise<Response> {
+  const billing = getAppEventContext(event).apiBilling
+  if (!billing?.creditReservation) return response
+
+  let prepared = response
+  if (shouldChargeGatewayCall({
+    costCredits: billing.costCredits,
+    apiKeyUserId: billing.apiKeyUserId,
+    statusCode: response.status
+  }) && response.body) {
+    const body = await response.arrayBuffer()
+    prepared = new Response(body, {
+      status: response.status,
+      statusText: response.statusText,
+      headers: response.headers
+    })
+  }
+  signal.throwIfAborted()
+  try {
+    await persistGatewayBillingOutcome(event, response.status)
+  } catch (error) {
+    await prepared.body?.cancel().catch(() => undefined)
+    throw new BillingPersistenceError(error)
+  }
+  signal.throwIfAborted()
+  return prepared
 }
 
 export async function releaseGatewayBillingReservation(

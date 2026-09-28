@@ -1448,10 +1448,13 @@ describe('Platform to Node API Service acceptance', () => {
     )
     const dplayerHTML = await dplayer.text()
     expect(dplayer.status).toBe(200)
-    expect(dplayerHTML).toContain('/v1/player/assets/dplayer-1.27.2-nuoxi4n.min.js')
+    const dplayerAssetPath = dplayerHTML.match(
+      /src="(\/v1\/player\/assets\/dplayer-[^"/]+\.js)"/
+    )?.[1]
+    expect(dplayerAssetPath).toBeTruthy()
 
     const customAsset = await fetch(
-      `${gatewayBaseURL}/v1/player/assets/dplayer-1.27.2-nuoxi4n.min.js`
+      `${gatewayBaseURL}${dplayerAssetPath}`
     )
     const customAssetBody = await customAsset.text()
     expect(customAsset.status).toBe(200)
@@ -1749,7 +1752,8 @@ async function readPublicEnvelope<T = unknown>(
   expect(body.timestamp).toBeGreaterThan(0)
   expect(body.timestamp).toBeLessThanOrEqual(Date.now())
   expect(response.headers.get('content-type')).toContain('application/json')
-  expect(response.headers.get('cache-control')).toBe('no-store')
+  expect(response.headers.get('cache-control')?.split(',').map(value => value.trim()))
+    .toContain('no-store')
   expect(response.headers.get('x-request-id')).toBeTruthy()
   return body
 }

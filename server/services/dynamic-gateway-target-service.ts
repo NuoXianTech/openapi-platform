@@ -414,6 +414,12 @@ export function createGatewayProxyFetch(input: {
 }): typeof fetch {
   return async (_request, init) => {
     const method = (init?.method ?? 'GET').toUpperCase()
+    const route = input.match.route
+    const allowCaching = !route.isApiKey
+      && !route.isStatistics
+      && route.creditsCost === 0
+      && ![route.rateLimitPerSecond, route.rateLimitPerMinute,
+        route.rateLimitPerHour, route.rateLimitPerDay].some(limit => limit > 0)
     const mayRetry = RETRYABLE_METHODS.has(method)
     const targets = mayRetry ? input.targets : input.targets.slice(0, 1)
     const overallSignal = init?.signal ?? null
@@ -480,7 +486,8 @@ export function createGatewayProxyFetch(input: {
         return limitGatewayUpstreamResponse(
           response,
           input.maximumResponseBytes,
-          input.onResponseBytes
+          input.onResponseBytes,
+          allowCaching
         )
       } catch (error) {
         releaseAttempt()

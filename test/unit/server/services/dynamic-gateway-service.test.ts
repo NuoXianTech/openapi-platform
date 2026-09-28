@@ -181,40 +181,6 @@ describe('dynamic gateway streaming billing', () => {
     expect(headers.get('x-forwarded-proto')).toBe('https')
   })
 
-  it('does not settle a paid call before the streamed response completes', async () => {
-    const event = createEvent()
-    let finishProxy: (() => Promise<void>) | null = null
-    mocks.sendProxy.mockImplementation((proxyEvent, _url, options) => (
-      new Promise((resolve, reject) => {
-        finishProxy = async () => {
-          await options.onResponse?.(
-            proxyEvent,
-            new Response('streamed', { status: 200 })
-          )
-          resolve('streamed')
-        }
-        options.fetchOptions?.signal?.addEventListener(
-          'abort',
-          () => reject(options.fetchOptions?.signal?.reason),
-          { once: true }
-        )
-      })
-    ))
-
-    const handling = dynamicGatewayService.tryHandle(event)
-    await vi.waitFor(() => expect(mocks.sendProxy).toHaveBeenCalledOnce())
-    expect(mocks.markReservationPending).not.toHaveBeenCalled()
-    expect(mocks.releaseReservation).not.toHaveBeenCalled()
-
-    await finishProxy?.()
-    await expect(handling).resolves.toMatchObject({
-      matched: true,
-      response: 'streamed'
-    })
-    expect(mocks.markReservationPending).toHaveBeenCalledWith(11, 7)
-    expect(mocks.releaseReservation).not.toHaveBeenCalled()
-  })
-
   it('releases the reservation when the client interrupts the stream', async () => {
     const event = createEvent()
     mocks.sendProxy.mockImplementation((_proxyEvent, _url, options) => (
