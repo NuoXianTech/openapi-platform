@@ -1,54 +1,23 @@
 <script setup lang="ts">
-import type { FormError, FormSubmitEvent, TableColumn } from '@nuxt/ui'
+import type { FormError, TableColumn } from '@nuxt/ui'
 import { PAGE_SIZE_OPTIONS } from '~/constants/pagination'
-import { usePrivatePagedList } from '~/composables/dashboard/use-private-paged-list'
-import { usePrivateResource } from '~/composables/dashboard/use-private-resource'
-import type { PlatformRoutingRevisionSummary, PlatformRuntime } from '#shared/types/platform'
+import { useAdminRuntimeManagement } from '~/composables/admin/use-admin-runtime-management'
+import type { PlatformRoutingRevisionSummary } from '#shared/types/platform'
 import { parseFetchError } from '~/utils/client-error'
 import { compactFormErrors } from '~/utils/form-validation'
 import { formatPlatformDate } from '~/utils/platform-display'
 
 const { t, locale } = useI18n()
-const toast = useToast()
-const confirm = useConfirmDialog()
 
 useHead({ title: () => t('admin.apis.routing.sections.revisionsTitle') })
 
 const hostPattern = /^(?:\*\.)?(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)*[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/i
 
-const runtimeResource = usePrivateResource<PlatformRuntime>({
-  path: '/api/admin/v1/runtime',
-  defaultData: () => ({
-    defaultDomain: null,
-    activeRevisionId: null,
-    updatedAt: ''
-  })
-})
-const revisionsResource = usePrivatePagedList<Record<string, never>, PlatformRoutingRevisionSummary>({
-  path: '/api/admin/v1/revisions',
-  defaultFilters: {},
-  defaultPageSize: PAGE_SIZE_OPTIONS[0]
-})
-
-const runtime = computed(() => runtimeResource.data.value)
-const revisions = computed(() => revisionsResource.items.value)
-const revisionPage = revisionsResource.page
-const revisionPageSize = revisionsResource.pageSize
-const loading = computed(() => (
-  runtimeResource.loading.value || revisionsResource.loading.value
-))
-const resourceError = computed(() => (
-  runtimeResource.error.value || revisionsResource.error.value
-))
-const domainState = reactive({ defaultDomain: '' })
-const savingDomain = ref(false)
-const domainDirty = computed(() => (
-  domainState.defaultDomain.trim() !== (runtime.value.defaultDomain ?? '')
-))
-
-watch(() => runtime.value.defaultDomain, (defaultDomain) => {
-  domainState.defaultDomain = defaultDomain ?? ''
-}, { immediate: true })
+const {
+  runtime, revisions, revisionsResource, revisionPage, revisionPageSize,
+  loading, resourceError, domainState, domainDirty, controls,
+  refresh, saveDomain, activateRevision
+} = useAdminRuntimeManagement()
 
 function validateDomain(value: Partial<typeof domainState>): FormError<string>[] {
   return compactFormErrors(
@@ -56,65 +25,6 @@ function validateDomain(value: Partial<typeof domainState>): FormError<string>[]
       ? { name: 'defaultDomain', message: t('admin.apis.routing.validation.hostInvalid') }
       : null
   )
-}
-
-async function refresh() {
-  await Promise.all([runtimeResource.refresh(), revisionsResource.refresh()])
-}
-
-async function saveDomain(event: FormSubmitEvent<typeof domainState>) {
-  savingDomain.value = true
-  try {
-    const result = await $fetch('/api/admin/v1/runtime', {
-      method: 'PATCH',
-      body: { defaultDomain: event.data.defaultDomain.trim() || null }
-    })
-    toast.add({
-      title: t('admin.apis.routing.feedback.defaultDomainUpdated'),
-      description: t(result.revision
-        ? 'admin.apis.routing.feedback.runtimeUpdated'
-        : 'admin.apis.routing.feedback.runtimeUnchanged'),
-      color: 'success'
-    })
-    await refresh()
-  } catch (error: unknown) {
-    toast.add({
-      title: parseFetchError(error, t('admin.apis.routing.feedback.updateFailed')),
-      color: 'error'
-    })
-  } finally {
-    savingDomain.value = false
-  }
-}
-
-async function activateRevision(revision: PlatformRoutingRevisionSummary) {
-  if (revision.id === runtime.value.activeRevisionId) return
-
-  await confirm({
-    title: t('admin.apis.routing.rollback.title', { sequence: revision.sequence }),
-    description: t('admin.apis.routing.rollback.description'),
-    confirmLabel: t('admin.apis.routing.actions.activateRevision'),
-    confirmColor: 'warning',
-    onConfirm: async () => {
-      try {
-        await $fetch('/api/admin/v1/revisions/activate', {
-          method: 'POST',
-          body: { revisionId: revision.id }
-        })
-        toast.add({
-          title: t('admin.apis.routing.feedback.revisionActivated', { sequence: revision.sequence }),
-          color: 'success'
-        })
-        await refresh()
-      } catch (error: unknown) {
-        toast.add({
-          title: parseFetchError(error, t('admin.apis.routing.feedback.activateFailed')),
-          color: 'error'
-        })
-        throw error
-      }
-    }
-  })
 }
 
 const columns = computed<TableColumn<PlatformRoutingRevisionSummary>[]>(() => [
@@ -142,6 +52,7 @@ const columns = computed<TableColumn<PlatformRoutingRevisionSummary>[]>(() => [
           color="error"
           variant="soft"
           size="xs"
+          :disabled="controls.refreshDisabled"
           @click="refresh"
         >
           {{ $t('common.actions.retry') }}
@@ -154,7 +65,7 @@ const columns = computed<TableColumn<PlatformRoutingRevisionSummary>[]>(() => [
         :state="domainState"
         :validate="validateDomain"
         class="flex flex-col gap-4 lg:flex-row lg:items-end"
-        @submit="saveDomain"
+        @submit="saveDomain()"
       >
         <UFormField
           name="defaultDomain"
@@ -170,8 +81,8 @@ const columns = computed<TableColumn<PlatformRoutingRevisionSummary>[]>(() => [
         </UFormField>
         <UButton
           type="submit"
-          :loading="savingDomain"
-          :disabled="!domainDirty"
+          :loading="controls.savingDomain"
+          :disabled="!domainDirty || controls.disabled"
         >
           {{ $t('common.actions.save') }}
         </UButton>
@@ -190,6 +101,7 @@ const columns = computed<TableColumn<PlatformRoutingRevisionSummary>[]>(() => [
           variant="outline"
           icon="i-lucide-refresh-cw"
           :loading="loading"
+          :disabled="controls.refreshDisabled"
           @click="refresh"
         >
           {{ $t('common.actions.refresh') }}
@@ -250,6 +162,7 @@ const columns = computed<TableColumn<PlatformRoutingRevisionSummary>[]>(() => [
               variant="ghost"
               size="xs"
               icon="i-lucide-rotate-ccw"
+              :disabled="controls.disabled"
               @click="activateRevision(row.original)"
             >
               {{ $t('admin.apis.routing.actions.activateRevision') }}

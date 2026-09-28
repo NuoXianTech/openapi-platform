@@ -47,5 +47,13 @@ export interface RoutingRevisionPayload {
   generatedAt: string
   defaultDomain: string | null
   routes: RoutingRevisionRoute[]
+  /** Last explicitly applied Route configuration, including temporarily unroutable Routes.
+   * Older revisions use their executable routes as this baseline. */
+  appliedRoutes?: RoutingRevisionRoute[]
   upstreams: RoutingRevisionUpstream[]
 }
+
+export type RoutingPublicationScope
+  = { kind: 'all' }
+    | { kind: 'applied' }
+    | { kind: 'routes', routeIds: readonly string[] }

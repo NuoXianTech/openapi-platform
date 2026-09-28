@@ -37,10 +37,10 @@ let liveStatsRefreshTimer: ReturnType<typeof setInterval> | undefined
 let liveStatsRefreshPending = false
 
 const introSummaryLoading = computed(() =>
-  isLoading.value || (publicStatsLoading.value && !liveStats.value)
+  publicStatsLoading.value && !liveStats.value
 )
 const introSummaryError = computed(() =>
-  Boolean(loadError.value) || (Boolean(publicStatsError.value) && !liveStats.value)
+  Boolean(publicStatsError.value) && !liveStats.value
 )
 const popularApisLoading = computed(() => isLoading.value || publicStatsLoading.value)
 const popularApisLoadError = computed(() => {
@@ -49,7 +49,7 @@ const popularApisLoadError = computed(() => {
 })
 
 async function refreshLiveStats(): Promise<void> {
-  if (liveStatsRefreshPending || document.visibilityState !== 'visible') return
+  if (!settings.value.homeRequestCountEnabled || liveStatsRefreshPending || document.visibilityState !== 'visible') return
 
   liveStatsRefreshPending = true
   try {
@@ -73,23 +73,9 @@ onBeforeUnmount(() => {
   if (liveStatsRefreshTimer) clearInterval(liveStatsRefreshTimer)
 })
 
-const introMetrics = computed(() => {
-  const apis = allApis.value
-  const total = totalApiCount.value
-
-  return {
-    total,
-    calls: liveStats.value?.totalCalls
-      ?? publicStats.value?.overview.totalCalls
-      ?? apis.reduce((sum, api) => sum + (Number(api.totalCalls) || 0), 0),
-    successRate: liveStats.value?.successRate
-      ?? publicStats.value?.overview.successRate
-      ?? 0,
-    users: liveStats.value?.userCount
-      ?? publicStats.value?.overview.userCount
-      ?? 0
-  }
-})
+const totalCallCount = computed(() => liveStats.value?.totalCalls
+  ?? publicStats.value?.overview.totalCalls
+  ?? 0)
 
 const popularApis = computed<ApiCatalogItem[]>(() => {
   const apiByRouteId = new Map(allApis.value.flatMap(api => (
@@ -128,10 +114,8 @@ useSeoMeta({
     <CommonPublicApiIntro
       :site-description="settings.siteDescription"
       :uptime-days="settings.uptimeDays"
-      :total-count="introMetrics.total"
-      :call-count="introMetrics.calls"
-      :success-rate="introMetrics.successRate"
-      :user-count="introMetrics.users"
+      :show-call-count="settings.homeRequestCountEnabled"
+      :call-count="totalCallCount"
       :summary-loading="introSummaryLoading"
       :summary-error="introSummaryError"
     />

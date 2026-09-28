@@ -6,9 +6,9 @@ interface DebouncedListKeywordOptions {
   maxWait?: number
 }
 
-export function useDebouncedListKeyword(
+export function useDebouncedListKeyword<TResult>(
   keyword: MaybeRefOrGetter<string>,
-  applyFilters: () => void | Promise<void>,
+  applyFilters: () => TResult | Promise<TResult>,
   options: DebouncedListKeywordOptions = {}
 ) {
   const normalizedKeyword = () => toValue(keyword).trim()
@@ -20,7 +20,7 @@ export function useDebouncedListKeyword(
 
   async function applyNow() {
     markApplied()
-    await applyFilters()
+    return await applyFilters()
   }
 
   watchDebounced(

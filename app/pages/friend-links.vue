@@ -30,7 +30,6 @@ const {
   items,
   loading,
   error,
-  isEmpty,
   fetchFriendLinks
 } = useFriendLinkList()
 
@@ -48,7 +47,13 @@ const filteredItems = computed(() => {
   })
 })
 
-const isFilteredEmpty = computed(() => !loading.value && !error.value && filteredItems.value.length === 0 && items.value.length > 0)
+const isFilteredEmpty = computed(() => filteredItems.value.length === 0 && items.value.length > 0)
+const resultState = computed(() => {
+  if (loading.value && !items.value.length) return 'loading'
+  if (error.value && !loading.value) return 'error'
+  if (!items.value.length) return 'empty'
+  return isFilteredEmpty.value ? 'filtered-empty' : 'content'
+})
 
 const totalCount = computed(() => items.value.length)
 const activeCount = computed(() => items.value.filter(item => item.isActive).length)
@@ -92,7 +97,7 @@ const visibleCount = computed(() => filteredItems.value.length)
         </div>
 
         <div
-          v-if="!loading && !error && !isEmpty"
+          v-if="items.length > 0 && (!error || loading)"
           class="friend-links-result-meta"
         >
           <span>
@@ -114,33 +119,30 @@ const visibleCount = computed(() => filteredItems.value.length)
           </span>
         </div>
 
-        <Transition
-          name="state-fade"
-          mode="out-in"
+        <CommonStateTransition
+          :state-key="resultState"
+          :busy="loading"
+          :refreshing="loading && items.length > 0"
+          class="friend-links-result-state"
         >
           <section
-            v-if="loading"
+            v-if="resultState === 'loading'"
             key="loading"
-            class="friend-links-state"
+            class="grid gap-3.5 sm:grid-cols-2 lg:grid-cols-3"
+            aria-hidden="true"
           >
-            <UEmpty
-              icon="i-lucide-loader-circle"
-              :title="t('common.states.loading')"
-              :description="t('public.friendLinks.loadingDescription')"
-              variant="naked"
-              size="lg"
-            />
+            <USkeleton v-for="index in 6" :key="index" class="h-44 rounded-lg" />
           </section>
 
           <section
-            v-else-if="error"
+            v-else-if="resultState === 'error'"
             key="error"
             class="friend-links-state"
           >
             <UEmpty
               icon="i-mdi-alert-circle-outline"
               :title="t('common.states.loadFailed')"
-              :description="error"
+              :description="error || undefined"
               variant="naked"
               size="lg"
               :actions="retryActions"
@@ -148,7 +150,7 @@ const visibleCount = computed(() => filteredItems.value.length)
           </section>
 
           <section
-            v-else-if="isEmpty"
+            v-else-if="resultState === 'empty'"
             key="empty"
             class="friend-links-state"
           >
@@ -162,7 +164,7 @@ const visibleCount = computed(() => filteredItems.value.length)
           </section>
 
           <section
-            v-else-if="isFilteredEmpty"
+            v-else-if="resultState === 'filtered-empty'"
             key="filtered-empty"
             class="friend-links-state"
           >
@@ -182,7 +184,7 @@ const visibleCount = computed(() => filteredItems.value.length)
           >
             <LinkList :items="filteredItems" />
           </section>
-        </Transition>
+        </CommonStateTransition>
       </section>
     </main>
 
@@ -247,6 +249,10 @@ const visibleCount = computed(() => filteredItems.value.length)
 
 .friend-links-results {
   min-width: 0;
+}
+
+.friend-links-result-state {
+  min-height: 16rem;
 }
 
 .friend-links-state {

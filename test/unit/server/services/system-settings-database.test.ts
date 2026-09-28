@@ -7,6 +7,7 @@ import {
   SYSTEM_SETTING_NAMES
 } from '~~/server/config/system-settings'
 import * as schema from '~~/server/db/schema'
+import { adminUpdateSiteSettingsSchema } from '~~/server/schemas/admin/site-settings'
 
 const testContext = vi.hoisted(() => ({
   database: null as unknown,
@@ -195,5 +196,20 @@ describe('system settings database service', () => {
     expect(systemSettingsService.registeredKeys()).toEqual(
       SYSTEM_SETTING_NAMES.map(name => SYSTEM_SETTING_DEFINITIONS[name].key)
     )
+  })
+
+  it('persists the home request count switch and exposes both states publicly', async () => {
+    expect((await systemSettingsService.getPublicSettings()).homeRequestCountEnabled).toBe(true)
+
+    for (const enabled of [false, true]) {
+      const patch = adminUpdateSiteSettingsSchema.parse({ homeRequestCountEnabled: enabled })
+      testContext.deletedCacheKeys.length = 0
+      await systemSettingsService.update(patch)
+
+      expect((await systemSettingsService.getSettings()).homeRequestCountEnabled).toBe(enabled)
+      expect((await systemSettingsService.getForAdmin()).homeRequestCountEnabled).toBe(enabled)
+      expect((await systemSettingsService.getPublicSettings()).homeRequestCountEnabled).toBe(enabled)
+      expect(testContext.deletedCacheKeys).toContain('cache:public:settings')
+    }
   })
 })

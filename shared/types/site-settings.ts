@@ -7,6 +7,7 @@ export interface SystemSettings {
   siteName: string
   siteDescription: string
   startTime: string
+  homeRequestCountEnabled: boolean
   registrationMode: 'open' | 'invite' | 'closed'
   registrationInviteCode: string
   defaultRegisterCredits: number
@@ -84,6 +85,7 @@ export interface PublicSiteSettings {
   siteDescription: string
   startTime: string
   uptimeDays: number | null
+  homeRequestCountEnabled: boolean
   icpBeian: string | null
   policeBeian: string | null
   policeBeianCode: string | null

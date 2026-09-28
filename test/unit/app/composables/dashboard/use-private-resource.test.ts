@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { ref } from 'vue'
+import { effectScope, ref } from 'vue'
 import { usePrivateResource } from '@/composables/dashboard/use-private-resource'
 
 afterEach(() => {
@@ -7,6 +7,45 @@ afterEach(() => {
 })
 
 describe('usePrivateResource', () => {
+  it('returns a read failure while retaining the last successful detail', async () => {
+    const failure = { message: 'network down' }
+    vi.stubGlobal('$fetch', vi.fn().mockResolvedValueOnce({ id: 1 }).mockRejectedValueOnce(failure))
+    const resource = usePrivateResource({ path: '/api/detail', defaultData: () => ({ id: 0 }), immediate: false })
+    await expect(resource.refresh()).resolves.toEqual({ status: 'success', data: { id: 1 } })
+    await expect(resource.refresh()).resolves.toEqual({ status: 'error', error: failure })
+    expect(resource.data.value).toEqual({ id: 1 })
+    expect(resource.error.value).toBe(failure)
+  })
+
+  it('rejects late results and retained refresh calls after scope disposal', async () => {
+    let resolve!: (value: { id: number }) => void
+    const fetchMock = vi.fn().mockReturnValue(new Promise(res => { resolve = res }))
+    vi.stubGlobal('$fetch', fetchMock)
+    const scope = effectScope()
+    const resource = scope.run(() => usePrivateResource({ path: '/api/detail', defaultData: () => ({ id: 0 }), immediate: false }))!
+    const pending = resource.refresh()
+    scope.stop()
+    expect(fetchMock.mock.calls[0]?.[1].signal.aborted).toBe(true)
+    resolve({ id: 1 })
+    await expect(pending).resolves.toEqual({ status: 'disposed' })
+    await expect(resource.refresh()).resolves.toEqual({ status: 'disposed' })
+    expect(fetchMock).toHaveBeenCalledOnce()
+    expect(resource.data.value).toEqual({ id: 0 })
+    expect(resource.loading.value).toBe(false)
+  })
+
+  it('returns superseded for a late error without replacing the current success', async () => {
+    let reject!: (error: unknown) => void
+    vi.stubGlobal('$fetch', vi.fn().mockReturnValueOnce(new Promise((_resolve, rej) => { reject = rej })).mockResolvedValueOnce({ id: 2 }))
+    const resource = usePrivateResource({ path: '/api/detail', defaultData: () => ({ id: 0 }), immediate: false })
+    const stale = resource.refresh()
+    await expect(resource.refresh()).resolves.toEqual({ status: 'success', data: { id: 2 } })
+    reject(new Error('stale failure'))
+    await expect(stale).resolves.toEqual({ status: 'superseded' })
+    expect(resource.error.value).toBeNull()
+    expect(resource.status.value).toBe('success')
+  })
+
   it('resolves reactive request inputs for every refresh', async () => {
     const fetchMock = vi.fn()
       .mockResolvedValueOnce({ id: 1 })

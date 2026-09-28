@@ -18,10 +18,6 @@ export function getApiKeySecret(): Buffer {
   return cachedApiKeySecret
 }
 
-export function assertApiKeySecretConfigured(): void {
-  getApiKeySecret()
-}
-
 function deriveKey(domain: StoredSecretDomain, purpose: 'encrypt' | 'lookup'): Buffer {
   return createHmac('sha256', getApiKeySecret())
     .update(`openapi:${domain}:${purpose}:${ENCRYPTION_VERSION}`)

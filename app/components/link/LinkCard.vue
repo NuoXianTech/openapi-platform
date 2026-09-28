@@ -278,4 +278,9 @@ const isActive = computed(() => props.status === 1)
 .link-card--inactive .link-card__title {
   color: var(--ui-text-muted);
 }
+
+@media (prefers-reduced-motion: reduce) {
+  .link-card__cta { transition: none; }
+  .link-card:hover .link-card__cta { gap: 3px; }
+}
 </style>

@@ -111,6 +111,24 @@ async function assertCanDisableLastTarget(
   })
 }
 
+/** Stage credentials in the caller's transaction; only discovery promotes them. */
+async function stageServiceToken(tx: DatabaseTransaction, id: string, token: string) {
+  const normalizedToken = normalizeServiceToken(token)
+  const service = await platformUpstreamService.findById(id, { transaction: tx })
+  if (!service || service.deletedAt) {
+    throw createApplicationError({ statusCode: 404, message: 'upstream not found', data: { code: 'UPSTREAM_NOT_FOUND' } })
+  }
+  const updated = firstRow(await tx.update(upstreamServiceConnections).set({
+    pendingServiceTokenCiphertext: encryptStoredSecret(normalizedToken, 'service-token'),
+    lastDiscoveryError: 'Service Token changed; run discovery to verify the connection',
+    updatedAt: new Date()
+  }).where(eq(upstreamServiceConnections.upstreamServiceId, id)).returning())
+  if (!updated) {
+    throw createApplicationError({ statusCode: 404, message: 'upstream not found', data: { code: 'SERVICE_CONNECTION_NOT_FOUND' } })
+  }
+  return updated
+}
+
 export const platformUpstreamService = {
   async list(
     options: { checkAvailability?: boolean, ids?: string[] } = {}
@@ -377,7 +395,7 @@ export const platformUpstreamService = {
                 lastError: null
               }
             : {}),
-          updatedAt: new Date()
+          updatedAt: new Date(Math.max(Date.now(), binding.target.updatedAt.getTime() + 1))
         }).where(eq(upstreamTargets.id, id)).returning())
         if (!target) throw new Error('target update returned no row')
         const disablingPublishedTarget = binding.target.enabled
@@ -454,48 +472,23 @@ export const platformUpstreamService = {
   },
 
   async updateServiceToken(id: string, serviceToken: string) {
-    const normalizedToken = normalizeServiceToken(serviceToken)
-    const service = await platformUpstreamService.findById(id)
-    if (!service || service.deletedAt) {
-      throw createApplicationError({
-        statusCode: 404,
-        message: 'upstream not found',
-        data: { code: 'UPSTREAM_NOT_FOUND' }
-      })
-    }
-    const serviceTokenCiphertext = encryptStoredSecret(
-      normalizedToken,
-      'service-token'
-    )
-    const updated = firstRow(await db.update(upstreamServiceConnections)
-      .set({
-        // Control-plane requests verify the pending token before Gateway
-        // traffic switches away from the active credential.
-        pendingServiceTokenCiphertext: serviceTokenCiphertext,
-        lastDiscoveryError: 'Service Token changed; run discovery to verify the connection',
-        updatedAt: new Date()
-      })
-      .where(eq(upstreamServiceConnections.upstreamServiceId, id))
-      .returning())
-    if (!updated) {
-      throw createApplicationError({
-        statusCode: 404,
-        message: 'upstream not found',
-        data: { code: 'SERVICE_CONNECTION_NOT_FOUND' }
-      })
-    }
+    const connection = await db.transaction(tx => stageServiceToken(tx, id, serviceToken))
     upstreamServiceTokenService.invalidate(id)
-    return toServiceConnectionView(updated)
+    return toServiceConnectionView(connection)
   },
 
   async updateAndPublish(
     id: string,
-    input: UpdateUpstreamInput,
+    input: UpdateUpstreamInput & { serviceToken?: string },
     createdBy: number | null
   ) {
-    const committed = await applyPlatformMutation(createdBy, async tx => ({
-      value: await platformUpstreamService.update(id, input, { transaction: tx })
-    }))
+    const { serviceToken, ...patch } = input
+    const committed = await applyPlatformMutation(createdBy, async (tx) => {
+      const upstream = await platformUpstreamService.update(id, patch, { transaction: tx })
+      if (serviceToken !== undefined) await stageServiceToken(tx, id, serviceToken)
+      return { value: upstream, publishRouting: Object.keys(patch).length > 0 }
+    })
+    if (serviceToken !== undefined) upstreamServiceTokenService.invalidate(id)
     const { value: upstream, ...publication } = committed
     return { upstream, ...publication }
   },

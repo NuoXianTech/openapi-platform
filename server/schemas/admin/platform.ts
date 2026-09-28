@@ -38,12 +38,14 @@ export const adminUpdateVersionSchema = z.strictObject({
   changelog: z.string().trim().max(CONTENT_CONSTRAINTS.VERSION_CHANGELOG_MAX_LENGTH).optional()
 }).refine(value => Object.keys(value).length > 0, 'at least one field is required')
 
+const serviceTokenSchema = z.string().trim()
+  .min(UPSTREAM_CONSTRAINTS.SERVICE_TOKEN_MIN_LENGTH)
+  .max(UPSTREAM_CONSTRAINTS.SERVICE_TOKEN_MAX_LENGTH)
+
 export const adminCreateUpstreamSchema = z.object({
   slug: slugSchema,
   name: nameSchema,
-  serviceToken: z.string().trim()
-    .min(UPSTREAM_CONSTRAINTS.SERVICE_TOKEN_MIN_LENGTH)
-    .max(UPSTREAM_CONSTRAINTS.SERVICE_TOKEN_MAX_LENGTH),
+  serviceToken: serviceTokenSchema,
   loadBalancing: z.enum(['round_robin', 'weighted']).default('round_robin'),
   targets: z.array(z.object({
     baseUrl: targetBaseUrlSchema,
@@ -52,6 +54,7 @@ export const adminCreateUpstreamSchema = z.object({
 })
 
 export const adminUpdateUpstreamSchema = z.object({
+  serviceToken: serviceTokenSchema.optional(),
   slug: slugSchema.optional(),
   name: nameSchema.optional(),
   loadBalancing: z.enum(['round_robin', 'weighted']).optional(),
@@ -109,7 +112,5 @@ export const adminUpdateServiceConfigurationSchema = z.object({
 })
 
 export const adminUpdateServiceTokenSchema = z.object({
-  serviceToken: z.string().trim()
-    .min(UPSTREAM_CONSTRAINTS.SERVICE_TOKEN_MIN_LENGTH)
-    .max(UPSTREAM_CONSTRAINTS.SERVICE_TOKEN_MAX_LENGTH)
+  serviceToken: serviceTokenSchema
 })

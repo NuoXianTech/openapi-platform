@@ -1,5 +1,5 @@
 import { adminUpdateEndpointPublicationSchema } from '~~/server/schemas/admin'
-import { platformEndpointCatalogService } from '~~/server/services/platform-endpoint-catalog-service'
+import { platformEndpointService } from '~~/server/services/platform-endpoint-service'
 import { addRequestOperationLog } from '~~/server/utils/request-operation-log'
 import { defineAdminEventHandler } from '~~/server/utils/auth'
 import { readUuidRouterParam } from '~~/server/utils/router-param'
@@ -12,7 +12,7 @@ export default defineAdminEventHandler(async (event, admin) => {
     event,
     adminUpdateEndpointPublicationSchema
   )
-  const result = await platformEndpointCatalogService.update(
+  const result = await platformEndpointService.update(
     routeId,
     body,
     admin.id,

@@ -1,19 +1,18 @@
 <script setup lang="ts">
 import type {
   PlatformEndpointCatalogItem,
-  PlatformEndpointCatalogService,
-  PlatformEndpointPublicationPatch
+  PlatformEndpointCatalogService
 } from '#shared/types/platform'
 import {
   platformStatusColor,
   serviceAvailabilityColor
 } from '~/utils/platform-display'
-import type { EndpointFeedback } from '~/composables/admin/use-admin-endpoint-catalog-page'
+import type { DiscoveryOperationState, EndpointOperationState } from '~/composables/admin/use-admin-endpoint-catalog-operations'
 
 const props = defineProps<{
   service: PlatformEndpointCatalogService
-  isBusy: (key: string) => boolean
-  feedback: Record<string, EndpointFeedback>
+  endpointState: (item: PlatformEndpointCatalogItem) => EndpointOperationState
+  discoveryState: DiscoveryOperationState
   selectedKeys: Set<string>
   selectableKeys: Set<string>
   selectionDisabled: boolean
@@ -27,15 +26,16 @@ const emit = defineEmits<{
     service: PlatformEndpointCatalogService,
     item: PlatformEndpointCatalogItem
   ]
-  update: [
-    item: PlatformEndpointCatalogItem,
-    patch: PlatformEndpointPublicationPatch,
-    successKey: string
-  ]
+  toggleStatistics: [item: PlatformEndpointCatalogItem]
+  toggleApiKey: [item: PlatformEndpointCatalogItem]
 }>()
 
 const { t } = useI18n()
 const route = useRoute()
+const endpointRows = computed(() => props.service.endpoints.map(item => ({
+  item,
+  operation: props.endpointState(item)
+})))
 const serviceSelectableKeys = computed(() => props.service.endpoints
   .filter(item => props.selectableKeys.has(item.key))
   .map(item => item.key))
@@ -69,16 +69,6 @@ function serviceStateLabel() {
   return t(
     `admin.apis.routing.serviceControl.availability.${upstream.connection.availability}`
   )
-}
-
-function endpointBusy(item: PlatformEndpointCatalogItem) {
-  return props.isBusy(`endpoint:${item.key}`)
-    || props.isBusy('apply:runtime')
-    || props.isBusy('bulk:endpoints')
-}
-
-function itemFeedback(item: PlatformEndpointCatalogItem) {
-  return props.feedback[item.route?.route.id ?? item.key]
 }
 
 function itemMethod(item: PlatformEndpointCatalogItem) {
@@ -141,32 +131,6 @@ function primaryActionColor(item: PlatformEndpointCatalogItem) {
   }
   return 'primary' as const
 }
-
-function toggleStatistics(item: PlatformEndpointCatalogItem) {
-  const binding = item.route
-  if (!binding) return
-  emit(
-    'update',
-    item,
-    { isStatistics: !binding.route.isStatistics },
-    binding.route.isStatistics
-      ? 'admin.apis.routing.catalog.feedback.statisticsDisabled'
-      : 'admin.apis.routing.catalog.feedback.statisticsEnabled'
-  )
-}
-
-function toggleApiKey(item: PlatformEndpointCatalogItem) {
-  const binding = item.route
-  if (!binding) return
-  emit(
-    'update',
-    item,
-    { isApiKey: !binding.route.isApiKey },
-    binding.route.isApiKey
-      ? 'admin.apis.routing.catalog.feedback.apiKeyDisabled'
-      : 'admin.apis.routing.catalog.feedback.apiKeyEnabled'
-  )
-}
 </script>
 
 <template>
@@ -217,8 +181,8 @@ function toggleApiKey(item: PlatformEndpointCatalogItem) {
           variant="ghost"
           size="sm"
           icon="i-lucide-scan-search"
-          :loading="isBusy(`discover:${service.upstream.id}`)"
-          :disabled="selectionDisabled"
+          :loading="discoveryState.loading"
+          :disabled="discoveryState.disabled"
           @click="emit('discover', service.upstream.id)"
         >
           {{ $t('admin.apis.routing.catalog.actions.rediscover') }}
@@ -245,7 +209,7 @@ function toggleApiKey(item: PlatformEndpointCatalogItem) {
       </div>
       <ul class="divide-y divide-default">
         <li
-          v-for="item in service.endpoints"
+          v-for="{ item, operation } in endpointRows"
           :key="item.key"
           class="endpoint-entry transition-colors hover:bg-muted/40"
           :class="{ 'bg-muted/60': selectedKeys.has(item.key) }"
@@ -280,19 +244,19 @@ function toggleApiKey(item: PlatformEndpointCatalogItem) {
               </p>
               <div class="mt-1 min-h-4" role="status" aria-live="polite" aria-atomic="true">
                 <p
-                v-if="itemFeedback(item)"
+                  v-if="operation.feedback"
                   class="flex items-start gap-1 text-xs leading-4 [overflow-wrap:anywhere]"
                   :class="{
-                  'text-success': itemFeedback(item)?.color === 'success',
-                  'text-warning': itemFeedback(item)?.color === 'warning',
-                  'text-error': itemFeedback(item)?.color === 'error'
+                    'text-success': operation.feedback.color === 'success',
+                    'text-warning': operation.feedback.color === 'warning',
+                    'text-error': operation.feedback.color === 'error'
                   }"
                 >
                   <UIcon
-                  :name="itemFeedback(item)?.color === 'error' ? 'i-lucide-circle-alert' : itemFeedback(item)?.color === 'warning' ? 'i-lucide-clock-3' : 'i-lucide-check'"
+                    :name="operation.feedback.color === 'error' ? 'i-lucide-circle-alert' : operation.feedback.color === 'warning' ? 'i-lucide-clock-3' : 'i-lucide-check'"
                     class="size-4 shrink-0"
                   />
-                {{ itemFeedback(item)?.message }}
+                  {{ operation.feedback.message }}
                 </p>
               </div>
             </div>
@@ -324,21 +288,21 @@ function toggleApiKey(item: PlatformEndpointCatalogItem) {
                   size="sm"
                   color="success"
                   :model-value="item.route.route.isStatistics"
-                  :disabled="item.route.route.creditsCost > 0 || endpointBusy(item)"
+                  :disabled="operation.settingsDisabled"
                   :label="$t('admin.apis.routing.catalog.actions.statistics')"
                   :aria-label="$t('admin.apis.routing.catalog.accessibility.statistics', { path: publicPath(item) })"
                   :ui="{ label: 'text-xs' }"
-                  @update:model-value="toggleStatistics(item)"
+                  @update:model-value="emit('toggleStatistics', item)"
                 />
                 <USwitch
                   size="sm"
                   color="success"
                   :model-value="item.route.route.isApiKey"
-                  :disabled="item.route.route.creditsCost > 0 || endpointBusy(item)"
+                  :disabled="operation.settingsDisabled"
                   :label="$t('admin.apis.routing.actions.apiKey')"
                   :aria-label="$t('admin.apis.routing.catalog.accessibility.apiKey', { path: publicPath(item) })"
                   :ui="{ label: 'text-xs' }"
-                  @update:model-value="toggleApiKey(item)"
+                  @update:model-value="emit('toggleApiKey', item)"
                 />
               </div>
               <span v-else class="text-xs text-muted">{{ $t('admin.apis.routing.catalog.settingsUnavailable') }}</span>
@@ -360,7 +324,7 @@ function toggleApiKey(item: PlatformEndpointCatalogItem) {
                   size="sm"
                   icon="i-lucide-settings-2"
                   class="size-8 justify-center"
-                  :disabled="!item.route || endpointBusy(item)"
+                  :disabled="operation.editDisabled"
                   :aria-label="$t('admin.apis.routing.catalog.actions.advancedSettings')"
                   @click="emit('edit', item)"
                 />
@@ -371,8 +335,8 @@ function toggleApiKey(item: PlatformEndpointCatalogItem) {
                 :color="primaryActionColor(item)"
                 :variant="item.status === 'live' ? 'outline' : 'solid'"
                 :icon="primaryActionIcon(item)"
-                :loading="isBusy(`endpoint:${item.key}`)"
-                :disabled="!item.publishable || item.status === 'pending' || item.status === 'retiring' || endpointBusy(item)"
+                :loading="operation.loading"
+                :disabled="operation.primaryDisabled"
                 @click="emit('primary', service, item)"
               >
                 {{ primaryActionLabel(item) }}
@@ -393,8 +357,8 @@ function toggleApiKey(item: PlatformEndpointCatalogItem) {
           <UButton
             size="sm"
             icon="i-lucide-scan-search"
-            :loading="isBusy(`discover:${service.upstream.id}`)"
-            :disabled="selectionDisabled"
+            :loading="discoveryState.loading"
+            :disabled="discoveryState.disabled"
             @click="emit('discover', service.upstream.id)"
           >
             {{ $t('admin.apis.routing.catalog.actions.rediscover') }}

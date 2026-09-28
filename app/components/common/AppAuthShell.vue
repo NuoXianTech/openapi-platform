@@ -19,7 +19,7 @@ withDefaults(defineProps<{
         class="auth-home"
       />
 
-      <div class="auth-form-wrap">
+      <div class="auth-form-wrap motion-enter">
         <slot />
       </div>
     </section>
@@ -62,7 +62,6 @@ withDefaults(defineProps<{
   min-width: 0;
   max-width: 430px;
   box-sizing: border-box;
-  animation: auth-fade-in 320ms ease-out;
 }
 
 .auth-brand {
@@ -193,12 +192,4 @@ withDefaults(defineProps<{
   .auth-brand__title { font-size: 1.4rem; }
 }
 
-@media (prefers-reduced-motion: reduce) {
-  .auth-form-wrap { animation: none; }
-}
-
-@keyframes auth-fade-in {
-  from { opacity: 0; transform: translateY(6px); }
-  to { opacity: 1; transform: translateY(0); }
-}
 </style>

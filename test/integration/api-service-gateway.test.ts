@@ -756,7 +756,7 @@ describe('Platform to Node API Service acceptance', () => {
     ).toEqual([`${serviceBaseURL}/`])
   })
 
-  it('does not let an older configuration sync overwrite newer target state', async () => {
+  it('rejects an older configuration sync without overwriting newer target state', async () => {
     const current = await platformServiceControlService.get(officialUpstreamId)
     const updateConfiguration
       = serviceControlClient.updateConfiguration.bind(serviceControlClient)
@@ -801,7 +801,10 @@ describe('Platform to Node API Service acceptance', () => {
         }
       )
       release()
-      await first
+      await expect(first).rejects.toMatchObject({
+        statusCode: 409,
+        data: { code: 'SERVICE_CONFIGURATION_REVISION_CONFLICT' }
+      })
 
       expect(second).toMatchObject({
         status: 'synced',

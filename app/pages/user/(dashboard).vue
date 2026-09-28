@@ -11,5 +11,5 @@ definePageMeta({
 </script>
 
 <template>
-  <NuxtPage />
+  <CommonPageOutlet />
 </template>

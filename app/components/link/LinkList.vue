@@ -15,7 +15,6 @@ const props = withDefaults(defineProps<LinkListProps>(), {
     name="link-card-item"
     tag="div"
     class="link-grid"
-    appear
   >
     <LinkCard
       v-for="(item, index) in props.items"
@@ -49,22 +48,32 @@ const props = withDefaults(defineProps<LinkListProps>(), {
   }
 }
 
-.link-card-item {
-  will-change: transform, opacity;
-}
-
 .link-card-item-enter-active,
 .link-card-item-leave-active {
-  transition: opacity 180ms ease, transform 180ms ease;
+  transition: opacity var(--motion-duration-normal) var(--motion-ease-out), transform var(--motion-duration-normal) var(--motion-ease-out);
 }
 
 .link-card-item-enter-from,
 .link-card-item-leave-to {
   opacity: 0;
-  transform: translateY(8px) scale(0.985);
+  transform: translateY(var(--motion-distance));
 }
 
 .link-card-item-move {
-  transition: transform 180ms ease;
+  transition: transform var(--motion-duration-normal) var(--motion-ease-out);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .link-card-item-enter-active,
+  .link-card-item-leave-active,
+  .link-card-item-move {
+    transition: none;
+  }
+
+  .link-card-item-enter-from,
+  .link-card-item-leave-to {
+    opacity: 1;
+    transform: none;
+  }
 }
 </style>

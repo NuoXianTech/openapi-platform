@@ -91,6 +91,14 @@ export const SYSTEM_SETTING_DEFINITIONS = {
     secret: false,
     description: '站点开始运行时间'
   },
+  homeRequestCountEnabled: {
+    key: 'site.home_request_count_enabled',
+    schema: z.boolean(),
+    default: SITE_SETTINGS_DEFAULTS.homeRequestCountEnabled,
+    public: true,
+    secret: false,
+    description: '首页是否显示累计接口请求数'
+  },
   registrationMode: {
     key: 'registration.mode',
     schema: z.enum(['open', 'invite', 'closed'], enumMessage('注册模式', ['open', 'invite', 'closed'])),

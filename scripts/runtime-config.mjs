@@ -77,15 +77,27 @@ export function parseApiKeySecret(raw) {
   throw new Error('NUXT_API_KEY_SECRET must be 32 bytes (hex / base64url / utf-8)')
 }
 
-export function runtimeConfigurationErrors(env) {
-  const errors = []
-  if (Buffer.byteLength(env.NUXT_AUTH_SECRET || '', 'utf8') < 32) {
-    errors.push('NUXT_AUTH_SECRET must contain at least 32 bytes')
+/** @param {string | undefined} raw */
+export function parseAuthSecret(raw) {
+  const secret = raw ?? ''
+  if (Buffer.byteLength(secret, 'utf8') < 32) {
+    throw new Error('NUXT_AUTH_SECRET must contain at least 32 bytes')
   }
-  try { parseApiKeySecret(env.NUXT_API_KEY_SECRET) } catch (error) { errors.push(error.message) }
-  if (env.NUXT_AUTH_SECRET && env.NUXT_AUTH_SECRET === env.NUXT_API_KEY_SECRET) {
+  return secret
+}
+
+export function runtimeSecretErrors({ authSecret, apiKeySecret }) {
+  const errors = []
+  try { parseAuthSecret(authSecret) } catch (error) { errors.push(error.message) }
+  try { parseApiKeySecret(apiKeySecret) } catch (error) { errors.push(error.message) }
+  if (authSecret && authSecret === apiKeySecret) {
     errors.push('NUXT_AUTH_SECRET and NUXT_API_KEY_SECRET must be different')
   }
+  return errors
+}
+
+export function runtimeConfigurationErrors(env) {
+  const errors = runtimeSecretErrors({ authSecret: env.NUXT_AUTH_SECRET, apiKeySecret: env.NUXT_API_KEY_SECRET })
   for (const [key, protocols] of [
     ['DATABASE_URL', ['postgres:', 'postgresql:']],
     ['NUXT_REDIS_URL', ['redis:', 'rediss:']]

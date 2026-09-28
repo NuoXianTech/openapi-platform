@@ -12,6 +12,7 @@
       "introTitle": "开发者需要的公共接口，一站式免费调用",
       "uptimeLabel": "平台稳定运行",
       "uptimeLessThanDay": "不足 1 天",
+      "processedRequests": "累计已处理 {count} 次接口请求",
       "catalogDescription": "按能力、状态和接入成本查找接口，打开详情即可查看请求契约。",
       "popularKicker": "MOST USED",
       "popularTitle": "热门接口",

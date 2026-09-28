@@ -22,6 +22,11 @@ const emit = defineEmits<{
 }>()
 
 const { t } = useI18n()
+const resultState = computed(() => {
+  if (props.isLoading && !props.apis.length) return 'loading'
+  if (props.loadError && !props.isLoading) return 'error'
+  return props.apis.length ? 'content' : 'empty'
+})
 const retryActions = computed(() => [{
   label: t('common.actions.retry'),
   color: 'neutral' as const,
@@ -64,42 +69,49 @@ const emptyActions = computed(() => [{
       </UButton>
     </div>
 
-    <div v-if="props.isLoading" class="popular-apis__grid" aria-hidden="true">
-      <USkeleton
-        v-for="index in 6"
-        :key="index"
-        class="h-52 w-full rounded-lg"
+    <CommonStateTransition
+      :state-key="resultState"
+      :busy="props.isLoading"
+      :refreshing="props.isLoading && props.apis.length > 0"
+      class="popular-apis__results"
+    >
+      <div v-if="resultState === 'loading'" class="popular-apis__grid" aria-hidden="true">
+        <USkeleton
+          v-for="index in 6"
+          :key="index"
+          class="h-52 w-full rounded-lg"
+        />
+      </div>
+
+      <UEmpty
+        v-else-if="resultState === 'error'"
+        icon="i-mdi-alert-circle-outline"
+        :title="$t('common.states.loadFailed')"
+        :description="props.loadError || undefined"
+        variant="naked"
+        size="lg"
+        :actions="retryActions"
+        class="popular-apis__state"
       />
-    </div>
 
-    <UEmpty
-      v-else-if="props.loadError"
-      icon="i-mdi-alert-circle-outline"
-      :title="$t('common.states.loadFailed')"
-      :description="props.loadError"
-      variant="naked"
-      size="lg"
-      :actions="retryActions"
-      class="popular-apis__state"
-    />
+      <UEmpty
+        v-else-if="resultState === 'empty'"
+        icon="i-lucide-compass"
+        :title="$t('public.home.popularEmptyTitle')"
+        :description="$t('public.home.popularEmptyDescription')"
+        variant="naked"
+        size="lg"
+        :actions="emptyActions"
+        class="popular-apis__state"
+      />
 
-    <UEmpty
-      v-else-if="props.apis.length === 0"
-      icon="i-lucide-compass"
-      :title="$t('public.home.popularEmptyTitle')"
-      :description="$t('public.home.popularEmptyDescription')"
-      variant="naked"
-      size="lg"
-      :actions="emptyActions"
-      class="popular-apis__state"
-    />
-
-    <ApiCardGrid
-      v-else
-      :apis="props.apis"
-      :category-map="props.categoryMap"
-      class="popular-apis__list"
-    />
+      <ApiCardGrid
+        v-else
+        :apis="props.apis"
+        :category-map="props.categoryMap"
+        class="popular-apis__list"
+      />
+    </CommonStateTransition>
   </section>
 </template>
 
@@ -144,10 +156,9 @@ const emptyActions = computed(() => [{
   line-height: 1.65;
 }
 
-.popular-apis__list,
-.popular-apis__grid,
-.popular-apis__state {
+.popular-apis__results {
   margin-top: 2rem;
+  min-height: 16rem;
 }
 
 .popular-apis__grid {

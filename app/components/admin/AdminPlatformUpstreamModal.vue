@@ -4,7 +4,7 @@ import type { PlatformUpstreamSummary } from '#shared/types/platform'
 import { validateUpstreamTargetUrl } from '#shared/utils/upstream-target'
 import { UPSTREAM_CONSTRAINTS } from '#shared/schemas/platform-constraints'
 import { adminModalUi } from '~/utils/admin-modal-ui'
-import { parseFetchError } from '~/utils/client-error'
+import { useAdminUpstreamEditor, type UpstreamFormValues } from '~/composables/admin/use-admin-upstream-editor'
 import { compactFormErrors, integerRangeError, maxLengthError, requiredTextError } from '~/utils/form-validation'
 
 const open = defineModel<boolean>('open', { default: false })
@@ -12,23 +12,14 @@ const props = defineProps<{
   upstream?: PlatformUpstreamSummary | null
 }>()
 const emit = defineEmits<{ saved: [] }>()
-const toast = useToast()
 const { t } = useI18n()
 
-interface UpstreamTargetFormState {
-  baseUrl: string
-  weight: number
-}
+const { loading, formError, save } = useAdminUpstreamEditor({
+  id: () => props.upstream?.id,
+  open: () => open.value
+})
 
-interface UpstreamFormState {
-  name: string
-  slug: string
-  serviceToken: string
-  loadBalancing: 'round_robin' | 'weighted'
-  targets: UpstreamTargetFormState[]
-}
-
-function initialState(): UpstreamFormState {
+function initialState(): UpstreamFormValues {
   return {
     name: props.upstream?.name ?? '',
     slug: props.upstream?.slug ?? '',
@@ -38,9 +29,7 @@ function initialState(): UpstreamFormState {
   }
 }
 
-const state = reactive<UpstreamFormState>(initialState())
-const loading = ref(false)
-const formError = ref<string | null>(null)
+const state = reactive<UpstreamFormValues>(initialState())
 const isEditing = computed(() => Boolean(props.upstream))
 const slugPattern = /^[a-z0-9]+(?:-[a-z0-9]+)*$/
 
@@ -52,7 +41,6 @@ const loadBalancingItems = computed(() => [
 watch(open, (isOpen) => {
   if (isOpen) {
     Object.assign(state, initialState())
-    formError.value = null
   }
 })
 
@@ -64,7 +52,7 @@ function removeTarget(index: number) {
   if (state.targets.length > 1) state.targets.splice(index, 1)
 }
 
-function validateUpstreamForm(value: Partial<UpstreamFormState>): FormError<string>[] {
+function validateUpstreamForm(value: Partial<UpstreamFormValues>): FormError<string>[] {
   const errors = compactFormErrors(
     requiredTextError('name', value.name, t('admin.apis.routing.validation.nameRequired')),
     maxLengthError('name', value.name, 160, t('admin.apis.routing.validation.nameMaxLength')),
@@ -117,52 +105,10 @@ function validateUpstreamForm(value: Partial<UpstreamFormState>): FormError<stri
   return errors
 }
 
-async function onSubmit(event: FormSubmitEvent<UpstreamFormState>) {
-  loading.value = true
-  formError.value = null
-  try {
-    await $fetch(
-      isEditing.value ? `/api/admin/v1/upstreams/${props.upstream!.id}` : '/api/admin/v1/upstreams',
-      {
-        method: isEditing.value ? 'PATCH' : 'POST',
-        body: isEditing.value
-          ? {
-              name: event.data.name.trim(),
-              slug: event.data.slug.trim(),
-              loadBalancing: event.data.loadBalancing
-            }
-          : {
-              name: event.data.name.trim(),
-              slug: event.data.slug.trim(),
-              serviceToken: event.data.serviceToken.trim(),
-              loadBalancing: event.data.loadBalancing,
-              targets: event.data.targets.map(target => ({
-                baseUrl: target.baseUrl.trim(),
-                weight: target.weight
-              }))
-            }
-      }
-    )
-    if (isEditing.value && event.data.serviceToken.trim()) {
-      await $fetch(`/api/admin/v1/upstreams/${props.upstream!.id}/token`, {
-        method: 'PUT',
-        body: { serviceToken: event.data.serviceToken.trim() }
-      })
-    }
-    toast.add({
-      title: t(isEditing.value
-        ? 'admin.apis.routing.feedback.upstreamUpdated'
-        : 'admin.apis.routing.feedback.upstreamCreated'),
-      color: 'success'
-    })
+async function onSubmit(event: FormSubmitEvent<UpstreamFormValues>) {
+  if (await save(event.data)) {
     open.value = false
     emit('saved')
-  } catch (error: unknown) {
-    formError.value = parseFetchError(error, t(isEditing.value
-      ? 'admin.apis.routing.feedback.updateFailed'
-      : 'admin.apis.routing.feedback.createFailed'))
-  } finally {
-    loading.value = false
   }
 }
 </script>

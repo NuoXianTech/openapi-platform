@@ -1,6 +1,7 @@
 @import "tailwindcss";
 @import "@nuxt/ui";
 @import "./fonts.css";
+@import "./motion.css";
 
 @custom-variant dark (&:is(.dark *));
 
@@ -449,18 +450,6 @@ kbd,
   --vis-tooltip-background-color: var(--ui-bg-elevated);
   --vis-tooltip-border-color: var(--ui-border);
   --vis-tooltip-text-color: var(--ui-text-highlighted);
-}
-
-/* 列表 / 表单状态切换的统一淡入淡出过渡：首页、友链、auth 等多处 <Transition name="state-fade"> 复用 */
-.state-fade-enter-active,
-.state-fade-leave-active {
-  transition: opacity 220ms ease, transform 220ms ease;
-}
-
-.state-fade-enter-from,
-.state-fade-leave-to {
-  opacity: 0;
-  transform: translateY(10px);
 }
 
 .dashboard-hero-surface {

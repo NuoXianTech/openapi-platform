@@ -263,6 +263,7 @@ const inviteModeReady = computed(() => (
           v-for="item in items"
           :key="item.provider"
           v-model:open="getForm(item.provider).open"
+          :unmount-on-hide="false"
           class="dashboard-oauth-provider-card"
         >
           <button
@@ -290,7 +291,7 @@ const inviteModeReady = computed(() => (
             </UBadge>
             <UIcon
               name="i-mdi-chevron-down"
-              class="size-5 shrink-0 text-muted transition-transform duration-200"
+              class="size-5 shrink-0 text-muted transition-transform duration-200 motion-reduce:transition-none"
               :class="getForm(item.provider).open ? 'rotate-180' : ''"
             />
           </button>

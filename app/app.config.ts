@@ -50,6 +50,11 @@ export default defineAppConfig({
       upload: 'i-mdi-upload',
       warning: 'i-mdi-alert-outline'
     },
+    collapsible: {
+      slots: {
+        content: 'motion-reduce:animate-none'
+      }
+    },
     card: {
       slots: {
         root: 'rounded-lg overflow-hidden shadow-none',

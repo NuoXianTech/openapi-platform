@@ -8,7 +8,6 @@ import type {
   ServiceConfigurationValue,
   StoredServiceConfigurationValues
 } from '#shared/types/service-control'
-import { db } from '~~/server/db/client'
 import {
   upstreamServiceConnections,
   upstreamTargets
@@ -17,6 +16,7 @@ import { createApplicationError } from '~~/server/errors/application-error'
 import {
   type PlatformServiceControlContext,
   loadServiceControlContext,
+  commitServiceControlContext,
   safeServiceControlError,
   serviceTargetControlState
 } from '~~/server/services/platform-service-control-context'
@@ -36,8 +36,7 @@ import {
   decryptStoredSecret,
   encryptStoredSecret
 } from '~~/server/utils/stored-secret'
-import { firstRow } from '~~/server/utils/row'
-import { applyPlatformRevision } from '~~/server/services/platform-endpoint-publication-service'
+import { refreshPlatformRevision } from '~~/server/services/platform-endpoint-publication-service'
 
 const CONFIGURATION_SYNC_CONCURRENCY = 8
 const MAX_CONFIGURATION_REVISION = 2_147_483_647
@@ -253,23 +252,7 @@ async function pushConfiguration(
   const status = successful === enabledTargets.length
     ? 'synced'
     : successful > 0 ? 'partial' : 'failed'
-  await db.transaction(async (tx) => {
-    const current = firstRow(await tx.select({
-      revision: upstreamServiceConnections.configurationRevision,
-      hash: upstreamServiceConnections.configurationHash
-    }).from(upstreamServiceConnections)
-      .where(eq(
-        upstreamServiceConnections.upstreamServiceId,
-        context.service.id
-      ))
-      .limit(1)
-      .for('update'))
-    if (
-      current?.revision !== revision
-      || current.hash !== configurationHash
-    ) return
-
-    const synchronizedAt = new Date()
+  await commitServiceControlContext(context, 'configuration', async (tx, _current, synchronizedAt) => {
     for (const result of results) {
       if (result.ok) {
         await tx.update(upstreamTargets).set({
@@ -326,7 +309,7 @@ async function publishRoutableConfigurationTargets(
   // Named apart from result.revision: that one is the Service configuration
   // revision, this one is the routing snapshot sequence. Spreading both
   // under one key silently dropped the configuration revision.
-  const { revision } = await applyPlatformRevision(null)
+  const { revision } = await refreshPlatformRevision(null)
   return { routingRevision: revision }
 }
 
@@ -407,34 +390,11 @@ function storeConfigurationValues(
 async function advanceStoredConfigurationRevision(input: {
   context: PlatformServiceControlContext
   revision: number
-  configurationHash: string
-  schemaSha256: string
 }): Promise<PlatformServiceControlContext> {
-  const updated = await db.transaction(async (tx) => {
-    const now = new Date()
-    const connection = firstRow(await tx.update(upstreamServiceConnections)
+  return commitServiceControlContext(input.context, 'configuration', async (tx, _current, now) => {
+    await tx.update(upstreamServiceConnections)
       .set({ configurationRevision: input.revision, updatedAt: now })
-      .where(and(
-        eq(
-          upstreamServiceConnections.upstreamServiceId,
-          input.context.service.id
-        ),
-        eq(
-          upstreamServiceConnections.configurationRevision,
-          input.context.connection.configurationRevision
-        ),
-        eq(
-          upstreamServiceConnections.configurationSchemaSha256,
-          input.schemaSha256
-        ),
-        eq(
-          upstreamServiceConnections.configurationHash,
-          input.configurationHash
-        )
-      ))
-      .returning())
-    if (!connection) return null
-
+      .where(eq(upstreamServiceConnections.upstreamServiceId, input.context.service.id))
     await tx.update(upstreamTargets).set({
       configurationStatus: 'unknown',
       updatedAt: now
@@ -442,16 +402,8 @@ async function advanceStoredConfigurationRevision(input: {
       eq(upstreamTargets.upstreamServiceId, input.context.service.id),
       eq(upstreamTargets.enabled, true)
     ))
-    return connection
+    return loadServiceControlContext(input.context.service.id, { transaction: tx })
   })
-  if (!updated) {
-    throw createApplicationError({
-      statusCode: 409,
-      message: 'Service configuration was changed by another administrator',
-      data: { code: 'SERVICE_CONFIGURATION_REVISION_CONFLICT' }
-    })
-  }
-  return { ...input.context, connection: updated }
 }
 
 async function pushConfigurationWithRevisionRecovery(input: {
@@ -459,7 +411,6 @@ async function pushConfigurationWithRevisionRecovery(input: {
   revision: number
   values: Record<string, ServiceConfigurationValue>
   configurationHash: string
-  schemaSha256: string
 }): Promise<ServiceConfigurationSyncResult> {
   let context = input.context
   let revision = input.revision
@@ -481,9 +432,7 @@ async function pushConfigurationWithRevisionRecovery(input: {
       ))
       context = await advanceStoredConfigurationRevision({
         context,
-        revision,
-        configurationHash: input.configurationHash,
-        schemaSha256: input.schemaSha256
+        revision
       })
     }
   }
@@ -546,53 +495,27 @@ export async function updatePlatformServiceConfiguration(
     values
   )
   const stored = storeConfigurationValues(definition, values)
-  const updated = await db.transaction(async (tx) => {
-    const connection = firstRow(await tx.update(upstreamServiceConnections)
-      .set({
-        configurationValues: stored,
-        configurationRevision: revision,
-        configurationHash,
-        updatedAt: new Date()
-      })
-      .where(and(
-        eq(
-          upstreamServiceConnections.upstreamServiceId,
-          upstreamServiceId
-        ),
-        eq(
-          upstreamServiceConnections.configurationRevision,
-          input.expectedRevision
-        ),
-        eq(
-          upstreamServiceConnections.configurationSchemaSha256,
-          schemaSha256
-        )
-      ))
-      .returning())
-    if (!connection) return null
-
+  const updated = await commitServiceControlContext(context, 'configuration', async (tx, _current, now) => {
+    await tx.update(upstreamServiceConnections).set({
+      configurationValues: stored,
+      configurationRevision: revision,
+      configurationHash,
+      updatedAt: now
+    }).where(eq(upstreamServiceConnections.upstreamServiceId, upstreamServiceId))
     await tx.update(upstreamTargets).set({
       configurationStatus: 'unknown',
-      updatedAt: new Date()
+      updatedAt: now
     }).where(and(
       eq(upstreamTargets.upstreamServiceId, upstreamServiceId),
       eq(upstreamTargets.enabled, true)
     ))
-    return connection
+    return loadServiceControlContext(upstreamServiceId, { transaction: tx })
   })
-  if (!updated) {
-    throw createApplicationError({
-      statusCode: 409,
-      message: 'Service configuration was changed by another administrator',
-      data: { code: 'SERVICE_CONFIGURATION_REVISION_CONFLICT' }
-    })
-  }
   const result = await pushConfigurationWithRevisionRecovery({
-    context: { ...context, connection: updated },
+    context: updated,
     revision,
     values,
-    configurationHash,
-    schemaSha256
+    configurationHash
   })
   const publication = await publishRoutableConfigurationTargets(result)
   return { ...result, ...publication }
@@ -642,16 +565,13 @@ export async function synchronizePlatformServiceConfiguration(
     ? context
     : await advanceStoredConfigurationRevision({
         context,
-        revision,
-        configurationHash,
-        schemaSha256
+        revision
       })
   const result = await pushConfigurationWithRevisionRecovery({
     context: synchronizedContext,
     revision,
     values,
-    configurationHash,
-    schemaSha256
+    configurationHash
   })
   const publication = await publishRoutableConfigurationTargets(result)
   return { ...result, ...publication }

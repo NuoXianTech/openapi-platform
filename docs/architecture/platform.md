@@ -55,6 +55,16 @@ Upstream
 
 ## 4. 接口目录与 Routing Revision
 
+Endpoint 协调集中在 `server/services/platform-endpoint-service.ts`，对外提供
+`list`、`publish`、`update` 和 `synchronizeSupportRoutes`。Endpoint 匹配、目录状态、
+Product / Version 复用和支撑 Route 联动是该模块的内部规则。目录选择绑定时优先展示
+活动快照中的 Route；发布优先复用期望状态为 active 的 Route；支撑 Route 优先匹配
+所属 Version。这些场景的选择顺序有意保持不同。
+
+通用事务与运行快照发布仍由 `platform-endpoint-publication-service.ts` 负责。
+Endpoint 协调通过只读的 `getServiceControlView` 读取 Service 契约；Service 发现调用
+支撑 Route 同步入口，协调模块不反向依赖发现入口。
+
 `/admin/apis` 是日常接口发布入口。它不是新的持久化领域，也不复制一份发布状态，而是将 Service Endpoint、Route 期望配置和当前活动 Revision 投影为一个接口目录。
 
 Service 的标准流程是：
@@ -68,9 +78,28 @@ Service 的标准流程是：
 
 接口分组页维护名称、说明、可见性与生命周期，版本设置维护发布状态和变更说明。自动复用分组及版本时保留这些设置；已退役的分组或版本必须先显式恢复为可发布状态，才能继续发布接口。
 
+管理台 Endpoint 快捷变更与高级设置保存统一进入
+`app/composables/admin/use-admin-endpoint-catalog-operations.ts`。高级设置弹窗只管理草稿和校验；
+执行前按当前目录重新检查 Route 与操作准入，保存期间纳入目录占用，反馈关联到同一 Endpoint。
+保存后的读取失败单独呈现，不将已成功的变更改报失败；离开页面后忽略旧保存响应。
+
+Product / Version 的编辑上下文、保存、删除确认和列表刷新由
+`app/composables/admin/use-admin-product-management.ts` 管理。确认期间保留操作占用，失败可在原确认中重试；
+成功读取后重新定位 Product 和 Version，读取失败保留编辑上下文。表单草稿与校验留在各自弹窗。
+
+默认域名保存与历史 Routing Revision 激活由
+`app/composables/admin/use-admin-runtime-management.ts` 协调准入、确认、反馈和双资源刷新。
+刷新不覆盖未提交的域名草稿，保存成功也不清除请求期间继续输入的内容。
+这两类管理模块均区分变更结果和刷新错误，卸载后不再使用旧请求结果或确认回调发起后续操作。
+
+Product、Routing Revision 和 Target 的确认动作共用
+`app/composables/use-confirmed-operation.ts`，集中处理重复点击、失败重试、完成后不可重放和作用域失效。
+Target 操作还绑定当前 Upstream 上下文，切换详情后旧确认回调和保存结果失效。
+领域模块继续负责操作准入、文案和成功后的资源刷新。
+
 Revision 是 Gateway 的安全运行边界，不是管理员必须手工编排的日常步骤。生成 Revision 时 Platform：
 
-1. 读取全部可发布配置。
+1. 按发布范围选择 Route：显式应用全部读取期望配置，自动刷新沿用活动 Revision 的已应用配置，单个 Endpoint 直接发布仅替换指定 Route。
 2. 校验 Route 冲突、引用完整性和治理约束。
 3. 生成规范化 JSON payload。
 4. 计算 SHA-256 checksum。
@@ -80,7 +109,14 @@ Revision 是 Gateway 的安全运行边界，不是管理员必须手工编排�
 
 Route 行保存期望状态，活动 Revision 保存实际流量状态。接口目录的保存与“应用全部变更”分为两个事务：前者只更新控制面，后者校验完整配置并生成/复用快照；冲突校验或引用校验失败时，应用动作回滚，活动流量继续使用旧快照。其他需要立即生效的 Platform 管理对象仍使用单事务自动发布。
 
+Revision 的 `appliedRoutes` 保存最近明确应用的 Route 配置，包括因 Target 未就绪、Product / Version / Upstream 暂不可用而不能执行的 Route；`routes` 只保存当前可执行集合。自动刷新叠加当前分组、版本治理和基础设施状态，不读取待应用的 Route 启停或治理草稿。发现依据已应用的公开 Route 和当前契约维护支撑 Route；因此待停用的公开接口在明确应用前仍有完整支撑能力。回滚后继续以所激活 Revision 的已应用配置为基线。旧 Revision 缺少 `appliedRoutes` 时以其 `routes` 为基线，原 payload 和 checksum 不改写。去重同时比较已应用配置和可执行配置，确保未就绪 Route 的显式应用也可审计。
+
 Service 发现和配置同步包含对 Target 的网络调用，不能纳入数据库事务。它们采用显式可重试语义：网络结果先按 Target 记录，健康 Target 可先刷新运行快照，失败 Target 标记为 degraded/error；只有全部 Target 都失败时才向调用方返回整体错误。相同配置和相同 Revision 均保持幂等。
+
+发现与配置同步通过 `platform-service-control-context.ts` 的 `commitServiceControlContext`
+统一接纳异步结果：在事务中锁定连接和 Target，检查凭证、期望配置、Target 地址、启用状态及集合是否仍属于请求开始时的上下文。
+上下文变化返回冲突，旧成功或失败结果都不能改写新状态；配置保存和版本恢复从提交后的上下文开始下一次网络请求。
+状态写入时间单调推进，避免同一时钟刻度内停用再启用或连续同步使旧结果重新有效。
 
 后台将该技术概念显示为“运行快照”。运行快照页面只用于审计和回滚；管理员可以重新激活历史 Revision，而不需要恢复旧 Route 行或重启进程。
 
@@ -124,6 +160,7 @@ Route 支持：
 
 - Platform 为每个 Upstream 独立加密保存 Service Token。
 - 修改 Service Token 先写入待验证版本；发现成功后才提升为活动凭证，期间已发布流量继续使用上一个已验证版本。
+- Upstream 编辑通过一次 PATCH 保存属性与可选的待验证 Token；两者和运行快照在同一事务提交，任一步失败全部回滚。凭证缓存只在提交后失效，审计分别记录属性变更和凭证更新状态，不记录 Token 明文。表单草稿与校验留在弹窗，提交和编辑上下文由 `use-admin-upstream-editor.ts` 管理。
 - 调用时注入 `Authorization: Service <token>`。
 - 删除调用方 `Authorization`、Cookie、API Key 和伪造内部头。
 - 可发现 Service 身份、OpenAPI 和业务配置 Schema。
@@ -140,7 +177,22 @@ Target 支持内网地址、容器名、HTTP 与 HTTPS，公网 HTTP 会被拒�
 `GET`、`HEAD` 可以在同一 Deadline 内安全尝试其余 Target，带写语义的请求不会
 重放。业务配置仍始终下发到全部启用 Target，与业务流量选择相互独立。
 
+### 7.3 管理台 Target 操作
+
+服务列表、服务详情与 Target 编辑弹窗通过
+`app/composables/admin/use-admin-target-operations.ts` 执行保存、启停和删除。
+该模块统一管理准入、确认、执行状态与反馈，页面提供各自的数据刷新逻辑，弹窗保留表单与校验。
+确认期间保留操作占用，变更失败时确认弹窗保持打开供重试；保存结果决定编辑弹窗是否关闭。
+刷新失败与变更失败分别处理，已成功的变更不会因刷新失败而再次提交。
+详情页将 Target 操作状态纳入 Service 控制操作的禁用规则。
+
 ## 8. Service 控制面
+
+管理台通过 `app/composables/admin/use-admin-service-control.ts` 协调发现、Token 更新、
+配置保存与同步。该模块持有控制视图、刷新和反馈，统一输出操作准入状态，并与 Target 操作互斥。
+每次操作绑定发起时的 Service 上下文；切换 Service 或卸载后，旧响应不能覆盖当前反馈、清空新 Token 草稿或解除新操作的占用。
+配置草稿仍由 `use-admin-service-configuration-form.ts` 管理：可用性刷新保留编辑，已保存 Revision 变化后重置草稿。
+保存与同步共用结果解释，配置 Revision 与 Routing Revision 保持区分；读取失败单独显示，不改写已完成的变更结果。
 
 管理员在 Upstream 页面执行 Service 发现。Platform 会：
 
@@ -172,6 +224,18 @@ Route 可以声明：
 付费调用采用“预留—请求—结算”流程。只有成功结果扣除积分；验证失败、网络失败、超时和业务失败会释放预留。重复结算必须保持幂等，余额变化必须有可审计流水。
 
 ## 10. 数据与后台任务
+
+私有读取统一由 `use-private-resource.ts` 管理请求序号、取消、作用域关闭和错误状态，只在客户端挂载后读取，使用本地 ref，不进入 Nuxt SSR payload。`refresh` 返回 `success`、`error`、`superseded` 或 `disposed`，调用方据此决定是否展示读取错误或更新编辑上下文；读取失败不会把已完成的写操作改报失败。作用域关闭后保留的刷新方法不再发起请求，也不接纳旧响应。`use-private-paged-list.ts` 复用该生命周期，只负责查询、响应校验和末页修正，修正后的最终读取结果返回给调用方。详情失败保留已有数据，分页失败清空旧列表。
+
+系统设置编辑由 `use-admin-settings-page.ts` 管理已发送快照、当前草稿和已保存基线。
+普通保存与 OAuth 批量保存共用操作准入和结果接纳；成功响应更新基线，仅回写提交后未继续编辑的字段。
+初始读取和 OAuth 配置刷新保留已有草稿，只写 Secret 仅清除本次提交且未再次编辑的值。
+网络设置只在保存成功、模式和相关草稿都未继续变化时重置依赖字段；失败或页面卸载不会继续应用旧结果。
+
+公开内容缓存由 `shared-cache.ts` 统一处理加载合并和失效。失效会分离本进程的旧加载；
+Redis 通过原子读和条件写校验随机版本标记，其他实例已开始的加载也不能回填失效后的缓存。
+锁按版本隔离；版本标记可过期，丢失的标记不能授权旧结果写入。旧请求可以完成，但失效后的请求不会加入它。
+Redis 不可用时仍按原约定回源或使用有 TTL 的内存缓存；此期间无法保证跨实例即时失效。
 
 Platform 持有：
 

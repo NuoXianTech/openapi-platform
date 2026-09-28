@@ -1,8 +1,7 @@
 <script setup lang="ts">
-import type { FormError, FormSubmitEvent } from '@nuxt/ui'
-import type { PlatformEndpointPublicationResult, PlatformRouteBinding } from '#shared/types/platform'
+import type { FormError, FormErrorEvent, FormSubmitEvent } from '@nuxt/ui'
+import type { PlatformEndpointPublicationPatch, PlatformRouteBinding } from '#shared/types/platform'
 import { adminModalUi } from '~/utils/admin-modal-ui'
-import { parseFetchError } from '~/utils/client-error'
 import { compactFormErrors, integerRangeError, maxLengthError, requiredTextError } from '~/utils/form-validation'
 import {
   createEndpointSettingsForm,
@@ -13,13 +12,14 @@ import {
 const open = defineModel<boolean>('open', { default: false })
 const props = defineProps<{
   routeBinding: PlatformRouteBinding
+  operation: { loading: boolean, disabled: boolean, error: string | null }
+  save: (routeId: string, patch: PlatformEndpointPublicationPatch) => Promise<boolean>
 }>()
-const emit = defineEmits<{ saved: [result: PlatformEndpointPublicationResult] }>()
 const { t } = useI18n()
 
 const state = reactive<EndpointSettingsForm>(createEndpointSettingsForm(props.routeBinding.route))
-const loading = ref(false)
-const error = ref<string | null>(null)
+const loading = computed(() => props.operation.loading)
+const error = computed(() => props.operation.error)
 const advancedOpen = ref(true)
 const catalogStatusItems = computed(() => [
   { label: t('admin.apis.routing.catalogStatuses.automatic'), value: 'automatic' },
@@ -30,7 +30,6 @@ watch(open, (isOpen) => {
   if (isOpen) {
     Object.assign(state, createEndpointSettingsForm(props.routeBinding.route))
     advancedOpen.value = true
-    error.value = null
   }
 })
 
@@ -63,20 +62,25 @@ function validateSettings(value: Partial<EndpointSettingsForm>): FormError<strin
 }
 
 async function onSubmit(event: FormSubmitEvent<EndpointSettingsForm>) {
-  loading.value = true
-  error.value = null
-  try {
-    const result = await $fetch<PlatformEndpointPublicationResult>(
-      `/api/admin/v1/service-endpoints/${props.routeBinding.route.id}`,
-      { method: 'PATCH', body: endpointSettingsPayload(event.data) }
-    )
+  if (props.operation.disabled) return
+  const routeId = props.routeBinding.route.id
+  if (await props.save(routeId, endpointSettingsPayload(event.data)) && props.routeBinding.route.id === routeId) {
     open.value = false
-    emit('saved', result)
-  } catch (cause: unknown) {
-    error.value = parseFetchError(cause, t('admin.apis.routing.feedback.updateFailed'))
-  } finally {
-    loading.value = false
   }
+}
+
+async function onError(event: FormErrorEvent) {
+  const firstError = event.errors[0]
+  if (!firstError?.name || firstError.name === 'name') return
+  advancedOpen.value = true
+  await nextTick()
+  // Reka removes the retained panel's hidden state after its own DOM update.
+  await new Promise<void>(resolve => requestAnimationFrame(() => resolve()))
+  if (!open.value || !advancedOpen.value) return
+  if (!firstError.id) return
+  const field = document.getElementById(firstError.id)
+  const input = field?.querySelector<HTMLElement>('input:not([type="hidden"]), textarea, select') ?? field
+  input?.focus()
 }
 </script>
 
@@ -95,6 +99,7 @@ async function onSubmit(event: FormSubmitEvent<EndpointSettingsForm>) {
         :validate="validateSettings"
         class="space-y-5"
         @submit="onSubmit"
+        @error="onError"
       >
         <UAlert
           v-if="error"
@@ -131,6 +136,7 @@ async function onSubmit(event: FormSubmitEvent<EndpointSettingsForm>) {
 
         <UCollapsible
           v-model:open="advancedOpen"
+          :unmount-on-hide="false"
           class="rounded-lg border border-default bg-elevated/30"
         >
           <button
@@ -147,7 +153,7 @@ async function onSubmit(event: FormSubmitEvent<EndpointSettingsForm>) {
             </div>
             <UIcon
               name="i-lucide-chevron-down"
-              class="mt-0.5 size-4 shrink-0 text-muted transition-transform"
+              class="mt-0.5 size-4 shrink-0 text-muted transition-transform motion-reduce:transition-none"
               :class="advancedOpen ? 'rotate-180' : ''"
             />
           </button>
@@ -280,6 +286,7 @@ async function onSubmit(event: FormSubmitEvent<EndpointSettingsForm>) {
           type="submit"
           form="platform-endpoint-settings"
           :loading="loading"
+          :disabled="operation.disabled"
         >
           {{ $t('admin.apis.routing.actions.saveRoute') }}
         </UButton>

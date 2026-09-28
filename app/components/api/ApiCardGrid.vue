@@ -15,20 +15,23 @@ const { apis = [], categoryMap = {} } = defineProps<ApiCardGridProps>()
       name="api-card"
       tag="div"
       class="api-card-grid"
-      appear
     >
-      <ApiCard
+      <div
         v-for="api in apis"
         :key="api.id"
-        :name="api.name"
-        :status="api.status"
-        :category-name="api.categoryId == null ? '' : categoryMap[api.categoryId]?.name"
-        :short-desc="api.shortDesc"
-        :description="api.description"
-        :doc-url="api.docUrl"
-        :endpoints="api.endpoints"
-        :total-calls="api.totalCalls"
-      />
+        class="api-card-grid__item"
+      >
+        <ApiCard
+          :name="api.name"
+          :status="api.status"
+          :category-name="api.categoryId == null ? '' : categoryMap[api.categoryId]?.name"
+          :short-desc="api.shortDesc"
+          :description="api.description"
+          :doc-url="api.docUrl"
+          :endpoints="api.endpoints"
+          :total-calls="api.totalCalls"
+        />
+      </div>
     </TransitionGroup>
   </div>
 </template>
@@ -41,6 +44,10 @@ const { apis = [], categoryMap = {} } = defineProps<ApiCardGridProps>()
   grid-auto-rows: 1fr;
   gap: 16px;
   align-items: stretch;
+}
+
+.api-card-grid__item {
+  min-width: 0;
 }
 
 @media (min-width: 640px) {
@@ -57,17 +64,17 @@ const { apis = [], categoryMap = {} } = defineProps<ApiCardGridProps>()
 
 .api-card-enter-active,
 .api-card-leave-active {
-  transition: opacity 180ms ease, transform 180ms ease;
+  transition: opacity var(--motion-duration-normal) var(--motion-ease-out), transform var(--motion-duration-normal) var(--motion-ease-out);
 }
 
 .api-card-enter-from,
 .api-card-leave-to {
   opacity: 0;
-  transform: translateY(6px);
+  transform: translateY(var(--motion-distance));
 }
 
 .api-card-move {
-  transition: transform 180ms ease;
+  transition: transform var(--motion-duration-normal) var(--motion-ease-out);
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -75,6 +82,12 @@ const { apis = [], categoryMap = {} } = defineProps<ApiCardGridProps>()
   .api-card-leave-active,
   .api-card-move {
     transition: none;
+  }
+
+  .api-card-enter-from,
+  .api-card-leave-to {
+    opacity: 1;
+    transform: none;
   }
 }
 </style>

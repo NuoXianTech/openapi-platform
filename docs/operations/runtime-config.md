@@ -19,6 +19,8 @@
 | `NUXT_AUTH_SECRET` | 必填 | access JWT、邮箱验证、一次性 token 与 OAuth state 共用的 HS256/HMAC 签名密钥，缺失时鉴权应 fail-closed |
 | `NUXT_API_KEY_SECRET` | 必填 | 用于生成 API Key，并派生 API Key/兑换码的 HMAC 查询摘要与 AES-256-GCM 加密密钥 |
 
+CLI 启动诊断与 Nitro 启动共用 `scripts/runtime-config.mjs` 的密钥约束：认证密钥至少 32 个 UTF-8 字节，数据密钥按现有 hex / base64url / UTF-8 格式解析为 32 字节，两项配置值不得相同。输入来源分别是环境变量和 Nuxt runtimeConfig，校验规则及聚合错误保持一致；密钥使用时仍保留现有进程内缓存。
+
 ## 推荐变量
 
 | 变量 | 推荐值 | 说明 |

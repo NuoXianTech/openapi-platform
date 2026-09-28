@@ -260,7 +260,7 @@ function applyDraft() {
         <template #trailing>
           <UIcon
             name="i-mdi-chevron-down"
-            class="size-4 shrink-0 text-dimmed transition-transform duration-200 group-data-[state=open]:rotate-180"
+            class="size-4 shrink-0 text-dimmed transition-transform duration-200 motion-reduce:transition-none group-data-[state=open]:rotate-180"
           />
         </template>
       </UButton>

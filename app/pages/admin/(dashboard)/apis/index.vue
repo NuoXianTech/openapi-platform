@@ -5,6 +5,11 @@ import { parseFetchError } from '~/utils/client-error'
 const { t } = useI18n()
 const {
   catalog,
+  controls,
+  endpointState,
+  discoveryState,
+  toggleStatistics,
+  toggleApiKey,
   catalogFeedback,
   applyChanges,
   applyChangeCount,
@@ -17,14 +22,11 @@ const {
   discoverService,
   driftedServices,
   editingRoute,
-  endpointFeedback,
   focusedUpstreamId,
   requiresDiscovery,
   handlePrimaryAction,
-  handleSettingsSaved,
-  serviceUpstreams,
-  isBusy,
-  operationBusy,
+  settingsState,
+  saveSettings,
   loading,
   openEditRoute,
   refresh,
@@ -41,7 +43,6 @@ const {
   selectAllEndpoints,
   statusFilter,
   statusItems,
-  updatePublication,
   visibleServices
 } = useAdminEndpointCatalogPage()
 
@@ -60,16 +61,16 @@ useHead({ title: () => t('admin.apis.routing.catalog.title') })
         <UButton
           v-if="canApply"
           icon="i-lucide-cloud-upload"
-          :loading="isBusy('apply:runtime')"
-          :disabled="operationBusy"
+          :loading="controls.applying"
+          :disabled="controls.applyDisabled"
           @click="applyChanges"
         >
           {{ $t('admin.apis.routing.catalog.actions.applyAllChanges', { count: applyChangeCount }) }}
         </UButton>
         <UButton
           icon="i-lucide-scan-search"
-          :loading="isBusy('discover:all')"
-          :disabled="serviceUpstreams.length === 0 || operationBusy"
+          :loading="controls.discovering"
+          :disabled="controls.discoveryDisabled"
           @click="discoverAllServices"
         >
           {{ $t('admin.apis.routing.catalog.actions.syncServices') }}
@@ -161,8 +162,8 @@ useHead({ title: () => t('admin.apis.routing.catalog.title') })
           variant="soft"
           size="xs"
           icon="i-lucide-scan-search"
-          :loading="isBusy('discover:all')"
-          :disabled="operationBusy"
+          :loading="controls.discovering"
+          :disabled="controls.discoveryDisabled"
           @click="discoverAllServices"
         >
           {{ $t('admin.apis.routing.catalog.actions.syncServices') }}
@@ -216,7 +217,7 @@ useHead({ title: () => t('admin.apis.routing.catalog.title') })
         icon="i-lucide-search"
         :placeholder="$t('admin.apis.routing.catalog.searchPlaceholder')"
         :aria-label="$t('admin.apis.routing.catalog.searchPlaceholder')"
-        :disabled="isBusy('bulk:endpoints')"
+        :disabled="controls.filtersDisabled"
         class="min-w-0 basis-full sm:flex-1"
       />
       <USelect
@@ -224,7 +225,7 @@ useHead({ title: () => t('admin.apis.routing.catalog.title') })
         :items="statusItems"
         value-key="value"
         :aria-label="$t('admin.apis.routing.catalog.columns.status')"
-        :disabled="isBusy('bulk:endpoints')"
+        :disabled="controls.filtersDisabled"
         class="min-w-0 flex-1 sm:w-44 sm:flex-none"
       />
       <UTooltip :text="$t('common.actions.refresh')" :ui="{ content: 'pointer-events-none' }" :disable-hoverable-content="true">
@@ -233,7 +234,7 @@ useHead({ title: () => t('admin.apis.routing.catalog.title') })
           variant="ghost"
           icon="i-lucide-refresh-cw"
           :loading="loading"
-          :disabled="operationBusy"
+          :disabled="controls.refreshDisabled"
           :aria-label="$t('common.actions.refresh')"
           class="size-8 justify-center"
           @click="refresh"
@@ -244,7 +245,7 @@ useHead({ title: () => t('admin.apis.routing.catalog.title') })
         color="neutral"
         variant="soft"
         icon="i-lucide-x"
-        :disabled="isBusy('bulk:endpoints')"
+        :disabled="controls.filtersDisabled"
         @click="clearFocusedService"
       >
         {{ $t('admin.apis.routing.catalog.actions.showAllServices') }}
@@ -255,7 +256,7 @@ useHead({ title: () => t('admin.apis.routing.catalog.title') })
       <div class="flex min-h-11 flex-wrap items-center gap-x-4 gap-y-2 border-b border-default pb-3">
         <UCheckbox
           :model-value="selectionState"
-          :disabled="selectableKeys.size === 0 || operationBusy"
+          :disabled="controls.selectAllDisabled"
           :label="$t('admin.apis.routing.catalog.bulk.selectAll')"
           @update:model-value="selectAllEndpoints($event === true)"
         />
@@ -265,7 +266,7 @@ useHead({ title: () => t('admin.apis.routing.catalog.title') })
             color="neutral"
             variant="outline"
             icon="i-lucide-check"
-            :disabled="selectedEnableCount === 0 || operationBusy"
+            :disabled="controls.bulkEnableDisabled"
             @click="bulkSetEnabled(true)"
           >
             {{ $t('admin.apis.routing.catalog.bulk.enable') }}
@@ -275,7 +276,7 @@ useHead({ title: () => t('admin.apis.routing.catalog.title') })
             color="neutral"
             variant="outline"
             icon="i-lucide-power"
-            :disabled="selectedDisableCount === 0 || operationBusy"
+            :disabled="controls.bulkDisableDisabled"
             @click="bulkSetEnabled(false)"
           >
             {{ $t('admin.apis.routing.catalog.bulk.disable') }}
@@ -288,14 +289,14 @@ useHead({ title: () => t('admin.apis.routing.catalog.title') })
               icon="i-lucide-x"
               class="size-8 justify-center"
               :aria-label="$t('admin.apis.routing.catalog.bulk.clear')"
-              :disabled="selectedKeys.size === 0 || operationBusy"
+              :disabled="controls.clearSelectionDisabled"
               @click="selectAllEndpoints(false)"
             />
           </UTooltip>
         </div>
       </div>
-      <div v-if="isBusy('bulk:endpoints') || bulkFeedback" role="status" aria-live="polite" aria-atomic="true" class="text-xs">
-        <p v-if="isBusy('bulk:endpoints')" class="flex items-center gap-1.5 text-muted">
+      <div v-if="controls.bulkRunning || bulkFeedback" role="status" aria-live="polite" aria-atomic="true" class="text-xs">
+        <p v-if="controls.bulkRunning" class="flex items-center gap-1.5 text-muted">
           <UIcon name="i-lucide-loader-circle" class="size-3.5 animate-spin" />
           {{ $t('admin.apis.routing.catalog.bulk.progress', bulkProgress) }}
         </p>
@@ -324,16 +325,17 @@ useHead({ title: () => t('admin.apis.routing.catalog.title') })
         v-for="service in visibleServices"
         :key="service.upstream.id"
         :service="service"
-        :is-busy="isBusy"
-        :feedback="endpointFeedback"
+        :endpoint-state="endpointState"
+        :discovery-state="discoveryState(service.upstream.id)"
         :selected-keys="selectedKeys"
         :selectable-keys="selectableKeys"
-        :selection-disabled="operationBusy"
+        :selection-disabled="controls.selectionDisabled"
         @discover="discoverService"
         @edit="openEditRoute"
         @primary="handlePrimaryAction"
         @select="selectEndpoints"
-        @update="updatePublication"
+        @toggle-statistics="toggleStatistics"
+        @toggle-api-key="toggleApiKey"
       />
     </div>
 
@@ -368,9 +370,11 @@ useHead({ title: () => t('admin.apis.routing.catalog.title') })
 
     <AdminPlatformEndpointSettingsModal
       v-if="editingRoute"
+      :key="editingRoute.route.id"
       v-model:open="routeModalOpen"
       :route-binding="editingRoute"
-      @saved="handleSettingsSaved"
+      :operation="settingsState(editingRoute.route.id)"
+      :save="saveSettings"
     />
   </div>
 </template>

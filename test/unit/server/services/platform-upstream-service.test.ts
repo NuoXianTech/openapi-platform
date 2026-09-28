@@ -3,7 +3,7 @@ import { PGlite } from '@electric-sql/pglite'
 import { eq } from 'drizzle-orm'
 import { drizzle } from 'drizzle-orm/pglite'
 import { migrate } from 'drizzle-orm/pglite/migrator'
-import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import * as schema from '~~/server/db/schema'
 
 const testContext = vi.hoisted(() => ({ database: null as unknown }))
@@ -26,6 +26,7 @@ const { platformRuntimeService } = await import(
 const { upstreamServiceTokenService } = await import(
   '~~/server/services/upstream-service-token-service'
 )
+const { routingRevisionService } = await import('~~/server/services/routing-revision-service')
 
 let client: PGlite
 let database: ReturnType<typeof drizzle<typeof schema>>
@@ -52,6 +53,7 @@ beforeEach(async () => {
 })
 
 afterAll(async () => client.close())
+afterEach(() => vi.restoreAllMocks())
 
 async function createConfiguredTarget() {
   const upstream = await platformUpstreamService.create({
@@ -104,6 +106,33 @@ async function createActiveRoute(upstreamServiceId: string) {
 }
 
 describe('Platform upstream target state', () => {
+  it('commits metadata and a pending Token together while preserving the live credential', async () => {
+    const target = await createConfiguredTarget()
+    const id = target.upstreamServiceId
+    const original = await upstreamServiceTokenService.getForControl(id)
+    const replacement = 'replacement-service-token-with-at-least-32-characters'
+    const updated = await platformUpstreamService.updateAndPublish(id, { name: 'Updated together', serviceToken: replacement }, null)
+    expect(updated.upstream.name).toBe('Updated together')
+    await expect(upstreamServiceTokenService.getForControl(id)).resolves.toBe(replacement)
+    await expect(upstreamServiceTokenService.get(id)).resolves.toBe(original)
+  })
+
+  it.each(['token', 'publication'] as const)('rolls back the whole edit when %s fails', async (failure) => {
+    const target = await createConfiguredTarget()
+    const id = target.upstreamServiceId
+    const before = await platformUpstreamService.findById(id)
+    const invalidate = vi.spyOn(upstreamServiceTokenService, 'invalidate')
+    if (failure === 'publication') vi.spyOn(routingRevisionService, 'publish').mockRejectedValueOnce(new Error('publication rejected'))
+    await expect(platformUpstreamService.updateAndPublish(id, {
+      name: 'Must not be committed',
+      serviceToken: failure === 'token' ? 'short' : 'replacement-service-token-with-at-least-32-characters'
+    }, null)).rejects.toThrow()
+    expect((await platformUpstreamService.findById(id))?.name).toBe(before!.name)
+    const [connection] = await database.select().from(schema.upstreamServiceConnections).where(eq(schema.upstreamServiceConnections.upstreamServiceId, id))
+    expect(connection!.pendingServiceTokenCiphertext).toBeNull()
+    expect(invalidate).not.toHaveBeenCalled()
+  })
+
   it('stages Service Token rotation and keeps the verified token on live traffic', async () => {
     const upstream = await platformUpstreamService.create({
       slug: 'staged-token-rotation',

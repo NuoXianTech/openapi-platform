@@ -13,49 +13,154 @@ function createFakeRedis(options: FakeRedisOptions = {}) {
   const values = new Map(Object.entries(options.initial ?? {}))
   const set = vi.fn(async (key: string, value: string, ...args: Array<string | number>) => {
     if (args.includes('NX') && (values.has(key) || options.canAcquireLock === false)) return null
-    values.set(key, value)
+    values.set(key!, value)
     return 'OK'
   })
   const client: SharedCacheClient = {
-    get: vi.fn(async key => values.get(key) ?? null),
+    get: vi.fn(async key => values.get(key!) ?? null),
     set,
     del: vi.fn(async (...keys) => {
       let deleted = 0
       for (const key of keys) {
-        if (values.delete(key)) deleted += 1
+        if (values.delete(key!)) deleted += 1
       }
       return deleted
     }),
-    eval: vi.fn(async (script, _numberOfKeys, key, token) => {
+    eval: vi.fn(async (script, numberOfKeys, ...parameters) => {
+      const [key, generationKey] = parameters.slice(0, numberOfKeys)
+      const [token, value, ttl] = parameters.slice(numberOfKeys)
+      if (script.includes('-- cache:read')) {
+        if (!values.has(generationKey!)) values.set(generationKey!, token!)
+        return [values.get(generationKey!), values.get(key!) ?? null]
+      }
+      if (script.includes('-- cache:write')) {
+        if (values.get(generationKey!) !== token) return 0
+        await set(key!, value!, 'PX', Number(ttl))
+        return 1
+      }
+      if (script.includes('-- cache:invalidate')) {
+        values.set(generationKey!, token!)
+        return client.del(key!)
+      }
       if (script.includes('redis.call(\'EXISTS\'')) {
-        const next = Number(values.get(key) ?? '1') + 1
-        values.set(key, String(next))
+        const next = Number(values.get(key!) ?? '1') + 1
+        values.set(key!, String(next))
         return next
       }
-      if (values.get(key) !== token) return 0
-      values.delete(key)
+      if (values.get(key!) !== token) return 0
+      values.delete(key!)
       return 1
     })
   }
   return { client, values, set }
 }
 
+let cacheSequence = 0
+
 function createTestCache(client: SharedCacheClient | null, overrides: {
   now?: () => number
   random?: () => number
   sleep?: (milliseconds: number) => Promise<void>
 } = {}) {
+  let token = 0
+  const cacheId = ++cacheSequence
   return createSharedCache({
     getClient: () => client,
     getKeyPrefix: () => 'test:',
     now: overrides.now ?? (() => 1_000),
     random: overrides.random ?? (() => 0.5),
-    createToken: () => 'lock-token',
+    createToken: () => `cache-${cacheId}-token-${++token}`,
     sleep: overrides.sleep ?? (async () => {})
   })
 }
 
 describe('shared cache', () => {
+  function deferred<T>() {
+    let resolve!: (value: T) => void
+    const promise = new Promise<T>(done => { resolve = done })
+    return { promise, resolve }
+  }
+
+  it.each(['memory', 'redis'] as const)('does not reuse or cache pre-invalidation loads in %s', async (mode) => {
+    const cache = createTestCache(mode === 'redis' ? createFakeRedis().client : null)
+    const old = deferred<string>()
+    const started = deferred<undefined>()
+    const first = cache.get({ key: 'item', ttlSeconds: 30, loader: () => { started.resolve(undefined); return old.promise } })
+    await started.promise
+    await cache.delete(['item'])
+    const fresh = vi.fn(async () => 'new')
+    await expect(cache.get({ key: 'item', ttlSeconds: 30, loader: fresh })).resolves.toBe('new')
+    old.resolve('old')
+    await expect(first).resolves.toBe('old')
+    await expect(cache.get({ key: 'item', ttlSeconds: 30, loader: fresh })).resolves.toBe('new')
+    expect(fresh).toHaveBeenCalledOnce()
+  })
+
+  it('rejects stale writes from another cache instance after invalidation', async () => {
+    const { client } = createFakeRedis()
+    const reader = createTestCache(client)
+    const writer = createTestCache(client)
+    const old = deferred<string>()
+    const started = deferred<undefined>()
+    const first = reader.get({ key: 'item', ttlSeconds: 30, loader: () => { started.resolve(undefined); return old.promise } })
+    await started.promise
+    await writer.delete(['item'])
+    const fresh = vi.fn(async () => 'new')
+    await writer.get({ key: 'item', ttlSeconds: 30, loader: fresh })
+    old.resolve('old')
+    await first
+    await expect(reader.get({ key: 'item', ttlSeconds: 30, loader: fresh })).resolves.toBe('new')
+    expect(fresh).toHaveBeenCalledOnce()
+  })
+
+  it('does not join a producer invalidated by another instance', async () => {
+    const { client } = createFakeRedis()
+    const reader = createTestCache(client)
+    const writer = createTestCache(client)
+    const old = deferred<string>()
+    const started = deferred<undefined>()
+    const first = reader.get({ key: 'item', ttlSeconds: 30, loader: () => { started.resolve(undefined); return old.promise } })
+    await started.promise
+    await writer.delete(['item'])
+    await expect(reader.get({ key: 'item', ttlSeconds: 30, loader: async () => 'new' })).resolves.toBe('new')
+    old.resolve('old')
+    await first
+  })
+
+  it('does not revive an invalidated generation after its metadata expires or is evicted', async () => {
+    const { client, values } = createFakeRedis()
+    const reader = createTestCache(client)
+    const writer = createTestCache(client)
+    const old = deferred<string>()
+    const started = deferred<undefined>()
+    const first = reader.get({ key: 'item', ttlSeconds: 30, loader: () => { started.resolve(undefined); return old.promise } })
+    await started.promise
+    await writer.delete(['item'])
+    values.delete('test:item:generation')
+    old.resolve('old')
+    await first
+    expect(values.has('test:item')).toBe(false)
+    await expect(writer.get({ key: 'item', ttlSeconds: 30, loader: async () => 'new' })).resolves.toBe('new')
+  })
+
+  it('does not let old cleanup remove the new pending producer', async () => {
+    const cache = createTestCache(null)
+    const old = deferred<string>()
+    const started = deferred<undefined>()
+    const first = cache.get({ key: 'item', ttlSeconds: 30, loader: () => { started.resolve(undefined); return old.promise } })
+    await started.promise
+    await cache.delete(['item'])
+    const next = deferred<string>()
+    const fresh = vi.fn(() => next.promise)
+    const second = cache.get({ key: 'item', ttlSeconds: 30, loader: fresh })
+    old.resolve('old')
+    await first
+    const third = cache.get({ key: 'item', ttlSeconds: 30, loader: fresh })
+    next.resolve('new')
+    expect(await Promise.all([second, third])).toEqual(['new', 'new'])
+    expect(fresh).toHaveBeenCalledOnce()
+  })
+
   beforeEach(() => {
     vi.spyOn(console, 'warn').mockImplementation(() => {})
   })
@@ -113,7 +218,11 @@ describe('shared cache', () => {
   it('coalesces and caches loads when Redis reads fail', async () => {
     const loader = vi.fn(async () => ({ id: 1 }))
     const client = createFakeRedis().client
-    vi.mocked(client.get).mockRejectedValue(new Error('offline'))
+    const evaluate = vi.mocked(client.eval).getMockImplementation()!
+    vi.mocked(client.eval).mockImplementation(async (...args) => {
+      if (args[0].includes('-- cache:read')) throw new Error('offline')
+      return evaluate(...args)
+    })
     const cache = createTestCache(client)
 
     await expect(Promise.all([
@@ -164,7 +273,7 @@ describe('shared cache', () => {
   })
 
   it('deletes malformed JSON and reloads a valid value', async () => {
-    const { client } = createFakeRedis({ initial: { 'test:cache:item': '{broken' } })
+    const { client, values } = createFakeRedis({ initial: { 'test:cache:item': '{broken' } })
     const cache = createTestCache(client)
 
     await expect(cache.get({
@@ -173,7 +282,7 @@ describe('shared cache', () => {
       loader: async () => ({ id: 1 })
     })).resolves.toEqual({ id: 1 })
 
-    expect(client.del).toHaveBeenCalledWith('test:cache:item')
+    expect(JSON.parse(values.get('test:cache:item')!)).toEqual({ id: 1 })
   })
 
   it('increments a version from an initialized baseline', async () => {

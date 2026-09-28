@@ -241,6 +241,7 @@ export const systemSettingsService = {
       siteDescription: settings.siteDescription,
       startTime: settings.startTime,
       uptimeDays: calculateUptimeDays(settings.startTime),
+      homeRequestCountEnabled: settings.homeRequestCountEnabled,
       icpBeian: settings.icpBeian || null,
       policeBeian: settings.policeBeian || null,
       policeBeianCode: settings.policeBeianCode || null,

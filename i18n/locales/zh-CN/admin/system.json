@@ -30,6 +30,10 @@
             "description": "可选。设置后，首页会显示站点已运行天数。",
             "placeholder": "选择上线时间"
           },
+          "homeRequestCount": {
+            "label": "首页累计请求数",
+            "description": "在首页运行状态栏中显示累计已处理的接口请求数。"
+          },
           "termsUrl": {
             "label": "使用条款链接",
             "description": "留空则不展示。填写后展示在登录 / 注册页，可填完整 URL 或站内路径。"

@@ -26,6 +26,7 @@ import {
 } from '~~/server/utils/service-configuration-values'
 import { toNullableIsoString } from '~~/server/utils/date'
 import { firstRow } from '~~/server/utils/row'
+import { canonicalJson } from '~~/server/utils/canonical-json'
 
 export interface PlatformServiceControlContext {
   service: typeof upstreamServices.$inferSelect
@@ -149,6 +150,63 @@ export async function loadServiceControlContext(
   return { ...row, targets }
 }
 
+function serviceControlFingerprint(context: PlatformServiceControlContext): string {
+  return canonicalJson({
+    service: {
+      openapiDocumentId: context.service.openapiDocumentId,
+      status: context.service.status,
+      deletedAt: context.service.deletedAt?.toISOString() ?? null,
+      updatedAt: context.service.updatedAt.toISOString()
+    },
+    connection: {
+      serviceTokenCiphertext: context.connection.serviceTokenCiphertext,
+      pendingServiceTokenCiphertext: context.connection.pendingServiceTokenCiphertext,
+      configurationRevision: context.connection.configurationRevision,
+      configurationHash: context.connection.configurationHash,
+      configurationSchemaSha256: context.connection.configurationSchemaSha256,
+      updatedAt: context.connection.updatedAt.toISOString()
+    },
+    targets: context.targets.map(target => ({
+      id: target.id,
+      baseUrl: target.baseUrl,
+      enabled: target.enabled,
+      updatedAt: target.updatedAt.toISOString()
+    })).sort((left, right) => left.id.localeCompare(right.id))
+  })
+}
+
+/** Network results may only change the exact control context they observed.
+ * Hold the connection and Target locks through validation and the entire write. */
+export async function commitServiceControlContext<T>(
+  expected: PlatformServiceControlContext,
+  operation: 'discovery' | 'configuration',
+  commit: (tx: DatabaseTransaction, current: PlatformServiceControlContext, changedAt: Date) => Promise<T>
+): Promise<T> {
+  return db.transaction(async (tx) => {
+    const current = await loadServiceControlContext(expected.service.id, {
+      transaction: tx,
+      forUpdate: true
+    })
+    if (serviceControlFingerprint(expected) !== serviceControlFingerprint(current)) {
+      throw createApplicationError({
+        statusCode: 409,
+        message: operation === 'discovery'
+          ? 'Service changed while discovery was running; retry discovery'
+          : 'Service changed while configuration was running; retry configuration',
+        data: { code: operation === 'discovery'
+          ? 'SERVICE_DISCOVERY_CONFLICT'
+          : 'SERVICE_CONFIGURATION_REVISION_CONFLICT' }
+      })
+    }
+    // Keep each accepted write distinguishable even within one clock tick.
+    const lastChange = current.targets.reduce(
+      (latest, target) => Math.max(latest, target.updatedAt.getTime()),
+      Math.max(current.connection.updatedAt.getTime(), current.service.updatedAt.getTime())
+    )
+    return commit(tx, current, new Date(Math.max(Date.now(), lastChange + 1)))
+  })
+}
+
 export async function buildServiceControlView(
   context: PlatformServiceControlContext,
   options: ServiceViewOptions = {}
@@ -187,4 +245,15 @@ export async function buildServiceControlView(
     )),
     endpoints: document ? readStoredServiceEndpoints(document.summary) : []
   }
+}
+
+/** Read-only control view shared by management and Endpoint reconciliation. */
+export async function getServiceControlView(
+  upstreamServiceId: string,
+  options: ServiceViewOptions = {}
+): Promise<ServiceConfigurationView> {
+  return buildServiceControlView(
+    await loadServiceControlContext(upstreamServiceId),
+    options
+  )
 }
