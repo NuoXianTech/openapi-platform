@@ -66,10 +66,8 @@ export function useAdminEndpointCatalogPage() {
   const allDrift = computed(() => catalog.value.services.flatMap(
     service => service.targetDrift
   ))
-  // Publication only adopts Targets discovery already verified, and an
-  // `address_changed` Target is unverified by definition: publishing it
-  // reproduces the same payload and leaves the active revision untouched. So it
-  // must not enable Apply, and it needs discovery instead.
+  // Address changes require discovery and do not count as applicable changes.
+  // Other pending changes can still publish using the last verified Targets.
   const requiresDiscovery = computed(() => allDrift.value.some(
     item => item.kind === 'address_changed'
   ))
@@ -77,10 +75,7 @@ export function useAdminEndpointCatalogPage() {
     catalog.value.totals.pending
     + allDrift.value.filter(item => item.kind !== 'address_changed').length
   ))
-  const canApply = computed(() => (
-    !requiresDiscovery.value
-    && applyChangeCount.value > 0
-  ))
+  const canApply = computed(() => applyChangeCount.value > 0)
   const loading = catalogResource.loading
   const resourceError = catalogResource.error
   const focusedUpstreamId = computed(() => (
@@ -276,8 +271,7 @@ export function useAdminEndpointCatalogPage() {
   }
 
   /**
-   * Publication covers the whole runtime, so one unready Upstream blocks
-   * every other pending change. Name it instead of leaving the admin to guess.
+   * Identify the Service when publication returns a Service-specific error.
    */
   function blockingUpstreamName(error: unknown): string | null {
     if (!error || typeof error !== 'object') return null

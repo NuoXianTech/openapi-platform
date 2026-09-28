@@ -70,6 +70,30 @@ afterEach(() => {
 })
 
 describe('endpoint selection and feedback', () => {
+  it('applies pending changes while another Service awaits address discovery', async () => {
+    const { page, catalog } = setup([endpoint('one', 'pending')])
+    catalog.value.totals.pending = 1
+    catalog.value.services.push({
+      upstream: { id: 'other-service', name: 'Other Service', status: 'active' },
+      endpoints: [],
+      targetDrift: [{ targetId: 'changed', kind: 'address_changed', runtimeBaseUrl: 'http://old:8080/', desiredBaseUrl: 'http://new:8080/' }]
+    } as unknown as PlatformEndpointCatalogService)
+    expect(page.requiresDiscovery.value).toBe(true)
+    expect(page.canApply.value).toBe(true)
+    fetchMock.mockResolvedValueOnce({ revision: { id: 'revision-2' } })
+    await page.applyChanges()
+    expect(fetchMock).toHaveBeenCalledWith('/api/admin/v1/service-endpoints/apply', { method: 'POST' })
+  })
+
+  it('does not offer publication for an unverified address change alone', async () => {
+    const { page, catalog } = setup([])
+    catalog.value.services[0]!.targetDrift = [{ targetId: 'changed', kind: 'address_changed', runtimeBaseUrl: 'http://old:8080/', desiredBaseUrl: 'http://new:8080/' }]
+    expect(page.requiresDiscovery.value).toBe(true)
+    expect(page.canApply.value).toBe(false)
+    await page.applyChanges()
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+
   it('selects only actionable visible endpoints and drops selections hidden by a filter', async () => {
     const { page } = setup([
       endpoint('live', 'live'), endpoint('available', 'available'),
