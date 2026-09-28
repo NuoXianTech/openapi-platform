@@ -161,6 +161,12 @@ Target 支持内网地址、容器名、HTTP 与 HTTPS，公网 HTTP 会被拒�
 
 ## 8. Service 控制面
 
+管理台通过 `app/composables/admin/use-admin-service-control.ts` 协调发现、Token 更新、
+配置保存与同步。该模块持有控制视图、刷新和反馈，统一输出操作准入状态，并与 Target 操作互斥。
+每次操作绑定发起时的 Service 上下文；切换 Service 或卸载后，旧响应不能覆盖当前反馈、清空新 Token 草稿或解除新操作的占用。
+配置草稿仍由 `use-admin-service-configuration-form.ts` 管理：可用性刷新保留编辑，已保存 Revision 变化后重置草稿。
+保存与同步共用结果解释，配置 Revision 与 Routing Revision 保持区分；读取失败单独显示，不改写已完成的变更结果。
+
 管理员在 Upstream 页面执行 Service 发现。Platform 会：
 
 1. 读取 Service 描述。
