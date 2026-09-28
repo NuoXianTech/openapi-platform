@@ -53,6 +53,7 @@ export function useAdminServiceControl(upstreamId: Readonly<Ref<string>>) {
   const disposed = ref(false)
 
   const targetOperations = useAdminTargetOperations({
+    context: () => upstreamId.value,
     refresh: () => refreshData('both'),
     isBlocked: () => disposed.value || !upstreamId.value || active.value !== null || loading.value
   })

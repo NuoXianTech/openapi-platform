@@ -1,6 +1,7 @@
-import { computed, ref } from 'vue'
+import { computed, getCurrentScope, onScopeDispose, ref, watch } from 'vue'
 import type { PlatformUpstreamTarget } from '#shared/types/platform'
 import { parseFetchError } from '~/utils/client-error'
+import { useConfirmedOperation } from '~/composables/use-confirmed-operation'
 
 export interface TargetFormValues {
   baseUrl: string
@@ -18,32 +19,51 @@ const feedbackKeys = {
 export function useAdminTargetOperations(options: {
   refresh: () => Promise<void>
   isBlocked: () => boolean
+  context?: () => unknown
 }) {
   const { t } = useI18n()
   const toast = useToast()
-  const confirm = useConfirmDialog()
+  const confirm = useConfirmedOperation(options.context)
   const active = ref<'save' | 'confirmation' | null>(null)
+  const disposed = ref(false)
+  let generation = 0
+  if (options.context) watch(options.context, () => { generation += 1; active.value = null }, { flush: 'sync' })
+  if (getCurrentScope()) onScopeDispose(() => { disposed.value = true; generation += 1; active.value = null })
   const state = computed(() => ({
     busy: active.value !== null,
     saving: active.value === 'save',
-    disabled: active.value !== null || options.isBlocked()
+    disabled: disposed.value || active.value !== null || options.isBlocked()
   }))
 
-  async function execute(action: keyof typeof feedbackKeys, mutate: () => Promise<unknown>) {
-    try {
-      await mutate()
-    } catch (error: unknown) {
-      toast.add({ title: parseFetchError(error, t(feedbackKeys[action].failure)), color: 'error' })
-      // The confirmation dialog must remain open for retry on mutation failure.
-      throw error
-    }
+  async function reportSuccess(action: keyof typeof feedbackKeys) {
+    const startedGeneration = generation
     toast.add({ title: t(feedbackKeys[action].success), color: 'success' })
     try {
       await options.refresh()
     } catch (error: unknown) {
       // The mutation succeeded. A read failure must not invite another mutation.
-      toast.add({ title: parseFetchError(error, t('common.feedback.loadFailed')), color: 'error' })
+      if (!disposed.value && generation === startedGeneration) {
+        toast.add({ title: parseFetchError(error, t('common.feedback.loadFailed')), color: 'error' })
+      }
     }
+  }
+
+  function reportError(action: keyof typeof feedbackKeys, error: unknown) {
+    toast.add({ title: parseFetchError(error, t(feedbackKeys[action].failure)), color: 'error' })
+  }
+
+  async function execute(action: keyof typeof feedbackKeys, mutate: () => Promise<unknown>) {
+    const startedGeneration = generation
+    const isCurrent = () => !disposed.value && generation === startedGeneration
+    try {
+      await mutate()
+    } catch (error: unknown) {
+      if (isCurrent()) reportError(action, error)
+      throw error
+    }
+    if (!isCurrent()) return false
+    await reportSuccess(action)
+    return isCurrent()
   }
 
   async function save(upstreamId: string, target: PlatformUpstreamTarget | null, values: TargetFormValues): Promise<boolean> {
@@ -51,16 +71,16 @@ export function useAdminTargetOperations(options: {
     const targetId = target?.id
     const body = { baseUrl: values.baseUrl.trim(), weight: values.weight, enabled: values.enabled }
     active.value = 'save'
+    const startedGeneration = generation
     try {
-      await execute(targetId ? 'update' : 'create', () => $fetch(
+      return await execute(targetId ? 'update' : 'create', () => $fetch(
         targetId ? `/api/admin/v1/targets/${targetId}` : `/api/admin/v1/upstreams/${upstreamId}/targets`,
         { method: targetId ? 'PATCH' : 'POST', body }
       ))
-      return true
     } catch {
       return false
     } finally {
-      active.value = null
+      if (generation === startedGeneration) active.value = null
     }
   }
 
@@ -69,8 +89,7 @@ export function useAdminTargetOperations(options: {
     const targetId = target.id
     const enabled = !target.enabled
     active.value = 'confirmation'
-    let completed = false
-    let running: Promise<void> | null = null
+    const startedGeneration = generation
     try {
       return await confirm({
         ...(action === 'toggle' ? {
@@ -83,17 +102,14 @@ export function useAdminTargetOperations(options: {
           description: t('admin.apis.routing.deleteTarget.description'),
           confirmColor: 'error' as const
         }),
-        onConfirm: () => {
-          if (completed) return
-          // Keep retries in this admitted confirmation; repeated clicks share a request.
-          running ??= execute(action, () => $fetch(`/api/admin/v1/targets/${targetId}`,
-            action === 'toggle' ? { method: 'PATCH', body: { enabled } } : { method: 'DELETE' }
-          )).then(() => { completed = true }).finally(() => { running = null })
-          return running
-        }
+        mutate: () => $fetch(`/api/admin/v1/targets/${targetId}`,
+          action === 'toggle' ? { method: 'PATCH', body: { enabled } } : { method: 'DELETE' }
+        ),
+        onError: error => reportError(action, error),
+        onSuccess: () => reportSuccess(action)
       })
     } finally {
-      active.value = null
+      if (generation === startedGeneration) active.value = null
     }
   }
 

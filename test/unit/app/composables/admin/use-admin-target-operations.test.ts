@@ -1,4 +1,4 @@
-import { ref } from 'vue'
+import { effectScope, ref } from 'vue'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { PlatformUpstreamTarget } from '#shared/types/platform'
 import { useAdminTargetOperations, type TargetFormValues } from '~/composables/admin/use-admin-target-operations'
@@ -51,6 +51,45 @@ afterEach(() => {
 })
 
 describe('Target operations', () => {
+  it('invalidates a retained confirmation callback when its owner is disposed', async () => {
+    const scope = effectScope()
+    const { operations } = scope.run(setup)!
+    const pending = operations.remove(target)
+    scope.stop()
+    await dialog.options.onConfirm()
+    dialog.resolve(true)
+    await expect(pending).resolves.toBe(false)
+    expect(fetchMock).not.toHaveBeenCalled()
+    expect(refresh).not.toHaveBeenCalled()
+  })
+
+  it('does not execute a confirmation for an Upstream that is no longer selected', async () => {
+    const scope = effectScope()
+    const upstreamId = ref('first')
+    const operations = scope.run(() => useAdminTargetOperations({ refresh, isBlocked: () => false, context: () => upstreamId.value }))!
+    const pending = operations.remove(target)
+    upstreamId.value = 'second'
+    upstreamId.value = 'first'
+    await dialog.options.onConfirm()
+    dialog.resolve(true)
+    await expect(pending).resolves.toBe(false)
+    expect(fetchMock).not.toHaveBeenCalled()
+    expect(refresh).not.toHaveBeenCalled()
+    scope.stop()
+  })
+
+  it('ignores a save response after the owning scope is disposed', async () => {
+    const scope = effectScope()
+    const { operations } = scope.run(setup)!
+    const request = deferred<unknown>()
+    fetchMock.mockReturnValueOnce(request.promise)
+    const pending = operations.save('upstream-1', target, values)
+    scope.stop()
+    request.resolve(target)
+    await expect(pending).resolves.toBe(false)
+    expect(refresh).not.toHaveBeenCalled()
+    expect(toast).not.toHaveBeenCalled()
+  })
   it.each([null, target])('saves %s through the shared flow, normalizes the address and refreshes once', async (editing) => {
     const { operations } = setup()
     await expect(operations.save('upstream-1', editing, values)).resolves.toBe(true)

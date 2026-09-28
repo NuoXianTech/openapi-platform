@@ -5,7 +5,6 @@ import type {
   ServiceConfigurationDefinition,
   ServiceDescription
 } from '#shared/types/service-control'
-import { db, type DatabaseTransaction } from '~~/server/db/client'
 import {
   upstreamServiceConnections,
   upstreamTargets
@@ -14,6 +13,7 @@ import { createApplicationError } from '~~/server/errors/application-error'
 import {
   buildServiceControlView,
   loadServiceControlContext,
+  commitServiceControlContext,
   safeServiceControlError,
   type PlatformServiceControlContext
 } from '~~/server/services/platform-service-control-context'
@@ -152,57 +152,6 @@ export function selectCompatibleTargets<
     )
   }
   return { description: selected[0]!.description, targets: selected }
-}
-
-function discoveryContextFingerprint(
-  context: PlatformServiceControlContext
-): string {
-  return canonicalJson({
-    service: {
-      openapiDocumentId: context.service.openapiDocumentId,
-      updatedAt: context.service.updatedAt.toISOString()
-    },
-    connection: {
-      serviceTokenCiphertext: context.connection.serviceTokenCiphertext,
-      pendingServiceTokenCiphertext:
-        context.connection.pendingServiceTokenCiphertext,
-      updatedAt: context.connection.updatedAt.toISOString()
-    },
-    targets: context.targets
-      .map(target => ({
-        id: target.id,
-        baseUrl: target.baseUrl,
-        enabled: target.enabled,
-        updatedAt: target.updatedAt.toISOString()
-      }))
-      .sort((left, right) => left.id.localeCompare(right.id))
-  })
-}
-
-async function loadCurrentDiscoveryContext(
-  tx: DatabaseTransaction,
-  upstreamServiceId: string
-) {
-  return loadServiceControlContext(upstreamServiceId, {
-    transaction: tx,
-    forUpdate: true
-  })
-}
-
-function assertDiscoveryContextCurrent(
-  expected: PlatformServiceControlContext,
-  current: PlatformServiceControlContext
-) {
-  if (
-    discoveryContextFingerprint(expected)
-    !== discoveryContextFingerprint(current)
-  ) {
-    throw createApplicationError({
-      statusCode: 409,
-      message: 'Service changed while discovery was running; retry discovery',
-      data: { code: 'SERVICE_DISCOVERY_CONFLICT' }
-    })
-  }
 }
 
 async function fetchServiceSnapshot(
@@ -363,14 +312,7 @@ async function recordDiscoveryFailure(
   context: PlatformServiceControlContext,
   failure: DiscoveryFetchFailure
 ) {
-  await db.transaction(async (tx) => {
-    const current = await loadCurrentDiscoveryContext(tx, context.service.id)
-    if (
-      discoveryContextFingerprint(context)
-      !== discoveryContextFingerprint(current)
-    ) return
-
-    const now = new Date()
+  await commitServiceControlContext(context, 'discovery', async (tx, _current, now) => {
     for (const [targetId, message] of failure.targetErrors) {
       await tx.update(upstreamTargets).set({
         configurationStatus: 'error',
@@ -393,10 +335,7 @@ async function commitServiceSnapshot(
   context: PlatformServiceControlContext,
   snapshot: DiscoveryFetchSuccess
 ) {
-  await db.transaction(async (tx) => {
-    const current = await loadCurrentDiscoveryContext(tx, context.service.id)
-    assertDiscoveryContextCurrent(context, current)
-
+  await commitServiceControlContext(context, 'discovery', async (tx, current, now) => {
     const first = snapshot.targets[0]!
     const schemaChanged = Boolean(
       current.connection.configurationSchemaSha256
@@ -418,7 +357,6 @@ async function commitServiceSnapshot(
       transaction: tx
     })
 
-    const now = new Date()
     const firstTargetError = [...snapshot.targetErrors.values()][0]
     const discoveryError = snapshot.targetErrors.size > 0
       ? `${snapshot.targetErrors.size} Service target(s) could not be discovered: ${firstTargetError}`.slice(0, 500)

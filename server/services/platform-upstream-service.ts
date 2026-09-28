@@ -377,7 +377,7 @@ export const platformUpstreamService = {
                 lastError: null
               }
             : {}),
-          updatedAt: new Date()
+          updatedAt: new Date(Math.max(Date.now(), binding.target.updatedAt.getTime() + 1))
         }).where(eq(upstreamTargets.id, id)).returning())
         if (!target) throw new Error('target update returned no row')
         const disablingPublishedTarget = binding.target.enabled

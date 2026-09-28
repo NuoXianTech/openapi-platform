@@ -2,6 +2,7 @@ import { computed, onScopeDispose, ref, watch } from 'vue'
 import type { PlatformApiVersion, PlatformProduct, PlatformProductSummary } from '#shared/types/platform'
 import { PAGE_SIZE_OPTIONS } from '~/constants/pagination'
 import { usePrivatePagedList } from '~/composables/dashboard/use-private-paged-list'
+import { useConfirmedOperation } from '~/composables/use-confirmed-operation'
 import { parseFetchError } from '~/utils/client-error'
 
 export type ProductFormValues = Pick<PlatformProductSummary, 'name' | 'summary' | 'description' | 'visibility' | 'lifecycle'>
@@ -10,7 +11,7 @@ export type VersionFormValues = Pick<PlatformApiVersion, 'state' | 'changelog'>
 export function useAdminProductManagement() {
   const { t } = useI18n()
   const toast = useToast()
-  const confirm = useConfirmDialog()
+  const confirm = useConfirmedOperation()
   const resource = usePrivatePagedList<Record<string, never>, PlatformProduct>({
     path: '/api/admin/v1/products/paged', defaultFilters: {}, defaultPageSize: PAGE_SIZE_OPTIONS[0]
   })
@@ -105,36 +106,21 @@ export function useAdminProductManagement() {
     if (controls.value.disabled) return false
     const id = version?.id ?? product.id
     active.value = 'delete'
-    let valid = true
-    let completed = false
-    let running: Promise<void> | null = null
     try {
-      const answer = await confirm({
+      return await confirm({
         title: t(version ? 'admin.apis.routing.deleteVersion.title' : 'admin.apis.routing.deleteProduct.title', version ? { version: version.version } : { name: product.name }),
         description: t(version ? 'admin.apis.routing.deleteVersion.description' : 'admin.apis.routing.deleteProduct.description'),
         confirmColor: 'error',
-        onConfirm: () => {
-          if (!valid || disposed.value || completed) return
-          running ??= (async () => {
-            try {
-              await $fetch(`/api/admin/v1/${version ? 'versions' : 'products'}/${id}`, { method: 'DELETE' })
-            } catch (error: unknown) {
-              if (!disposed.value) toast.add({ title: parseFetchError(error, t('common.feedback.deleteFailed')), color: 'error' })
-              throw error
-            }
-            completed = true
-            if (disposed.value) return
-            toast.add({ title: t('common.feedback.deleted'), color: 'success' })
-            if (!version && editingProduct.value?.id === id) modalOpen.value = false
-            if (version ? editingVersion.value?.id === id : versionProduct.value?.id === id) versionModalOpen.value = false
-            await refreshProducts()
-          })().finally(() => { running = null })
-          return running
+        mutate: () => $fetch(`/api/admin/v1/${version ? 'versions' : 'products'}/${id}`, { method: 'DELETE' }),
+        onError: (error) => { toast.add({ title: parseFetchError(error, t('common.feedback.deleteFailed')), color: 'error' }) },
+        onSuccess: async () => {
+          toast.add({ title: t('common.feedback.deleted'), color: 'success' })
+          if (!version && editingProduct.value?.id === id) modalOpen.value = false
+          if (version ? editingVersion.value?.id === id : versionProduct.value?.id === id) versionModalOpen.value = false
+          await refreshProducts()
         }
       })
-      return answer && completed && !disposed.value
     } finally {
-      valid = false
       active.value = null
     }
   }

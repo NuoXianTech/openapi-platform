@@ -3,12 +3,13 @@ import type { PlatformRoutingRevisionSummary, PlatformRuntime } from '#shared/ty
 import { PAGE_SIZE_OPTIONS } from '~/constants/pagination'
 import { usePrivateResource } from '~/composables/dashboard/use-private-resource'
 import { usePrivatePagedList } from '~/composables/dashboard/use-private-paged-list'
+import { useConfirmedOperation } from '~/composables/use-confirmed-operation'
 import { parseFetchError } from '~/utils/client-error'
 
 export function useAdminRuntimeManagement() {
   const { t } = useI18n()
   const toast = useToast()
-  const confirm = useConfirmDialog()
+  const confirm = useConfirmedOperation()
   const runtimeResource = usePrivateResource<PlatformRuntime>({
     path: '/api/admin/v1/runtime',
     defaultData: () => ({ defaultDomain: null, activeRevisionId: null, updatedAt: '' })
@@ -80,36 +81,21 @@ export function useAdminRuntimeManagement() {
     if (controls.value.disabled || revision.id === runtime.value.activeRevisionId) return false
     const { id, sequence } = revision
     active.value = 'activation'
-    let valid = true
-    let completed = false
-    let running: Promise<void> | null = null
     try {
-      const answer = await confirm({
+      return await confirm({
         title: t('admin.apis.routing.rollback.title', { sequence }),
         description: t('admin.apis.routing.rollback.description'),
         confirmLabel: t('admin.apis.routing.actions.activateRevision'),
         confirmColor: 'warning',
-        onConfirm: () => {
-          if (!valid || disposed.value || completed) return
-          running ??= (async () => {
-            try {
-              await $fetch('/api/admin/v1/revisions/activate', { method: 'POST', body: { revisionId: id } })
-            } catch (error: unknown) {
-              if (!disposed.value) toast.add({ title: parseFetchError(error, t('admin.apis.routing.feedback.activateFailed')), color: 'error' })
-              throw error
-            }
-            completed = true
-            if (disposed.value) return
-            runtimeResource.data.value = { ...runtime.value, activeRevisionId: id }
-            toast.add({ title: t('admin.apis.routing.feedback.revisionActivated', { sequence }), color: 'success' })
-            await refreshResources()
-          })().finally(() => { running = null })
-          return running
+        mutate: () => $fetch('/api/admin/v1/revisions/activate', { method: 'POST', body: { revisionId: id } }),
+        onError: (error) => { toast.add({ title: parseFetchError(error, t('admin.apis.routing.feedback.activateFailed')), color: 'error' }) },
+        onSuccess: async () => {
+          runtimeResource.data.value = { ...runtime.value, activeRevisionId: id }
+          toast.add({ title: t('admin.apis.routing.feedback.revisionActivated', { sequence }), color: 'success' })
+          await refreshResources()
         }
       })
-      return answer && completed && !disposed.value
     } finally {
-      valid = false
       active.value = null
     }
   }

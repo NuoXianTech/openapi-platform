@@ -1,7 +1,7 @@
 import type { ButtonProps } from '@nuxt/ui'
 import { LazyCommonAppConfirmDialog } from '#components'
 
-interface ConfirmDialogOptions {
+export interface ConfirmDialogOptions {
   title?: string
   description?: string
   confirmLabel?: string
