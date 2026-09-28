@@ -1,191 +1,104 @@
-name: Create GitHub release
+name: Release
 
 on:
   push:
-    tags:
-      - 'v*.*.*'
+    tags: ['v*.*.*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Existing version tag to release, for example v0.1.5'
+        required: true
+        type: string
 
 permissions:
-  contents: write
+  contents: read
+  actions: write
+  packages: write
 
 concurrency:
-  group: release-${{ github.ref }}
+  group: release-${{ inputs.tag || github.ref_name }}
   cancel-in-progress: false
 
 jobs:
-  release:
-    name: Verify and release ${{ github.ref_name }}
+  ci:
+    uses: ./.github/workflows/verified-build.yml
+    with:
+      ref: ${{ inputs.tag || github.ref_name }}
+
+  package:
+    name: Package the verified Node server
+    needs: ci
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
-
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      actions: read
     steps:
-      - name: Validate version tag
-        id: version
-        shell: bash
-        env:
-          RELEASE_TAG: ${{ github.ref_name }}
-        run: |
-          if [[ ! "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
-            echo "Invalid release tag: $RELEASE_TAG" >&2
-            echo "Expected a semantic version such as v1.2.3 or v1.2.3-rc.1." >&2
-            exit 1
-          fi
-
-          echo "number=${RELEASE_TAG#v}" >> "$GITHUB_OUTPUT"
-          if [[ "$RELEASE_TAG" == *-* ]]; then
-            echo "prerelease=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "prerelease=false" >> "$GITHUB_OUTPUT"
-          fi
-
-      - name: Check out tagged source
-        uses: actions/checkout@v7
+      - uses: actions/checkout@v7
         with:
-          ref: ${{ github.ref }}
-          fetch-depth: 0
+          ref: ${{ needs.ci.outputs.sha }}
           persist-credentials: false
-
-      - name: Verify release commit is on main
-        shell: bash
-        run: |
-          git fetch --no-tags origin main:refs/remotes/origin/main
-          if ! git merge-base --is-ancestor HEAD origin/main; then
-            echo "Release tag ${GITHUB_REF_NAME} does not point to a commit on main." >&2
-            echo "Merge the release PR first, then create the tag from the updated main branch." >&2
-            exit 1
-          fi
-
-      - name: Set up pnpm
-        uses: pnpm/action-setup@v5
-        with:
-          version: 11.20.0
-          run_install: false
-
-      - name: Set up Node.js
-        uses: actions/setup-node@v6
+      - uses: actions/setup-node@v6
         with:
           node-version: 24
-          cache: pnpm
-
-      - name: Verify package version
-        shell: bash
-        env:
-          RELEASE_TAG: ${{ github.ref_name }}
-        run: |
-          package_version="$(node -p "require('./package.json').version")"
-          if [[ "$RELEASE_TAG" != "v${package_version}" ]]; then
-            echo "Release tag ${RELEASE_TAG} does not match package.json version ${package_version}." >&2
-            exit 1
-          fi
-
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
-
-      - name: Lint
-        run: pnpm lint
-
-      - name: Type-check
-        run: pnpm typecheck
-
-      - name: Check unused files and exports
-        run: pnpm check:dead-code
-
-      - name: Run unit tests
-        run: pnpm test
-
-      - name: Check out API Service main
-        uses: actions/checkout@v7
+      - uses: actions/download-artifact@v8
         with:
-          repository: NuoXianTech/openapi-service
-          ref: main
-          path: openapi-service
+          name: ci-distribution
+          run-id: ${{ needs.ci.outputs.run-id }}
+          github-token: ${{ github.token }}
+          path: ${{ runner.temp }}/ci-distribution
+      - name: Restore verified distribution
+        env:
+          EXPECTED_SHA: ${{ needs.ci.outputs.sha }}
+        run: node scripts/release/distribution.mjs restore "$RUNNER_TEMP/ci-distribution" .output
+      - name: Package application and checksums
+        run: node scripts/release/distribution.mjs package .output release
+      - uses: actions/upload-artifact@v7
+        with:
+          name: release-package
+          path: |
+            release/*.tar.gz
+            release/checksums.txt
+          compression-level: 0
+          if-no-files-found: error
+
+  images:
+    needs: ci
+    uses: ./.github/workflows/publish-images.yml
+    with:
+      sha: ${{ needs.ci.outputs.sha }}
+      run-id: ${{ needs.ci.outputs.run-id }}
+      image-tag: ${{ needs.ci.outputs.version }}
+
+  publish:
+    name: Publish the complete release
+    needs: [ci, package, images]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+      actions: read
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.ci.outputs.sha }}
+          fetch-depth: 0
           persist-credentials: false
-
-      - name: Install API Service dependencies
-        working-directory: openapi-service
-        run: pnpm install --frozen-lockfile --prefer-offline
-
-      - name: Build API Service main
-        working-directory: openapi-service
-        run: pnpm build
-
-      - name: Run Platform and API Service acceptance suite
+      - uses: actions/download-artifact@v8
+        with:
+          name: release-package
+          path: release
+      - name: Verify release files
         env:
-          OPENAPI_SERVICE_REPO: ${{ github.workspace }}/openapi-service
-        run: pnpm test:api-service
-
-      - name: Build production server
-        run: pnpm build
-
-      - name: Run integration tests
-        run: pnpm test:integration
-
-      - name: Package application
-        shell: bash
-        env:
-          VERSION: ${{ steps.version.outputs.number }}
+          VERSION: ${{ needs.ci.outputs.version }}
         run: |
-          package_name="openapi-platform-${VERSION}"
-          archive_name="${package_name}.tar.gz"
-          package_dir="${RUNNER_TEMP}/${package_name}"
-
-          mkdir -p "$package_dir" release
-          cp -a .output/. "$package_dir/"
-          cp .env.example LICENSE README.md README_ZH.md "$package_dir/"
-
-          tar -czf "release/${archive_name}" \
-            -C "$RUNNER_TEMP" "$package_name"
-
-          (
-            cd release
-            sha256sum "${archive_name}" > checksums.txt
-          )
-
-      - name: Verify release package
-        shell: bash
-        env:
-          VERSION: ${{ steps.version.outputs.number }}
-        run: |
-          set -euo pipefail
-          package_name="openapi-platform-${VERSION}"
-          archive_name="${package_name}.tar.gz"
-          contents_file="${RUNNER_TEMP}/${package_name}-contents.txt"
-
-          tar -tzf "release/${archive_name}" > "$contents_file"
-          grep -Fxq "${package_name}/package.json" "$contents_file"
-          grep -Fxq "${package_name}/server/index.mjs" "$contents_file"
-          grep -Fxq "${package_name}/server/start.mjs" "$contents_file"
-          grep -Fxq "${package_name}/server/doctor.mjs" "$contents_file"
-          grep -Fxq "${package_name}/server/runtime-config.mjs" "$contents_file"
-          grep -Fxq "${package_name}/server/runtime-checks.mjs" "$contents_file"
-          grep -Fxq "${package_name}/server/pglite-client.mjs" "$contents_file"
-          grep -Fxq "${package_name}/server/migrate.mjs" "$contents_file"
-          grep -Fxq "${package_name}/server/database-migrator.mjs" "$contents_file"
-          grep -Fxq "${package_name}/server/db/migrations/postgresql/meta/_journal.json" "$contents_file"
-          grep -Fxq "${package_name}/.env.example" "$contents_file"
-          grep -Fxq "${package_name}/LICENSE" "$contents_file"
-          grep -Fxq "${package_name}/README.md" "$contents_file"
-          grep -Fxq "${package_name}/README_ZH.md" "$contents_file"
-          if grep -Fq "${package_name}/.output/" "$contents_file"; then
-            echo "Release package must contain the contents of .output, not a nested .output directory." >&2
-            exit 1
-          fi
-          PACKAGE_JSON="${RUNNER_TEMP}/${package_name}/package.json" node -e '
-            const { readFileSync } = require("node:fs")
-            const packageJson = JSON.parse(readFileSync(process.env.PACKAGE_JSON, "utf8"))
-            if (packageJson.scripts?.start !== "node server/start.mjs" || packageJson.scripts?.migrate !== "node server/migrate.mjs" || packageJson.scripts?.doctor !== "node server/doctor.mjs") {
-              throw new Error("Release package has invalid runtime scripts.")
-            }
-          '
-          (
-            cd release
-            sha256sum --check checksums.txt
-          )
+          test -s "release/openapi-platform-${VERSION}.tar.gz"
+          (cd release && sha256sum --check checksums.txt)
 
       - name: Generate release notes
         shell: bash
         env:
-          RELEASE_TAG: ${{ github.ref_name }}
+          RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
         run: |
           set -euo pipefail
 
@@ -199,12 +112,6 @@ jobs:
           fi
 
           {
-            notes_file="docs/releases/${RELEASE_TAG}.md"
-            if [[ -f "$notes_file" ]]; then
-              cat "$notes_file"
-              echo
-              echo
-            fi
             echo "## Changes"
             echo
             git log "$commit_range" --first-parent \
@@ -214,14 +121,29 @@ jobs:
             echo "**Full Changelog**: ${comparison_url}"
           } > "${RUNNER_TEMP}/release-notes.md"
 
-      - name: Create or update GitHub release
-        uses: softprops/action-gh-release@v3
-        with:
-          name: OpenAPI Platform ${{ github.ref_name }}
-          body_path: ${{ runner.temp }}/release-notes.md
-          generate_release_notes: false
-          prerelease: ${{ steps.version.outputs.prerelease }}
-          make_latest: ${{ steps.version.outputs.prerelease == 'false' }}
-          fail_on_unmatched_files: true
-          files: |
-            release/*
+      - name: Publish verified release assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
+          VERSION: ${{ needs.ci.outputs.version }}
+          PRERELEASE: ${{ needs.ci.outputs.prerelease }}
+        run: |
+          set -euo pipefail
+          if state=$(gh release view "$RELEASE_TAG" --json isDraft --jq .isDraft); then
+            if [[ "$state" == false ]]; then
+              # Published assets and operator-edited notes are immutable here.
+              gh release download "$RELEASE_TAG" --dir "$RUNNER_TEMP/published-release" \
+                --pattern "openapi-platform-${VERSION}.tar.gz" --pattern checksums.txt
+              (cd "$RUNNER_TEMP/published-release" && sha256sum --check checksums.txt)
+              echo "Release already published; verified its assets." >> "$GITHUB_STEP_SUMMARY"
+              exit 0
+            fi
+          else
+            gh release create "$RELEASE_TAG" --verify-tag --draft \
+              --title "OpenAPI Platform $RELEASE_TAG" --notes-file "$RUNNER_TEMP/release-notes.md"
+          fi
+          gh release upload "$RELEASE_TAG" release/*.tar.gz release/checksums.txt --clobber
+          latest=true
+          if [[ "$PRERELEASE" == true ]]; then latest=false; fi
+          gh release edit "$RELEASE_TAG" --draft=false --prerelease="$PRERELEASE" --latest="$latest"

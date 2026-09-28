@@ -1,0 +1,15 @@
+FROM node:24-bookworm-slim
+
+ENV NODE_ENV=production
+ENV NITRO_HOST=0.0.0.0
+ENV NITRO_PORT=3000
+
+WORKDIR /app
+
+# The build context contains only the verified CI distribution.
+COPY --chown=node:node . ./
+RUN mkdir -p /app/.data && chown node:node /app/.data
+
+USER node
+EXPOSE 3000
+CMD ["node", "server/index.mjs"]

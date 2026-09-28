@@ -61,7 +61,7 @@ Git Tag 必须：
    ```
 
 7. 确认构建后集成测试已经实际执行 `.output/server/migrate.mjs`。
-   镜像发布工作流同样运行完整 Platform 产物测试，并在 amd64/arm64 各自的原生 Runner 上加载镜像，使用临时数据卷验证首次自动迁移、健康/就绪检查及保留数据卷的重启。检查通过后推送刚验证的本地镜像，不重新构建。
+   CI 完成全部测试后保存同一份 Nitro 产物。Release 和镜像发布复用它；镜像仍在 amd64/arm64 各自的原生 Runner 上加载并使用临时数据卷验证首次自动迁移、健康/就绪检查及保留数据卷的重启。检查通过后推送刚验证的本地镜像，不重新构建 Nuxt。
 8. 执行 [Platform 与 Service 集成测试](./service-integration-testing.md)。
 9. 按 [生产就绪清单](./production-readiness.md) 和[数据库迁移与版本升级](./database-migrations.md)完成备份、故障和回滚准备。
 
@@ -83,7 +83,7 @@ git switch -c release/v0.1.0
 - `package.json` 版本。
 - 锁文件中的根包版本（如果存在）。
 - Release Notes 草稿。
-- 在 `docs/releases/vX.Y.Z.md` 保存该版本的升级说明；Tag 工作流将其放在自动生成的提交记录之前。
+- Tag 工作流从 Git 提交记录自动生成 Release Notes；数据库、运行配置和回滚等补充说明直接维护在 GitHub Release 页面。
 - 数据库、运行配置和回滚说明。
 
 提交并创建 Pull Request：
@@ -124,21 +124,32 @@ git push origin v0.1.0
 
 ## 7. CI 发布要求
 
-版本标签工作流应：
+发布流程复用目标提交已通过 CI 的产物，将校验、打包和发布分开，并验证 Node Server、数据库迁移、Service 联调和容器运行行为。
 
-1. 检查 Tag 与 `package.json` 版本一致。
-2. 安装锁定依赖。
-3. 执行 lint、typecheck、死代码检查、测试和 build。
-4. 将 `.output` 内容扁平化到 Release 版本目录根部，并校验部署 `package.json`、数据库迁移执行器和迁移文件。
-5. 构建非 root amd64/arm64 镜像。
-6. 创建 GitHub Release 和校验和。
-7. 发布 GHCR 多架构镜像。
+```mermaid
+flowchart LR
+  CI[目标提交的完整 CI] --> Artifact[已测试的 Nitro 产物]
+  Tag[版本 Tag / 手动指定 Tag] --> Verify[核对 Tag、版本和 main 历史]
+  Verify --> Artifact
+  Artifact --> Package[Node Server 压缩包与校验和]
+  Artifact --> Images[amd64 / arm64 镜像与启动验证]
+  Images --> GHCR[GHCR 多架构镜像]
+  Package --> Release[公开 GitHub Release]
+  GHCR --> Release
+```
 
-仓库还应在 GitHub Security 中启用 Secret scanning 与 Push protection；
-这属于仓库安全设置，不由构建脚本伪装实现。GitHub Release 与 GHCR
-由两条独立的 Tag 工作流发布，只有两者都成功时版本才算完成。基础设施
-故障可以在不移动 Tag 的前提下重跑；源码或产物问题必须修复后发布新的
-patch 版本。
+- `quality.yml` 保持 PR 规则及 `Application quality` 检查名称，继续执行 lint、类型检查、死代码检查、单元测试、Service 联调、生产构建与产物集成测试。仅非 PR 运行在全部成功后上传 `ci-distribution`，保留 14 天。
+- `verified-build.yml` 校验版本 Tag 格式、包版本及其对远端 `main` 的可达性，只接受本仓库相同提交的 push 或手动 CI。已有运行则等待它；产物缺失或过期时为该 Tag 补跑 CI。失败或取消的 CI 不授权发布，PR 检查不作为正式产物来源。
+- `ci-distribution.tar` 保留构建后的目录结构和权限；`ci-build.json` 记录 Platform SHA、测试使用的 Service SHA、Node 主版本、应用版本和压缩包 SHA-256。下载后先核对来源和完整性，再解包。
+- `release.yml` 是唯一正式发布入口，支持 Tag push 和手动指定已有 Tag。打包任务与镜像任务使用相同 CI run；两者全部成功后，先上传附件到草稿 Release，再公开。发布说明由 Git 提交记录生成，不读取版本 Markdown 文件；补充升级说明直接维护在 Release 页面。
+- 发布与产物校验脚本位于 `scripts/release/`，工作流直接使用 `actions/download-artifact` 下载产物后调用校验脚本。
+- `publish-images.yml` 共用镜像构建、原生 Runner 验证和多架构 manifest 发布。镜像仅用根目录 `Dockerfile.runtime` 封装已测试产物，不执行依赖安装或 Nuxt 构建。根目录 `Dockerfile` 保留源码构建用途。
+- 当前 Nitro 服务端运行依赖为 JavaScript / WASM，可跨 Linux amd64、arm64 复用。归档和恢复都会拒绝 `.node` 等原生二进制；将来引入原生依赖时必须改成各架构单独构建和验收，不能移除此检查后继续复用。
+- `docker-publish.yml` 只负责 `main` 的开发镜像 `latest`，同样复用该提交的 CI 产物。若等待恢复期间 `main` 已前进，不以新提交的产物冒充旧提交。
+
+基础设施故障可在 Actions 的 **Release** 入口填写原 Tag 重跑。已有版本镜像先校验所属提交并重新验证启动，已有多架构 manifest 必须与两个架构镜像一致，不重新覆盖；`latest` 仍按主线滚动更新。已有公开 Release 的附件会重新校验，页面说明不会被自动覆盖；中断的草稿可以补传附件后公开。已发布版本的源码或产物问题必须发布新版本，不能移动 Tag。该恢复方式要求目标提交已包含此产物上传协议，旧工作流的历史 Tag 不会凭空获得 CI 产物。
+
+仓库还应在 GitHub Security 中启用 Secret scanning 与 Push protection；这属于仓库安全设置，不由构建脚本伪装实现。完整发布以 GitHub Release 和 GHCR 镜像均成功为准；生产环境的数据备份与部署仍是单独步骤。
 
 ## 8. 生产部署
 

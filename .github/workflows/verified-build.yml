@@ -1,0 +1,58 @@
+name: Require verified distribution
+
+on:
+  workflow_call:
+    inputs:
+      ref:
+        description: Existing version tag or full main commit SHA
+        required: true
+        type: string
+    outputs:
+      run-id:
+        value: ${{ jobs.ci.outputs.run-id }}
+      sha:
+        value: ${{ jobs.ci.outputs.sha }}
+      version:
+        value: ${{ jobs.ci.outputs.version }}
+      prerelease:
+        value: ${{ jobs.ci.outputs.prerelease }}
+
+permissions:
+  contents: read
+  actions: write
+
+jobs:
+  ci:
+    name: Require CI for the publication commit
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    concurrency:
+      group: verified-build-${{ inputs.ref }}
+      cancel-in-progress: false
+    outputs:
+      run-id: ${{ steps.ci.outputs.run-id }}
+      sha: ${{ steps.ci.outputs.sha }}
+      version: ${{ steps.ci.outputs.version }}
+      prerelease: ${{ steps.ci.outputs.prerelease }}
+    steps:
+      - name: Validate publication ref
+        env:
+          BUILD_REF: ${{ inputs.ref }}
+        run: |
+          if [[ ! "$BUILD_REF" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-rc\.(0|[1-9][0-9]*))?$ && ! "$BUILD_REF" =~ ^[a-f0-9]{40}$ ]]; then
+            echo "Expected a version tag or a full commit SHA." >&2
+            exit 1
+          fi
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.ref }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+      - id: ci
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BUILD_REF: ${{ inputs.ref }}
+        run: node scripts/release/require-ci.mjs

@@ -164,6 +164,21 @@ jobs:
       - name: Run integration test suite
         run: pnpm test:integration
 
+      - name: Archive the tested distribution
+        run: node scripts/release/distribution.mjs archive .output "$RUNNER_TEMP/ci-distribution"
+
+      - name: Upload the tested distribution
+        if: github.event_name != 'pull_request'
+        uses: actions/upload-artifact@v7
+        with:
+          name: ci-distribution
+          path: |
+            ${{ runner.temp }}/ci-distribution/ci-distribution.tar
+            ${{ runner.temp }}/ci-distribution/ci-build.json
+          compression-level: 0
+          retention-days: 14
+          if-no-files-found: error
+
       - name: Publish validation summary
         if: success()
         shell: bash

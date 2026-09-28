@@ -1,0 +1,279 @@
+name: Publish verified container images
+
+on:
+  workflow_call:
+    inputs:
+      sha:
+        required: true
+        type: string
+      run-id:
+        required: true
+        type: string
+      image-tag:
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+  packages: write
+
+env:
+  REGISTRY: ghcr.io
+
+jobs:
+  build:
+    name: Build image (${{ matrix.arch }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            platform: linux/amd64
+            runner: ubuntu-24.04
+          - arch: arm64
+            platform: linux/arm64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      actions: read
+      packages: write
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.sha }}
+          persist-credentials: false
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+
+      - uses: actions/download-artifact@v8
+        with:
+          name: ci-distribution
+          run-id: ${{ inputs.run-id }}
+          github-token: ${{ github.token }}
+          path: ${{ runner.temp }}/ci-distribution
+
+      - name: Restore verified distribution
+        env:
+          EXPECTED_SHA: ${{ inputs.sha }}
+        run: node scripts/release/distribution.mjs restore "$RUNNER_TEMP/ci-distribution" .output
+
+      - name: Normalize image name
+        id: image
+        shell: bash
+        run: echo "name=${REGISTRY}/${GITHUB_REPOSITORY,,}" >> "$GITHUB_OUTPUT"
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v4
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract architecture image metadata
+        id: metadata
+        uses: docker/metadata-action@v6
+        with:
+          images: ${{ steps.image.outputs.name }}
+          flavor: |
+            suffix=-${{ matrix.arch }},onlatest=true
+          tags: |
+            type=raw,value=${{ inputs.image-tag }}
+
+      - name: Reuse an existing version image
+        id: existing
+        if: inputs.image-tag != 'latest'
+        env:
+          IMAGE_TAGS_JSON: ${{ steps.metadata.outputs.json }}
+          EXPECTED_SHA: ${{ inputs.sha }}
+        run: |
+          set -euo pipefail
+          image="$(jq -r '.tags[0]' <<< "$IMAGE_TAGS_JSON")"
+          if docker pull "$image" 2> "$RUNNER_TEMP/image-lookup-error"; then
+            revision=$(docker image inspect "$image" --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}')
+            if [[ "$revision" != "$EXPECTED_SHA" ]]; then
+              echo "Existing version image belongs to another commit; refusing to overwrite it." >&2
+              exit 1
+            fi
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          elif ! grep -Eqi 'manifest unknown|not found' "$RUNNER_TEMP/image-lookup-error"; then
+            cat "$RUNNER_TEMP/image-lookup-error" >&2
+            exit 1
+          fi
+
+      - name: Build architecture image for local verification
+        if: steps.existing.outputs.exists != 'true'
+        uses: docker/build-push-action@v7
+        with:
+          context: .output
+          file: Dockerfile.runtime
+          platforms: ${{ matrix.platform }}
+          load: true
+          push: false
+          tags: ${{ steps.metadata.outputs.tags }}
+          labels: |
+            ${{ steps.metadata.outputs.labels }}
+            org.opencontainers.image.revision=${{ inputs.sha }}
+            org.opencontainers.image.version=${{ inputs.image-tag }}
+          cache-from: type=gha,scope=openapi-platform-${{ matrix.arch }}
+          cache-to: type=gha,mode=max,scope=openapi-platform-${{ matrix.arch }}
+          provenance: false
+          sbom: false
+
+      - name: Verify image startup, migrations and restart
+        shell: bash
+        env:
+          IMAGE_TAGS_JSON: ${{ steps.metadata.outputs.json }}
+        run: |
+          set -euo pipefail
+          image="$(jq -r '.tags[0]' <<< "$IMAGE_TAGS_JSON")"
+          container="platform-smoke-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          trap 'docker rm -fv "$container" >/dev/null 2>&1 || true' EXIT
+
+          # Isolated, disposable CI configuration; never use deployment secrets.
+          docker run -d --name "$container" \
+            -p 127.0.0.1::3000 -v /app/.data \
+            -e NUXT_AUTH_SECRET=ci-image-auth-secret-0123456789abcdef \
+            -e NUXT_API_KEY_SECRET=0123456789abcdef0123456789abcdef \
+            "$image"
+
+          wait_ready() {
+            local port
+            port="$(docker port "$container" 3000/tcp | cut -d: -f2)"
+            for attempt in $(seq 1 60); do
+              if [[ "$(docker inspect -f '{{.State.Running}}' "$container")" != true ]]; then
+                break
+              fi
+              if curl -fsS --max-time 2 "http://127.0.0.1:${port}/api/ready" | jq -e '.ready == true' >/dev/null; then
+                curl -fsS --max-time 5 "http://127.0.0.1:${port}/api/health" | jq -e '.ok == true' >/dev/null
+                return 0
+              fi
+              sleep 2
+            done
+            docker logs "$container" 2>&1 | sed -E 's/(initial password: ).*/\1[redacted]/'
+            return 1
+          }
+
+          wait_ready
+          docker stop --time 30 "$container"
+          docker start "$container"
+          wait_ready
+
+      - name: Push the verified image
+        if: steps.existing.outputs.exists != 'true'
+        shell: bash
+        env:
+          IMAGE_TAGS_JSON: ${{ steps.metadata.outputs.json }}
+        run: |
+          set -euo pipefail
+          while IFS= read -r tag; do
+            docker push "$tag"
+          done < <(jq -r '.tags[]' <<< "$IMAGE_TAGS_JSON")
+
+  merge:
+    name: Publish multi-platform image
+    needs: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      actions: read
+      packages: write
+
+    steps:
+      - name: Normalize image name
+        id: image
+        shell: bash
+        run: echo "name=${REGISTRY}/${GITHUB_REPOSITORY,,}" >> "$GITHUB_OUTPUT"
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v4
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract multi-platform image metadata
+        id: metadata
+        uses: docker/metadata-action@v6
+        with:
+          images: ${{ steps.image.outputs.name }}
+          tags: |
+            type=raw,value=${{ inputs.image-tag }}
+
+      - name: Create multi-platform manifests
+        shell: bash
+        env:
+          IMAGE_TAGS_JSON: ${{ steps.metadata.outputs.json }}
+          VERSION_TAG: ${{ inputs.image-tag }}
+        run: |
+          set -euo pipefail
+          mapfile -t tags < <(jq -r '.tags[]' <<< "$IMAGE_TAGS_JSON")
+          for tag in "${tags[@]}"; do
+            if [[ "$VERSION_TAG" != latest ]]; then
+              if docker buildx imagetools inspect --raw "$tag" > "$RUNNER_TEMP/existing-manifest.json" 2> "$RUNNER_TEMP/manifest-lookup-error"; then
+                for arch in amd64 arm64; do
+                  digest=$(docker buildx imagetools inspect "${tag}-${arch}" | awk '$1 == "Digest:" {print $2; exit}')
+                  test -n "$digest"
+                  jq -e --arg arch "$arch" --arg digest "$digest" \
+                    '.manifests | any(.digest == $digest and .platform.os == "linux" and .platform.architecture == $arch)' \
+                    "$RUNNER_TEMP/existing-manifest.json"
+                done
+                continue
+              elif ! grep -Eqi 'manifest unknown|not found' "$RUNNER_TEMP/manifest-lookup-error"; then
+                cat "$RUNNER_TEMP/manifest-lookup-error" >&2
+                exit 1
+              fi
+            fi
+            docker buildx imagetools create \
+              --tag "$tag" \
+              "${tag}-amd64" \
+              "${tag}-arm64"
+          done
+
+      - name: Inspect published images
+        shell: bash
+        env:
+          IMAGE_TAGS_JSON: ${{ steps.metadata.outputs.json }}
+        run: |
+          set -euo pipefail
+          while IFS= read -r tag; do
+            docker buildx imagetools inspect "$tag"
+            docker buildx imagetools inspect --raw "$tag" | jq -e \
+              '[.manifests[].platform | .os + "/" + .architecture] | sort == ["linux/amd64", "linux/arm64"]'
+          done < <(jq -r '.tags[]' <<< "$IMAGE_TAGS_JSON")
+
+  cleanup:
+    name: Clean up stale container images
+    needs: merge
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    concurrency:
+      group: ghcr-cleanup-${{ github.repository }}
+      cancel-in-progress: false
+    permissions:
+      contents: read
+      actions: read
+      packages: write
+
+    steps:
+      - name: Delete untagged and legacy SHA images
+        uses: dataaxiom/ghcr-cleanup-action@v1.2.2
+        with:
+          owner: ${{ github.repository_owner }}
+          package: ${{ github.event.repository.name }}
+          delete-untagged: 'true'
+          delete-tags: 'sha-*'
+          validate: 'true'

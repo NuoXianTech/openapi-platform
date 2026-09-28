@@ -40,7 +40,7 @@ GitHub Release 会保留版本目录、`LICENSE`、README 和 `.env.example`，�
 
 ## Docker 部署（推荐）
 
-GitHub Actions 使用仓库根目录的 `Dockerfile` 构建完整 Nitro 产物，分别发布带标签的 amd64/arm64 镜像，再生成自动匹配服务器架构的多架构镜像。VPS 只下载和运行已经构建好的镜像，不会执行 `pnpm install` 或 `pnpm build`，因此适合小内存服务器：
+GitHub Actions 在 CI 中构建并验收 Nitro 产物，再用根目录 `Dockerfile.runtime` 将同一份产物封装成 amd64/arm64 镜像。两个架构分别通过迁移、启动和重启检查后，生成自动匹配服务器架构的多架构镜像。VPS 只下载和运行已经构建好的镜像，不会执行 `pnpm install` 或 `pnpm build`，因此适合小内存服务器：
 
 ```bash
 docker network create openapi-network
