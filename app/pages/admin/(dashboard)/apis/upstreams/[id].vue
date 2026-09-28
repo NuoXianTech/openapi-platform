@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { useAdminTargetOperations } from '~/composables/admin/use-admin-target-operations'
 import { usePrivateResource } from '~/composables/dashboard/use-private-resource'
 import type {
   ServiceConfigurationSyncOutcome,
@@ -12,8 +13,6 @@ import { UPSTREAM_CONSTRAINTS } from '#shared/schemas/platform-constraints'
 
 const route = useRoute()
 const { t, locale } = useI18n()
-const toast = useToast()
-const confirm = useConfirmDialog()
 const upstreamId = computed(() => String(route.params.id ?? ''))
 const resource = usePrivateResource<ServiceConfigurationView | null>({
   path: () => `/api/admin/v1/upstreams/${upstreamId.value}/service`,
@@ -34,7 +33,6 @@ const synchronizing = ref(false)
 const saving = ref(false)
 const updatingToken = ref(false)
 const serviceToken = ref('')
-const targetBusy = ref(new Set<string>())
 interface ServiceFeedback {
   message: string
   description?: string
@@ -44,8 +42,14 @@ const activeSection = ref('configuration')
 const pageFeedback = ref<ServiceFeedback | null>(null)
 const configurationFeedback = ref<ServiceFeedback | null>(null)
 const tokenFeedback = ref<ServiceFeedback | null>(null)
-const operationBusy = computed(() => discovering.value || synchronizing.value
-  || saving.value || updatingToken.value || targetBusy.value.size > 0)
+const serviceOperationBusy = computed(() => discovering.value || synchronizing.value
+  || saving.value || updatingToken.value)
+const targetOperations = useAdminTargetOperations({
+  refresh: refreshTargets,
+  isBlocked: () => serviceOperationBusy.value || resource.loading.value || upstreamResource.loading.value
+})
+const targetState = targetOperations.state
+const operationBusy = computed(() => serviceOperationBusy.value || targetState.value.busy)
 const controlBusy = computed(() => operationBusy.value || resource.loading.value || upstreamResource.loading.value)
 const serviceName = computed(() => resource.data.value?.connection.serviceName
   || managementUpstream.value?.name || t('admin.apis.routing.serviceControl.pageTitle'))
@@ -95,6 +99,7 @@ watch(upstreamId, (id, previousId) => {
 })
 
 function openTarget(target: PlatformUpstreamTarget | null = null) {
+  if (!managementUpstream.value || targetState.value.disabled) return
   editingTarget.value = target
   targetModalOpen.value = true
 }
@@ -103,63 +108,16 @@ async function refreshTargets() {
   await Promise.all([resource.refresh(), upstreamResource.refresh()])
 }
 
-async function updateTargetStatus(target: PlatformUpstreamTarget) {
-  await confirm({
-    title: t('admin.apis.routing.toggleTarget.title', { name: target.baseUrl }),
-    description: t('admin.apis.routing.toggleTarget.description'),
-    confirmLabel: t(target.enabled ? 'common.actions.disable' : 'common.actions.enable'),
-    confirmColor: target.enabled ? 'warning' : 'primary',
-    onConfirm: async () => {
-      const next = new Set(targetBusy.value)
-      next.add(target.id)
-      targetBusy.value = next
-      try {
-        await $fetch(`/api/admin/v1/targets/${target.id}`, {
-          method: 'PATCH',
-          body: { enabled: !target.enabled }
-        })
-        toast.add({ title: t('common.feedback.updated'), color: 'success' })
-        await refreshTargets()
-      } catch (error: unknown) {
-        toast.add({ title: parseFetchError(error, t('common.feedback.operationFailed')), color: 'error' })
-        throw error
-      } finally {
-        const updated = new Set(targetBusy.value)
-        updated.delete(target.id)
-        targetBusy.value = updated
-      }
-    }
-  })
-}
-
-async function removeTarget(target: PlatformUpstreamTarget) {
-  await confirm({
-    title: t('admin.apis.routing.deleteTarget.title'),
-    description: t('admin.apis.routing.deleteTarget.description'),
-    confirmColor: 'error',
-    onConfirm: async () => {
-      try {
-        await $fetch(`/api/admin/v1/targets/${target.id}`, { method: 'DELETE' })
-        toast.add({ title: t('common.feedback.deleted'), color: 'success' })
-        await refreshTargets()
-      } catch (error: unknown) {
-        toast.add({ title: parseFetchError(error, t('common.feedback.deleteFailed')), color: 'error' })
-        throw error
-      }
-    }
-  })
-}
-
 function targetItems(target: PlatformUpstreamTarget) {
   return [[
-    { label: t('common.actions.edit'), icon: 'i-lucide-pencil', onSelect: () => openTarget(target) },
+    { label: t('common.actions.edit'), icon: 'i-lucide-pencil', disabled: targetState.value.disabled, onSelect: () => openTarget(target) },
     {
       label: t(target.enabled ? 'common.actions.disable' : 'common.actions.enable'),
       icon: target.enabled ? 'i-lucide-pause' : 'i-lucide-play',
-      disabled: targetBusy.value.has(target.id),
-      onSelect: () => updateTargetStatus(target)
+      disabled: targetState.value.disabled,
+      onSelect: () => targetOperations.toggle(target)
     },
-    { label: t('common.actions.delete'), icon: 'i-lucide-trash-2', color: 'error' as const, onSelect: () => removeTarget(target) }
+    { label: t('common.actions.delete'), icon: 'i-lucide-trash-2', color: 'error' as const, disabled: targetState.value.disabled, onSelect: () => targetOperations.remove(target) }
   ]]
 }
 
@@ -533,7 +491,7 @@ async function synchronizeConfiguration() {
                     variant="outline"
                     size="sm"
                     icon="i-lucide-plus"
-                    :disabled="!managementUpstream || controlBusy"
+                    :disabled="!managementUpstream || targetState.disabled"
                     @click="openTarget()"
                   >{{ $t('admin.apis.routing.actions.addTarget') }}</UButton>
                 </div>
@@ -681,7 +639,9 @@ async function synchronizeConfiguration() {
       v-model:open="targetModalOpen"
       :upstream="managementUpstream"
       :target="editingTarget"
-      @saved="refreshTargets"
+      :saving="targetState.saving"
+      :disabled="targetState.disabled"
+      :save="targetOperations.save"
     />
   </div>
 </template>

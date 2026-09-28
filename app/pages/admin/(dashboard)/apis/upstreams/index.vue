@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { useAdminTargetOperations } from '~/composables/admin/use-admin-target-operations'
 import type { DropdownMenuItem, TableColumn } from '@nuxt/ui'
 import { PAGE_SIZE_OPTIONS } from '~/constants/pagination'
 import { usePrivatePagedList } from '~/composables/dashboard/use-private-paged-list'
@@ -31,6 +32,11 @@ const upstreams = computed(() => resource.items.value)
 const page = resource.page
 const pageSize = resource.pageSize
 const total = resource.total
+const targetOperations = useAdminTargetOperations({
+  refresh: refreshUpstreams,
+  isBlocked: () => resource.loading.value || busyKeys.value.size > 0
+})
+const targetState = targetOperations.state
 
 function loadBalancingLabel(upstream: PlatformUpstream): string {
   return t(`admin.apis.routing.loadBalancing.${upstream.loadBalancing === 'weighted' ? 'weighted' : 'roundRobin'}`)
@@ -75,6 +81,7 @@ function openEditUpstream(upstream: PlatformUpstream) {
 }
 
 function openTarget(upstream: PlatformUpstream, target: PlatformUpstreamTarget | null = null) {
+  if (targetState.value.disabled) return
   targetUpstream.value = upstream
   editingTarget.value = target
   targetModalOpen.value = true
@@ -115,34 +122,6 @@ async function updateUpstreamStatus(upstream: PlatformUpstream) {
   })
 }
 
-async function updateTargetStatus(target: PlatformUpstreamTarget) {
-  await confirm({
-    title: t('admin.apis.routing.toggleTarget.title', { name: target.baseUrl }),
-    description: t('admin.apis.routing.toggleTarget.description'),
-    confirmLabel: t(target.enabled ? 'common.actions.disable' : 'common.actions.enable'),
-    confirmColor: target.enabled ? 'warning' : 'primary',
-    onConfirm: async () => {
-      const key = `target:${target.id}:status`
-      busyKeys.value = new Set(busyKeys.value).add(key)
-      try {
-        await $fetch(`/api/admin/v1/targets/${target.id}`, {
-          method: 'PATCH',
-          body: { enabled: !target.enabled }
-        })
-        toast.add({ title: t('common.feedback.updated'), color: 'success' })
-        await refreshUpstreams()
-      } catch (error: unknown) {
-        toast.add({ title: parseFetchError(error, t('common.feedback.operationFailed')), color: 'error' })
-        throw error
-      } finally {
-        const next = new Set(busyKeys.value)
-        next.delete(key)
-        busyKeys.value = next
-      }
-    }
-  })
-}
-
 async function removeUpstream(upstream: PlatformUpstream) {
   await confirm({
     title: t('admin.apis.routing.deleteUpstream.title', { name: upstream.name }),
@@ -164,27 +143,10 @@ async function removeUpstream(upstream: PlatformUpstream) {
   })
 }
 
-async function removeTarget(target: PlatformUpstreamTarget) {
-  await confirm({
-    title: t('admin.apis.routing.deleteTarget.title'),
-    description: t('admin.apis.routing.deleteTarget.description'),
-    confirmColor: 'error',
-    onConfirm: async () => {
-      try {
-        await $fetch(`/api/admin/v1/targets/${target.id}`, { method: 'DELETE' })
-        await refreshUpstreams()
-      } catch (error: unknown) {
-        toast.add({ title: parseFetchError(error, t('common.feedback.deleteFailed')), color: 'error' })
-        throw error
-      }
-    }
-  })
-}
-
 function upstreamItems(upstream: PlatformUpstream): DropdownMenuItem[][] {
   return [[
     { label: t('common.actions.edit'), icon: 'i-lucide-pencil', onSelect: () => openEditUpstream(upstream) },
-    { label: t('admin.apis.routing.actions.addTarget'), icon: 'i-lucide-plus', onSelect: () => openTarget(upstream) },
+    { label: t('admin.apis.routing.actions.addTarget'), icon: 'i-lucide-plus', disabled: targetState.value.disabled, onSelect: () => openTarget(upstream) },
     {
       label: t(upstream.status === 'active' ? 'common.actions.disable' : 'common.actions.enable'),
       icon: upstream.status === 'active' ? 'i-lucide-pause' : 'i-lucide-play',
@@ -198,14 +160,14 @@ function upstreamItems(upstream: PlatformUpstream): DropdownMenuItem[][] {
 
 function targetItems(upstream: PlatformUpstream, target: PlatformUpstreamTarget): DropdownMenuItem[][] {
   return [[
-    { label: t('common.actions.edit'), icon: 'i-lucide-pencil', onSelect: () => openTarget(upstream, target) },
+    { label: t('common.actions.edit'), icon: 'i-lucide-pencil', disabled: targetState.value.disabled, onSelect: () => openTarget(upstream, target) },
     {
       label: t(target.enabled ? 'common.actions.disable' : 'common.actions.enable'),
       icon: target.enabled ? 'i-lucide-pause' : 'i-lucide-play',
-      disabled: busyKeys.value.has(`target:${target.id}:status`),
-      onSelect: () => updateTargetStatus(target)
+      disabled: targetState.value.disabled,
+      onSelect: () => targetOperations.toggle(target)
     },
-    { label: t('common.actions.delete'), icon: 'i-lucide-trash-2', color: 'error', onSelect: () => removeTarget(target) }
+    { label: t('common.actions.delete'), icon: 'i-lucide-trash-2', color: 'error' as const, disabled: targetState.value.disabled, onSelect: () => targetOperations.remove(target) }
   ]]
 }
 </script>
@@ -373,7 +335,9 @@ function targetItems(upstream: PlatformUpstream, target: PlatformUpstreamTarget)
       v-model:open="targetModalOpen"
       :upstream="targetUpstream"
       :target="editingTarget"
-      @saved="refreshUpstreams"
+      :saving="targetState.saving"
+      :disabled="targetState.disabled"
+      :save="targetOperations.save"
     />
   </div>
 </template>

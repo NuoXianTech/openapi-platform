@@ -150,6 +150,15 @@ Target 支持内网地址、容器名、HTTP 与 HTTPS，公网 HTTP 会被拒�
 `GET`、`HEAD` 可以在同一 Deadline 内安全尝试其余 Target，带写语义的请求不会
 重放。业务配置仍始终下发到全部启用 Target，与业务流量选择相互独立。
 
+### 7.3 管理台 Target 操作
+
+服务列表、服务详情与 Target 编辑弹窗通过
+`app/composables/admin/use-admin-target-operations.ts` 执行保存、启停和删除。
+该模块统一管理准入、确认、执行状态与反馈，页面提供各自的数据刷新逻辑，弹窗保留表单与校验。
+确认期间保留操作占用，变更失败时确认弹窗保持打开供重试；保存结果决定编辑弹窗是否关闭。
+刷新失败与变更失败分别处理，已成功的变更不会因刷新失败而再次提交。
+详情页将 Target 操作状态纳入 Service 控制操作的禁用规则。
+
 ## 8. Service 控制面
 
 管理员在 Upstream 页面执行 Service 发现。Platform 会：

@@ -3,27 +3,21 @@ import type { FormError, FormSubmitEvent } from '@nuxt/ui'
 import type { PlatformUpstream, PlatformUpstreamTarget } from '#shared/types/platform'
 import { validateUpstreamTargetUrl } from '#shared/utils/upstream-target'
 import { adminModalUi } from '~/utils/admin-modal-ui'
-import { parseFetchError } from '~/utils/client-error'
 import { compactFormErrors, integerRangeError, requiredTextError } from '~/utils/form-validation'
+import type { TargetFormValues } from '~/composables/admin/use-admin-target-operations'
 
 const open = defineModel<boolean>('open', { default: false })
 const props = defineProps<{
   upstream: PlatformUpstream
   target?: PlatformUpstreamTarget | null
+  saving: boolean
+  disabled: boolean
+  save: (upstreamId: string, target: PlatformUpstreamTarget | null, values: TargetFormValues) => Promise<boolean>
 }>()
-const emit = defineEmits<{ saved: [target: PlatformUpstreamTarget] }>()
 const { t } = useI18n()
-const toast = useToast()
-const loading = ref(false)
-
-interface TargetFormState {
-  baseUrl: string
-  weight: number
-  enabled: boolean
-}
 
 const isEditing = computed(() => Boolean(props.target))
-const state = reactive<TargetFormState>({
+const state = reactive<TargetFormValues>({
   baseUrl: '',
   weight: 1,
   enabled: true
@@ -46,9 +40,9 @@ watch(open, (value) => {
     weight: props.target?.weight ?? 1,
     enabled: props.target?.enabled ?? true
   })
-})
+}, { immediate: true })
 
-function validate(value: Partial<TargetFormState>): FormError<string>[] {
+function validate(value: Partial<TargetFormValues>): FormError<string>[] {
   const validation = validateUpstreamTargetUrl(value.baseUrl ?? '')
   return compactFormErrors(
     requiredTextError('baseUrl', value.baseUrl, t('admin.apis.routing.validation.targetRequired')),
@@ -70,38 +64,9 @@ function validate(value: Partial<TargetFormState>): FormError<string>[] {
   )
 }
 
-async function submit(event: FormSubmitEvent<TargetFormState>) {
-  loading.value = true
-  try {
-    const target = await $fetch<PlatformUpstreamTarget>(
-      isEditing.value
-        ? `/api/admin/v1/targets/${props.target!.id}`
-        : `/api/admin/v1/upstreams/${props.upstream.id}/targets`,
-      {
-        method: isEditing.value ? 'PATCH' : 'POST',
-        body: {
-          baseUrl: event.data.baseUrl.trim(),
-          weight: event.data.weight,
-          enabled: event.data.enabled
-        }
-      }
-    )
-    toast.add({
-      title: t(isEditing.value
-        ? 'admin.apis.routing.feedback.targetUpdated'
-        : 'admin.apis.routing.feedback.targetCreated'),
-      color: 'success'
-    })
-    open.value = false
-    emit('saved', target)
-  } catch (error: unknown) {
-    toast.add({
-      title: parseFetchError(error, t('common.feedback.operationFailed')),
-      color: 'error'
-    })
-  } finally {
-    loading.value = false
-  }
+async function submit(event: FormSubmitEvent<TargetFormValues>) {
+  if (props.disabled) return
+  if (await props.save(props.upstream.id, props.target ?? null, event.data)) open.value = false
 }
 </script>
 
@@ -110,7 +75,8 @@ async function submit(event: FormSubmitEvent<TargetFormState>) {
     v-model:open="open"
     :title="$t(isEditing ? 'admin.apis.routing.targetForm.editTitle' : 'admin.apis.routing.targetForm.createTitle')"
     :description="$t('admin.apis.routing.targetForm.description', { upstream: upstream.name })"
-    :dismissible="!loading"
+    :dismissible="!saving"
+    :close="!saving"
     :ui="adminModalUi({ content: 'sm:max-w-xl' })"
   >
     <template #body>
@@ -118,6 +84,7 @@ async function submit(event: FormSubmitEvent<TargetFormState>) {
         id="platform-target-form"
         :state="state"
         :validate="validate"
+        :disabled="disabled"
         class="space-y-4"
         @submit="submit"
       >
@@ -167,7 +134,7 @@ async function submit(event: FormSubmitEvent<TargetFormState>) {
         <UButton
           color="neutral"
           variant="outline"
-          :disabled="loading"
+          :disabled="saving"
           @click="open = false"
         >
           {{ $t('common.actions.cancel') }}
@@ -175,7 +142,8 @@ async function submit(event: FormSubmitEvent<TargetFormState>) {
         <UButton
           type="submit"
           form="platform-target-form"
-          :loading="loading"
+          :loading="saving"
+          :disabled="disabled"
         >
           {{ $t('common.actions.save') }}
         </UButton>
