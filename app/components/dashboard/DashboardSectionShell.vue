@@ -54,7 +54,7 @@ useHead({ title: () => props.title })
         class="dashboard-section-page"
         :class="{ 'dashboard-section-page-fixed': fixedContent }"
       >
-        <NuxtPage />
+        <CommonPageOutlet />
       </div>
     </template>
   </UDashboardPanel>

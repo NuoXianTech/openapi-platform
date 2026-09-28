@@ -38,7 +38,7 @@ const callCountTarget = ref(0)
 const isCallCountAnimating = ref(false)
 const animatedCallCount = useTransition(callCountTarget, {
   duration: 900,
-  transition: TransitionPresets.easeOutCubic,
+  easing: TransitionPresets.easeOutCubic,
   disabled: transitionDisabled,
   onStarted: () => {
     isCallCountAnimating.value = true
@@ -154,7 +154,7 @@ async function copyRequest(): Promise<void> {
 
     <div class="public-api-intro__layout">
       <div class="public-api-intro__content">
-        <div v-if="uptimeParts.length || showCallCount" class="public-api-intro__status-row">
+        <div v-if="uptimeParts.length || showCallCount" class="public-api-intro__status-row motion-enter">
           <div class="public-api-intro__status" role="status">
             <span v-if="uptimeParts.length" class="public-api-intro__uptime">
               <UIcon name="i-mdi-clock-outline" class="public-api-intro__status-icon" aria-hidden="true" />
@@ -198,15 +198,15 @@ async function copyRequest(): Promise<void> {
           </div>
         </div>
 
-        <h1 id="public-api-intro-title" class="public-api-intro__title">
+        <h1 id="public-api-intro-title" class="public-api-intro__title motion-enter">
           {{ $t('public.home.introTitle') }}
         </h1>
 
-        <p class="public-api-intro__description">
+        <p class="public-api-intro__description motion-enter">
           {{ resolvedDescription }}
         </p>
 
-        <div class="public-api-intro__actions">
+        <div class="public-api-intro__actions motion-enter">
           <UButton :to="primaryAction.to" size="lg" :icon="primaryAction.icon">
             {{ primaryAction.label }}
           </UButton>
@@ -222,7 +222,7 @@ async function copyRequest(): Promise<void> {
         </div>
       </div>
 
-      <div class="api-request-demo" :aria-label="$t('public.home.simulatedExample')">
+      <div class="api-request-demo motion-enter" :aria-label="$t('public.home.simulatedExample')">
         <div class="api-request-demo__header">
           <div class="api-request-demo__title">
             <span class="api-request-demo__status" aria-hidden="true" />
@@ -332,6 +332,7 @@ async function copyRequest(): Promise<void> {
 .public-api-intro__request-count strong { margin-inline: 0.2em; color: var(--ui-text-highlighted); font: 650 0.75rem var(--font-code); white-space: nowrap; }
 
 .public-api-intro__title {
+  --motion-delay: 20ms;
   width: 100%;
   max-width: 11.5em;
   margin-top: 0;
@@ -344,6 +345,7 @@ async function copyRequest(): Promise<void> {
 .public-api-intro__status-row + .public-api-intro__title { margin-top: 1.5rem; }
 
 .public-api-intro__description {
+  --motion-delay: 40ms;
   max-width: 35rem;
   margin-top: 1.25rem;
   color: var(--ui-text-muted);
@@ -352,6 +354,7 @@ async function copyRequest(): Promise<void> {
 }
 
 .public-api-intro__actions {
+  --motion-delay: 60ms;
   display: flex;
   flex-wrap: wrap;
   gap: 0.75rem;
@@ -371,6 +374,7 @@ async function copyRequest(): Promise<void> {
 }
 
 .api-request-demo {
+  --motion-delay: 60ms;
   width: 100%;
   max-width: 100%;
   box-sizing: border-box;

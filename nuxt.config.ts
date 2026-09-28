@@ -47,6 +47,9 @@ export default defineNuxtConfig({
   devtools: {
     enabled: !isProduction,
   },
+  app: {
+    pageTransition: { name: 'page', mode: 'out-in' }
+  },
 
   css: ['~/assets/css/main.css'],
   ui: {

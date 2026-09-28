@@ -1,0 +1,72 @@
+:root {
+  --motion-duration-fast: 120ms;
+  --motion-duration-normal: 180ms;
+  --motion-duration-enter: 240ms;
+  --motion-ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+  --motion-distance: 6px;
+}
+
+/* Nuxt owns route lifecycles; keep the surrounding dashboard layout stationary. */
+.page-enter-active {
+  transition: opacity var(--motion-duration-normal) var(--motion-ease-out);
+}
+
+.page-leave-active {
+  transition: opacity var(--motion-duration-fast) ease-in;
+}
+
+.page-enter-from,
+.page-leave-to {
+  opacity: 0;
+}
+
+.state-fade-enter-active,
+.state-fade-leave-active {
+  transition:
+    opacity var(--motion-duration-normal) var(--motion-ease-out),
+    transform var(--motion-duration-normal) var(--motion-ease-out);
+}
+
+.state-fade-enter-from,
+.state-fade-leave-to {
+  opacity: 0;
+  transform: translateY(var(--motion-distance));
+}
+
+/* Entrances finish independently of hydration, without a persistent hidden state. */
+.motion-enter {
+  animation: content-enter var(--motion-duration-enter) var(--motion-ease-out) var(--motion-delay, 0ms) backwards;
+}
+
+@keyframes content-enter {
+  from {
+    opacity: 0;
+    transform: translateY(var(--motion-distance));
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .page-enter-active,
+  .page-leave-active,
+  .state-fade-enter-active,
+  .state-fade-leave-active {
+    transition: none;
+  }
+
+  .page-enter-from,
+  .page-leave-to,
+  .state-fade-enter-from,
+  .state-fade-leave-to {
+    opacity: 1;
+    transform: none;
+  }
+
+  .motion-enter {
+    animation: none;
+  }
+}

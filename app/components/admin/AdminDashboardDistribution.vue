@@ -58,7 +58,7 @@ const formatNumber = (val: number) => val.toLocaleString(locale.value)
         </div>
         <div class="h-1.5 w-full overflow-hidden rounded-full bg-elevated">
           <div
-            class="h-full rounded-full bg-primary transition-[width] duration-500"
+            class="h-full rounded-full bg-primary transition-[width] duration-500 motion-reduce:transition-none"
             :style="{ width: `${item.width}%` }"
           />
         </div>

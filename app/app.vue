@@ -39,7 +39,7 @@ if (import.meta.client) {
       :height="3"
     />
     <NuxtLayout>
-      <NuxtPage />
+      <CommonPageOutlet />
     </NuxtLayout>
   </UApp>
 </template>

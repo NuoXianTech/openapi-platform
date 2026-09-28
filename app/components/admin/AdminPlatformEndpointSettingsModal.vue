@@ -137,7 +137,7 @@ async function onSubmit(event: FormSubmitEvent<EndpointSettingsForm>) {
             </div>
             <UIcon
               name="i-lucide-chevron-down"
-              class="mt-0.5 size-4 shrink-0 text-muted transition-transform"
+              class="mt-0.5 size-4 shrink-0 text-muted transition-transform motion-reduce:transition-none"
               :class="advancedOpen ? 'rotate-180' : ''"
             />
           </button>

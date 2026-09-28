@@ -15,7 +15,6 @@ const { apis = [], categoryMap = {} } = defineProps<ApiCardGridProps>()
       name="api-card"
       tag="div"
       class="api-card-grid"
-      appear
     >
       <ApiCard
         v-for="api in apis"
@@ -57,17 +56,17 @@ const { apis = [], categoryMap = {} } = defineProps<ApiCardGridProps>()
 
 .api-card-enter-active,
 .api-card-leave-active {
-  transition: opacity 180ms ease, transform 180ms ease;
+  transition: opacity var(--motion-duration-normal) var(--motion-ease-out), transform var(--motion-duration-normal) var(--motion-ease-out);
 }
 
 .api-card-enter-from,
 .api-card-leave-to {
   opacity: 0;
-  transform: translateY(6px);
+  transform: translateY(var(--motion-distance));
 }
 
 .api-card-move {
-  transition: transform 180ms ease;
+  transition: transform var(--motion-duration-normal) var(--motion-ease-out);
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -75,6 +74,12 @@ const { apis = [], categoryMap = {} } = defineProps<ApiCardGridProps>()
   .api-card-leave-active,
   .api-card-move {
     transition: none;
+  }
+
+  .api-card-enter-from,
+  .api-card-leave-to {
+    opacity: 1;
+    transform: none;
   }
 }
 </style>
