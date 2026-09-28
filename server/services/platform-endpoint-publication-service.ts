@@ -1,87 +1,17 @@
-import type { ServiceEndpointSummary } from '#shared/types/service-control'
 import { db, type DatabaseTransaction } from '~~/server/db/client'
 import {
   invalidateRoutingPublicationCaches,
   lockPlatformRuntime,
   routingRevisionService
 } from '~~/server/services/routing-revision-service'
-import type { RoutingRevisionRoute } from '~~/server/types/routing-revision'
 import type {
   HttpMethod,
-  PublicationStatus,
   RouteBinding,
   RouteMutationInput
 } from '~~/server/types/platform-publication'
-import { canonicalJson } from '~~/server/utils/canonical-json'
-import { parseRoutePathPattern } from '~~/server/utils/route-pattern'
-import { toRoutingRevisionRoute } from '~~/server/utils/routing-revision-route'
 
 export interface PlatformPublication {
   revision: { id: string, sequence: number }
-}
-
-export function endpointPublicationStatus(
-  binding: RouteBinding | null,
-  liveRoutes: ReadonlyMap<string, RoutingRevisionRoute>
-): PublicationStatus {
-  if (!binding) return 'available'
-  const live = liveRoutes.get(binding.route.id)
-  const desiredActive = binding.route.state === 'active'
-  if (
-    desiredActive
-    && live
-    && canonicalJson(toRoutingRevisionRoute(binding)) === canonicalJson(live)
-  ) return 'live'
-  if (desiredActive) return 'pending'
-  if (live) return 'retiring'
-  return 'disabled'
-}
-
-function endpointShape(path: string): string | null {
-  try {
-    return parseRoutePathPattern(path).normalizedShape
-  } catch {
-    return null
-  }
-}
-
-function upstreamTemplateShape(path: string): string | null {
-  try {
-    return parseRoutePathPattern(
-      path.replace(/\{path\.([A-Za-z][A-Za-z0-9_]*)\}/g, '{$1}')
-    ).normalizedShape
-  } catch {
-    return null
-  }
-}
-
-export function endpointUpstreamTemplate(path: string): string {
-  const parsed = parseRoutePathPattern(path)
-  return parsed.pathPattern.replace(
-    /\{([A-Za-z][A-Za-z0-9_]*)(\+)?\}/g,
-    (_value, name: string) => `{path.${name}}`
-  )
-}
-
-export function routeMatchesEndpoint(
-  binding: RouteBinding,
-  endpoint: ServiceEndpointSummary
-): boolean {
-  return binding.route.method === endpoint.method
-    && endpointShape(endpoint.path) !== null
-    && endpointShape(endpoint.path)
-    === upstreamTemplateShape(binding.route.upstreamPathTemplate)
-}
-
-export function endpointRoutePriority(
-  binding: RouteBinding,
-  liveRoutes: ReadonlyMap<string, RoutingRevisionRoute>
-): number {
-  const status = endpointPublicationStatus(binding, liveRoutes)
-  if (status === 'live') return 0
-  if (status === 'pending') return 1
-  if (status === 'retiring') return 2
-  return 3
 }
 
 /** 只重新发布运行快照，不改动可发布配置。 */

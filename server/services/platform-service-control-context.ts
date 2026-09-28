@@ -188,3 +188,14 @@ export async function buildServiceControlView(
     endpoints: document ? readStoredServiceEndpoints(document.summary) : []
   }
 }
+
+/** Read-only control view shared by management and Endpoint reconciliation. */
+export async function getServiceControlView(
+  upstreamServiceId: string,
+  options: ServiceViewOptions = {}
+): Promise<ServiceConfigurationView> {
+  return buildServiceControlView(
+    await loadServiceControlContext(upstreamServiceId),
+    options
+  )
+}

@@ -187,7 +187,7 @@ export function toPlatformRoutingRevisionSummary(
 }
 
 export function toPlatformEndpointCatalog(
-  catalog: Awaited<ReturnType<typeof import('~~/server/services/platform-endpoint-catalog-service').platformEndpointCatalogService.list>>
+  catalog: Awaited<ReturnType<typeof import('~~/server/services/platform-endpoint-service').platformEndpointService.list>>
 ): PlatformEndpointCatalog {
   return {
     ...catalog,

@@ -22,7 +22,7 @@ import {
   readStoredServiceEndpoints
 } from '~~/server/services/platform-service-openapi-service'
 import { applyPlatformRevision } from '~~/server/services/platform-endpoint-publication-service'
-import { synchronizeEndpointSupportRoutes } from '~~/server/services/platform-endpoint-support-route-service'
+import { platformEndpointService } from '~~/server/services/platform-endpoint-service'
 import { upstreamServiceTokenService } from '~~/server/services/upstream-service-token-service'
 import { canonicalJson } from '~~/server/utils/canonical-json'
 import { firstRow } from '~~/server/utils/row'
@@ -411,7 +411,7 @@ async function commitServiceSnapshot(
       sourceUrl: snapshot.openapi.sourceUrl,
       transaction: tx
     })
-    await synchronizeEndpointSupportRoutes({
+    await platformEndpointService.synchronizeSupportRoutes({
       upstream: current.service,
       serviceName: snapshot.description.name,
       endpoints: readStoredServiceEndpoints(document.parsedSummary),

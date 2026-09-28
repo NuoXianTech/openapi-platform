@@ -43,8 +43,7 @@ vi.stubGlobal('useRuntimeConfig', () => ({
 
 const { platformProductService } = await import('~~/server/services/platform-product-service')
 const { apiCatalogService } = await import('~~/server/services/api-catalog-service')
-const { platformEndpointCatalogService } = await import('~~/server/services/platform-endpoint-catalog-service')
-const { synchronizeEndpointSupportRoutes } = await import('~~/server/services/platform-endpoint-support-route-service')
+const { platformEndpointService } = await import('~~/server/services/platform-endpoint-service')
 const { applyPlatformRevision } = await import('~~/server/services/platform-endpoint-publication-service')
 const { platformRouteService } = await import('~~/server/services/platform-route-service')
 const { platformUpstreamService } = await import('~~/server/services/platform-upstream-service')
@@ -702,7 +701,7 @@ describe('routing revision service', () => {
   it('publishes discovered Service endpoints and applies governance changes automatically', async () => {
     const service = await createDiscoveredService({})
 
-    let catalog = await platformEndpointCatalogService.list()
+    let catalog = await platformEndpointService.list()
     let item = catalog.services
       .find(entry => entry.upstream.id === service.upstream.id)
       ?.endpoints[0]
@@ -713,7 +712,7 @@ describe('routing revision service', () => {
       publishable: true
     })
 
-    const published = await platformEndpointCatalogService.publish({
+    const published = await platformEndpointService.publish({
       upstreamServiceId: service.upstream.id,
       method: 'GET',
       path: service.path
@@ -731,7 +730,7 @@ describe('routing revision service', () => {
       state: 'active'
     })
 
-    const unchanged = await platformEndpointCatalogService.update(
+    const unchanged = await platformEndpointService.update(
       published.route.id,
       {},
       null
@@ -741,7 +740,7 @@ describe('routing revision service', () => {
     })
     expect(await database.select().from(schema.routingRevisions)).toHaveLength(1)
 
-    const statistics = await platformEndpointCatalogService.update(
+    const statistics = await platformEndpointService.update(
       published.route.id,
       { isStatistics: false },
       null
@@ -751,7 +750,7 @@ describe('routing revision service', () => {
       route: { isStatistics: false }
     })
 
-    const disabled = await platformEndpointCatalogService.update(
+    const disabled = await platformEndpointService.update(
       published.route.id,
       { enabled: false },
       null
@@ -761,7 +760,7 @@ describe('routing revision service', () => {
       route: { state: 'disabled' }
     })
 
-    catalog = await platformEndpointCatalogService.list()
+    catalog = await platformEndpointService.list()
     item = catalog.services
       .find(entry => entry.upstream.id === service.upstream.id)
       ?.endpoints[0]
@@ -770,6 +769,54 @@ describe('routing revision service', () => {
       route: { route: { isStatistics: false, state: 'disabled' } }
     })
     expect(catalog.totals).toMatchObject({ live: 0, disabled: 1, pending: 0 })
+  })
+
+
+  it('keeps catalog snapshot preference distinct from desired Route reuse', async () => {
+    const service = await createDiscoveredService({})
+    const live = await platformEndpointService.publish({
+      upstreamServiceId: service.upstream.id,
+      method: 'GET',
+      path: service.path
+    }, null)
+
+    // Two public paths can map to the same discovered Endpoint shape.
+    // This path sorts first, but is not in the active Routing Revision.
+    const pending = await platformRouteService.create({
+      ...routeMutationInput(live.route),
+      name: 'Earlier pending binding',
+      method: 'GET',
+      pathPattern: '/v1/alternate/{id}',
+      upstreamPathTemplate: '/v1/catalog/{path.id}',
+      isStatistics: false,
+      state: 'active'
+    })
+    if (!pending) throw new Error('pending route was not created')
+
+    const catalog = await platformEndpointService.list()
+    const entries = catalog.services.find(entry => entry.upstream.id === service.upstream.id)!.endpoints
+    expect(entries.find(entry => entry.sourceKind === 'discovered')).toMatchObject({
+      status: 'live',
+      route: { route: { id: live.route.id } }
+    })
+    expect(entries.find(entry => entry.route?.route.id === pending.id)).toMatchObject({
+      sourceKind: 'missing',
+      status: 'pending'
+    })
+
+    const saved = await platformEndpointService.publish({
+      upstreamServiceId: service.upstream.id,
+      method: 'GET',
+      path: service.path
+    }, null, { publishRouting: false })
+    expect(saved).toMatchObject({
+      created: false,
+      revision: null,
+      route: { id: pending.id, isStatistics: false }
+    })
+    expect((await platformRouteService.get(live.route.id)).route.isStatistics).toBe(true)
+    expect(await database.select().from(schema.apiRoutes)).toHaveLength(2)
+    expect(await database.select().from(schema.routingRevisions)).toHaveLength(1)
   })
 
   it('saves multiple catalog changes and applies one shared runtime snapshot', async () => {
@@ -782,12 +829,12 @@ describe('routing revision service', () => {
       path: '/v1/catalog-two/{id}'
     })
 
-    const firstSaved = await platformEndpointCatalogService.publish({
+    const firstSaved = await platformEndpointService.publish({
       upstreamServiceId: firstService.upstream.id,
       method: 'GET',
       path: firstService.path
     }, null, { publishRouting: false })
-    const secondSaved = await platformEndpointCatalogService.publish({
+    const secondSaved = await platformEndpointService.publish({
       upstreamServiceId: secondService.upstream.id,
       method: 'GET',
       path: secondService.path
@@ -811,7 +858,7 @@ describe('routing revision service', () => {
     const service = await createDiscoveredService({
       slug: 'managed-route-service'
     })
-    await expect(platformEndpointCatalogService.publish({
+    await expect(platformEndpointService.publish({
       upstreamServiceId: service.upstream.id,
       method: 'GET',
       path: '/v1/unknown'
@@ -854,7 +901,7 @@ describe('routing revision service', () => {
       ]
     })
 
-    let catalog = await platformEndpointCatalogService.list()
+    let catalog = await platformEndpointService.list()
     expect(catalog.services.find(entry => (
       entry.upstream.id === service.upstream.id
     ))?.endpoints.map(item => item.endpoint?.path)).toEqual([
@@ -862,7 +909,7 @@ describe('routing revision service', () => {
       '/v1/player/art'
     ])
 
-    const dplayer = await platformEndpointCatalogService.publish({
+    const dplayer = await platformEndpointService.publish({
       upstreamServiceId: service.upstream.id,
       method: 'GET',
       path: '/v1/player'
@@ -884,12 +931,12 @@ describe('routing revision service', () => {
       state: 'active'
     })
 
-    catalog = await platformEndpointCatalogService.list()
+    catalog = await platformEndpointService.list()
     expect(catalog.services.find(entry => (
       entry.upstream.id === service.upstream.id
     ))?.endpoints).toHaveLength(2)
 
-    const artplayer = await platformEndpointCatalogService.publish({
+    const artplayer = await platformEndpointService.publish({
       upstreamServiceId: service.upstream.id,
       method: 'GET',
       path: '/v1/player/art'
@@ -899,7 +946,7 @@ describe('routing revision service', () => {
     expect(routes).toHaveLength(3)
     expect(new Set(routes.map(binding => binding.product.id)).size).toBe(1)
 
-    await platformEndpointCatalogService.update(
+    await platformEndpointService.update(
       dplayer.route.id,
       { enabled: false },
       null
@@ -910,7 +957,7 @@ describe('routing revision service', () => {
       binding.route.pathPattern === '/v1/player/assets/{asset}'
     ))?.route.state).toBe('active')
 
-    await platformEndpointCatalogService.update(
+    await platformEndpointService.update(
       artplayer.route.id,
       { enabled: false },
       null
@@ -930,7 +977,7 @@ describe('routing revision service', () => {
         tags: ['Weather'], system: false, support: false
       }))
     })
-    const first = await platformEndpointCatalogService.publish({
+    const first = await platformEndpointService.publish({
       upstreamServiceId: service.upstream.id, method: 'GET', path: '/v1/weather'
     }, null)
     const original = await platformRouteService.get(first.route.id)
@@ -946,7 +993,7 @@ describe('routing revision service', () => {
     await platformProductService.update(original.product.id, groupPatch)
     await platformProductService.updateVersion(original.version.id, versionPatch)
 
-    const second = await platformEndpointCatalogService.publish({
+    const second = await platformEndpointService.publish({
       upstreamServiceId: service.upstream.id, method: 'GET', path: '/v1/forecast'
     }, null)
     const updated = await platformRouteService.get(second.route.id)
@@ -968,7 +1015,7 @@ describe('routing revision service', () => {
     ['version', 'VERSION_NOT_PUBLISHABLE']
   ] as const)('does not reactivate a retired %s when publishing an endpoint', async (kind, code) => {
     const service = await createDiscoveredService({})
-    const published = await platformEndpointCatalogService.publish({
+    const published = await platformEndpointService.publish({
       upstreamServiceId: service.upstream.id, method: 'GET', path: service.path
     }, null)
     const binding = await platformRouteService.get(published.route.id)
@@ -977,7 +1024,7 @@ describe('routing revision service', () => {
     } else {
       await platformProductService.updateVersion(binding.version.id, { state: 'retired' })
     }
-    await expect(platformEndpointCatalogService.publish({
+    await expect(platformEndpointService.publish({
       upstreamServiceId: service.upstream.id, method: 'GET', path: service.path
     }, null)).rejects.toMatchObject({ data: { code } })
     const after = await platformRouteService.get(published.route.id)
@@ -1008,13 +1055,13 @@ describe('routing revision service', () => {
       slug: 'viewer-catalog-service',
       endpoints: [publicEndpoint, supportEndpoint]
     })
-    await platformEndpointCatalogService.publish({
+    await platformEndpointService.publish({
       upstreamServiceId: service.upstream.id,
       method: 'GET',
       path: publicEndpoint.path
     }, null)
 
-    await synchronizeEndpointSupportRoutes({
+    await platformEndpointService.synchronizeSupportRoutes({
       upstream: service.upstream,
       serviceName: 'Viewer Catalog Service',
       endpoints: [publicEndpoint]
@@ -1025,7 +1072,7 @@ describe('routing revision service', () => {
     ))
     expect(supportRoute?.route.state).toBe('disabled')
 
-    await synchronizeEndpointSupportRoutes({
+    await platformEndpointService.synchronizeSupportRoutes({
       upstream: service.upstream,
       serviceName: 'Viewer Catalog Service',
       endpoints: [publicEndpoint, supportEndpoint]
@@ -1083,12 +1130,12 @@ describe('routing revision service', () => {
       ]
     })
 
-    const v1 = await platformEndpointCatalogService.publish({
+    const v1 = await platformEndpointService.publish({
       upstreamServiceId: service.upstream.id,
       method: 'GET',
       path: '/v1/player'
     }, null)
-    await platformEndpointCatalogService.publish({
+    await platformEndpointService.publish({
       upstreamServiceId: service.upstream.id,
       method: 'GET',
       path: '/v2/player'
@@ -1115,7 +1162,7 @@ describe('routing revision service', () => {
       }
     ])
 
-    await platformEndpointCatalogService.update(
+    await platformEndpointService.update(
       v1.route.id,
       { enabled: false },
       null
@@ -1176,7 +1223,7 @@ describe('routing revision service', () => {
       new Response(null, { status: 200 })
     )
     try {
-      const catalog = await platformEndpointCatalogService.list()
+      const catalog = await platformEndpointService.list()
 
       expect(catalog.services.find(item => (
         item.upstream.id === service.upstream.id
@@ -1191,7 +1238,7 @@ describe('routing revision service', () => {
         .toBe('http://127.0.0.1:8090/.well-known/configuration.json')
 
       request.mockClear()
-      await platformEndpointCatalogService.publish({
+      await platformEndpointService.publish({
         upstreamServiceId: service.upstream.id,
         method: 'GET',
         path: service.path
@@ -1214,7 +1261,7 @@ describe('routing revision service', () => {
       path: '/v1/conflict/{itemId}'
     })
 
-    await expect(platformEndpointCatalogService.publish({
+    await expect(platformEndpointService.publish({
       upstreamServiceId: service.upstream.id,
       method: 'GET',
       path: service.path
@@ -1225,12 +1272,12 @@ describe('routing revision service', () => {
     const [runtime] = await database.select().from(schema.platformRuntime)
     expect(runtime?.activeRevisionId).toBe(firstRevision.id)
 
-    let catalog = await platformEndpointCatalogService.list()
+    let catalog = await platformEndpointService.list()
     expect(catalog.services
       .find(entry => entry.upstream.id === service.upstream.id)
       ?.endpoints[0]).toMatchObject({ status: 'available', route: null })
 
-    const resolved = await platformEndpointCatalogService.update(
+    const resolved = await platformEndpointService.update(
       active.route.id,
       { enabled: false },
       null
@@ -1239,7 +1286,7 @@ describe('routing revision service', () => {
       revision: { sequence: 2 }
     })
 
-    const published = await platformEndpointCatalogService.publish({
+    const published = await platformEndpointService.publish({
       upstreamServiceId: service.upstream.id,
       method: 'GET',
       path: service.path
@@ -1249,7 +1296,7 @@ describe('routing revision service', () => {
       revision: { sequence: 3 }
     })
 
-    catalog = await platformEndpointCatalogService.list()
+    catalog = await platformEndpointService.list()
     expect(catalog.services
       .find(entry => entry.upstream.id === service.upstream.id)
       ?.endpoints[0]).toMatchObject({ status: 'live' })

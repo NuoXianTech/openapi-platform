@@ -55,6 +55,16 @@ Upstream
 
 ## 4. 接口目录与 Routing Revision
 
+Endpoint 协调集中在 `server/services/platform-endpoint-service.ts`，对外提供
+`list`、`publish`、`update` 和 `synchronizeSupportRoutes`。Endpoint 匹配、目录状态、
+Product / Version 复用和支撑 Route 联动是该模块的内部规则。目录选择绑定时优先展示
+活动快照中的 Route；发布优先复用期望状态为 active 的 Route；支撑 Route 优先匹配
+所属 Version。这些场景的选择顺序有意保持不同。
+
+通用事务与运行快照发布仍由 `platform-endpoint-publication-service.ts` 负责。
+Endpoint 协调通过只读的 `getServiceControlView` 读取 Service 契约；Service 发现调用
+支撑 Route 同步入口，协调模块不反向依赖发现入口。
+
 `/admin/apis` 是日常接口发布入口。它不是新的持久化领域，也不复制一份发布状态，而是将 Service Endpoint、Route 期望配置和当前活动 Revision 投影为一个接口目录。
 
 Service 的标准流程是：
