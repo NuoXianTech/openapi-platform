@@ -5,6 +5,7 @@ import { db } from '~~/server/db/client'
 import { apiKeys, users } from '~~/server/db/schema'
 import { API_ACCESS_ERROR, type RateLimitWindow } from '~~/server/config/api-access'
 import { creditService } from '~~/server/services/credit-service'
+import { gatewayCallService } from '~~/server/services/dynamic-gateway-call-service'
 import type { ResolvedDynamicRoute } from '~~/server/services/routing-runtime-service'
 import type { ApiCreditReservationContext, GateOutcome, RateLimitResult } from '~~/server/types/api-access'
 import { getAppEventContext } from '~~/server/utils/event-context'
@@ -313,15 +314,7 @@ export const dynamicGatewayAccessService = {
       : null
     if (reservation && 'outcome' in reservation) return reject(event, reservation)
 
-    const context = getAppEventContext(event)
-    context.apiKey = apiKey
-      ? { id: apiKey.id, userId: apiKey.userId, name: apiKey.name }
-      : null
-    context.apiBilling = {
-      costCredits: match.route.creditsCost,
-      apiKeyUserId: apiKey?.userId ?? null,
-      creditReservation: reservation
-    }
+    gatewayCallService.acceptAccess(event, apiKey, reservation)
     const headers = rateLimitHeaders(rateLimits.results)
     if (Object.keys(headers).length > 0) setResponseHeaders(event, headers)
     return { passed: true }

@@ -17,22 +17,18 @@ import { invalidatePublicApiCatalogCache } from '~~/server/services/api-catalog-
 import { invalidateRoutingRuntimeCache } from '~~/server/services/routing-runtime-service'
 import type {
   RoutingRevisionPayload,
-  RoutingPublicationScope,
-  RoutingRevisionRoute,
-  RoutingRevisionUpstream
+  RoutingPublicationScope
 } from '~~/server/types/routing-revision'
 import { canonicalJson } from '~~/server/utils/canonical-json'
 import { getSqlState } from '~~/server/utils/database-error'
-import { findRoutingRouteConflict } from '~~/server/utils/routing-conflict'
 import { firstRow } from '~~/server/utils/row'
-import { isServiceTargetReady } from '~~/server/utils/service-upstream-readiness'
-import { toRoutingRevisionRoute } from '~~/server/utils/routing-revision-route'
 import { readStoredServiceEndpoints } from '~~/server/services/platform-service-openapi-service'
 
-type RoutingRuntimeConfiguration = Pick<
-  RoutingRevisionPayload,
-  'schemaVersion' | 'routes' | 'appliedRoutes' | 'upstreams' | 'defaultDomain'
->
+import {
+  compileRoutingRevision,
+  validatePublishedRouteConflicts,
+  type RoutingRuntimeConfiguration
+} from '~~/server/services/routing-revision-compiler'
 
 function revisionChecksum(payload: RoutingRevisionPayload): string {
   return createHash('sha256').update(canonicalJson(payload)).digest('hex')
@@ -58,20 +54,6 @@ function revisionDefaultDomain(
   // Revisions created before defaultDomain became part of schemaVersion 1 do
   // not contain the property. Preserve their historical activation behavior.
   return payload.defaultDomain === undefined ? legacyFallback : payload.defaultDomain
-}
-
-function validatePublishedRouteConflicts(
-  routes: RoutingRevisionRoute[],
-  defaultDomain: string | null
-) {
-  const conflict = findRoutingRouteConflict(routes, defaultDomain)
-  if (conflict) {
-    throw createApplicationError({
-      statusCode: 409,
-      message: 'routing revision contains conflicting host, method, and path shapes',
-      data: { code: 'REVISION_ROUTE_CONFLICT', ...conflict }
-    })
-  }
 }
 
 /**
@@ -144,150 +126,36 @@ export const routingRevisionService = {
               .where(eq(routingRevisions.id, runtime.activeRevisionId))
               .limit(1))
           : null
-        const activeUpstreams = new Map(
-          activeRevision?.configPayload.upstreams.map(upstream => [upstream.id, upstream])
-          ?? []
-        )
-
-        const scope = options.scope ?? { kind: 'all' }
-        const desired = routeRows.filter(row => row.route.state === 'active').map(toRoutingRevisionRoute)
-        const previous = activeRevision?.configPayload.appliedRoutes ?? activeRevision?.configPayload.routes ?? []
-        const previousIds = new Set(previous.map(route => route.id))
-        const selectedIds = new Set(scope.kind === 'routes' ? scope.routeIds : [])
-        const selected = scope.kind === 'all' ? desired : [
-          ...previous.filter(route => !selectedIds.has(route.id)),
-          ...desired.filter(route => selectedIds.has(route.id))
-        ]
-        const currentRoutes = new Map(routeRows.map(row => [row.route.id, row]))
-        // Preserve applied Route-owned fields even if their desired rows have
-        // pending edits. Product/Version governance is managed independently.
+        // Read all compilation inputs under the same runtime lock. Route
+        // selection and Target fallback are owned by the compiler.
         const [products, versions, currentUpstreams] = await Promise.all([
           tx.select().from(apiProducts).where(isNull(apiProducts.deletedAt)),
           tx.select().from(apiVersions),
           tx.select().from(upstreamServices).where(isNull(upstreamServices.deletedAt))
         ])
-        const productById = new Map(products.map(product => [product.id, product]))
-        const versionById = new Map(versions.map(version => [version.id, version]))
-        const upstreamById = new Map(currentUpstreams.map(upstream => [upstream.id, upstream]))
-        const publicRoutes = selected.filter(route => !route.isSupportRoute && currentRoutes.has(route.id) && upstreamById.has(route.upstreamServiceId))
         const documentIds = [...new Set(routeRows.flatMap(row => row.openapiDocumentId ? [row.openapiDocumentId] : []))]
-        const documents = documentIds.length
-          ? await tx.select().from(openapiDocuments).where(inArray(openapiDocuments.id, documentIds))
-          : []
-        const contractById = new Map(documents.map(document => [document.id, readStoredServiceEndpoints(document.parsedSummary)]))
-        // Support Routes follow applied public Routes and the discovered contract,
-        // not a pending enable/disable in the Endpoint draft.
-        const supportCandidates = routeRows.filter(row => {
-          if (!row.route.isSupportRoute) return false
-          const contract = row.openapiDocumentId ? contractById.get(row.openapiDocumentId) : undefined
-          const exists = contract
-            ? contract.some(endpoint => endpoint.support && endpoint.method === row.route.method && endpoint.path === row.route.pathPattern)
-            : selected.some(route => route.id === row.route.id)
-          return exists && publicRoutes.some(route => route.versionId === row.route.apiVersionId && route.upstreamServiceId === row.route.upstreamServiceId)
-        }).sort((left, right) => (
-          Number(right.route.state === 'active') - Number(left.route.state === 'active')
-          || Number(previousIds.has(right.route.id)) - Number(previousIds.has(left.route.id))
-          || left.route.id.localeCompare(right.route.id)
-        ))
-        const supportKeys = new Set<string>()
-        const supportRoutes = supportCandidates.filter(({ route }) => {
-          const key = JSON.stringify([route.apiVersionId, route.upstreamServiceId, route.method, route.pathPattern])
-          if (supportKeys.has(key)) return false
-          supportKeys.add(key)
-          return true
-        }).map(row => {
-          const peers = publicRoutes.filter(route => route.versionId === row.route.apiVersionId && route.upstreamServiceId === row.route.upstreamServiceId)
-          return { ...toRoutingRevisionRoute(row), hosts: peers.some(route => route.hosts.length === 0)
-            ? [] : [...new Set(peers.flatMap(route => route.hosts))].sort() }
-        })
-        const appliedRoutes = [...publicRoutes, ...supportRoutes].flatMap(route => {
-          const product = productById.get(route.productId)
-          const version = versionById.get(route.versionId)
-          if (!product || !version) return []
-          return [{ ...route, productSlug: product.slug,
-            productVisibility: product.visibility as RoutingRevisionRoute['productVisibility'],
-            productLifecycle: product.lifecycle as RoutingRevisionRoute['productLifecycle'],
-            version: version.version, versionState: version.state as RoutingRevisionRoute['versionState'] }]
-        }).sort((left, right) => left.id.localeCompare(right.id))
-        const eligibleRoutes = appliedRoutes.filter(route => {
-          return upstreamById.get(route.upstreamServiceId)?.status === 'active'
-            && ['active', 'deprecated'].includes(route.productLifecycle)
-            && ['published', 'deprecated'].includes(route.versionState)
-        })
-        const upstreamDefinitions = new Map(eligibleRoutes.map(route => [route.upstreamServiceId, {
-          id: route.upstreamServiceId,
-          loadBalancing: upstreamById.get(route.upstreamServiceId)!.loadBalancing as RoutingRevisionUpstream['loadBalancing']
-        }]))
-        const upstreamIds = Array.from(upstreamDefinitions.keys()).sort()
-        const targetRows = upstreamIds.length > 0
-          ? await tx.select().from(upstreamTargets).where(and(
-              inArray(upstreamTargets.upstreamServiceId, upstreamIds),
-              eq(upstreamTargets.enabled, true)
-            ))
-          : []
-        const connectionRows = upstreamIds.length > 0
-          ? await tx.select().from(upstreamServiceConnections).where(inArray(
-              upstreamServiceConnections.upstreamServiceId,
-              upstreamIds
-            ))
-          : []
-        const connections = new Map(connectionRows.map(connection => [
-          connection.upstreamServiceId,
-          connection
-        ]))
-
-        // While discovery or reconfiguration is pending, retain verified,
-        // enabled Targets from the active snapshot. Other Services can still
-        // publish; a new Service without any verified Target stays unpublished.
-        const skippedUpstreamIds = new Set<string>()
-        const upstreams: RoutingRevisionUpstream[] = upstreamIds.flatMap((id) => {
-          const definition = upstreamDefinitions.get(id)!
-          let targets = targetRows
-            .filter(target => target.upstreamServiceId === id)
-            .filter(target => isServiceTargetReady(target, connections.get(id) ?? null))
-            .map(target => ({ id: target.id, baseUrl: target.baseUrl, weight: target.weight }))
-            .sort((left, right) => left.id.localeCompare(right.id))
-          if (targets.length === 0) {
-            const activeUpstream = activeUpstreams.get(id)
-            if (activeUpstream) {
-              // Keep the last active runtime while a managed Upstream waits
-              // for a verified Target. Only retain Targets that still exist
-              // and remain enabled; an intentional disable/delete must take
-              // effect even while another Target is waiting for verification.
-              const enabledTargetIds = new Set(
-                targetRows
-                  .filter(target => target.upstreamServiceId === id)
-                  .map(target => target.id)
-              )
-              targets = activeUpstream.targets
-                .filter(target => enabledTargetIds.has(target.id))
-                .map(target => ({ ...target }))
-            }
-          }
-          if (targets.length === 0) {
-            skippedUpstreamIds.add(id)
-            return []
-          }
-          return [{ ...definition, targets }]
-        })
-
-        const routes = eligibleRoutes
-          .filter(route => !skippedUpstreamIds.has(route.upstreamServiceId))
-          .sort((left, right) => (
-            left.pathPattern.localeCompare(right.pathPattern)
-            || left.method.localeCompare(right.method)
-            || left.id.localeCompare(right.id)
-          ))
-
-        validatePublishedRouteConflicts(routes, runtime.defaultDomain)
-
-        const desiredConfiguration: RoutingRuntimeConfiguration = {
-          schemaVersion: 1,
-          routes,
-          appliedRoutes,
-          upstreams,
-          defaultDomain: runtime.defaultDomain
-        }
+        const upstreamIds = currentUpstreams.map(upstream => upstream.id)
+        const [documents, targetRows, connectionRows] = await Promise.all([
+          documentIds.length
+            ? tx.select().from(openapiDocuments).where(inArray(openapiDocuments.id, documentIds))
+            : [],
+          upstreamIds.length
+            ? tx.select().from(upstreamTargets).where(and(
+                inArray(upstreamTargets.upstreamServiceId, upstreamIds),
+                eq(upstreamTargets.enabled, true)
+              ))
+            : [],
+          upstreamIds.length
+            ? tx.select().from(upstreamServiceConnections).where(inArray(upstreamServiceConnections.upstreamServiceId, upstreamIds))
+            : []
+        ])
+        const desiredConfiguration = compileRoutingRevision({
+          routeRows, products, versions, currentUpstreams, targetRows, connectionRows,
+          contracts: documents.map(document => ({
+            id: document.id,
+            endpoints: readStoredServiceEndpoints(document.parsedSummary)
+          }))
+        }, activeRevision?.configPayload ?? null, options.scope ?? { kind: 'all' }, runtime.defaultDomain)
         if (
           activeRevision
           && hasSameRuntimeConfiguration(

@@ -19,11 +19,7 @@ import {
   findGatewayExecutionError,
   GatewayExecutionError
 } from '~~/server/errors/gateway-error'
-import {
-  initializeGatewayStatistics,
-  prepareGatewayBillingResponse,
-  releaseGatewayBillingReservation
-} from '~~/server/services/dynamic-gateway-billing-service'
+import { gatewayCallService } from '~~/server/services/dynamic-gateway-call-service'
 import {
   assertGatewayRequestSize,
   createGatewayRequestBody
@@ -243,7 +239,7 @@ export const dynamicGatewayService = {
     // returns a conflicting value.  The response-header sanitizer also blocks
     // the upstream copy when the stream is proxied below.
     setResponseHeader(event, 'X-Request-Id', ensureRequestId(event))
-    initializeGatewayStatistics(event, match)
+    gatewayCallService.start(event, match)
     let abortController: AbortController | null = null
     let abortReason: 'client_disconnected' | 'timeout' | null = null
     let abortRequest: (() => void) | null = null
@@ -293,7 +289,9 @@ export const dynamicGatewayService = {
       event.node.req.once('aborted', abortRequest)
       event.node.res.once('close', abortResponse)
 
-      const body = createGatewayRequestBody(event, match.route.maxRequestBytes)
+      const body = createGatewayRequestBody(event, match.route.maxRequestBytes, requestBytes => {
+        gatewayCallService.observe(event, { requestBytes })
+      })
       const proxyFetch = createGatewayProxyFetch({
         match,
         targets,
@@ -302,20 +300,15 @@ export const dynamicGatewayService = {
         maximumResponseBytes: match.route.maxResponseBytes,
         onTarget: (selected) => {
           targetId = selected.id
-          const statisticsTarget = getAppEventContext(event).apiStatsTarget
-          if (statisticsTarget) {
-            statisticsTarget.upstreamTargetId = selected.id
-            statisticsTarget.upstreamTargetUrl = selected.baseUrl
-          }
+          gatewayCallService.observe(event, { target: selected })
         },
         onResponseBytes: (receivedBytes) => {
-          const tracked = getAppEventContext(event).apiStatsTracked
-          if (tracked) tracked.responseSize = receivedBytes
+          gatewayCallService.observe(event, { responseBytes: receivedBytes })
         }
       })
       proxyStarted = true
       const response = await sendProxy(event, targetUrl.toString(), {
-        fetch: async (request, init) => prepareGatewayBillingResponse(
+        fetch: async (request, init) => gatewayCallService.prepareResponse(
           event,
           await proxyFetch(request, init),
           abortController!.signal
@@ -342,7 +335,7 @@ export const dynamicGatewayService = {
     } catch (caughtError) {
       let error = caughtError
       try {
-        await releaseGatewayBillingReservation(event)
+        await gatewayCallService.release(event)
       } catch (releaseError) {
         error = new BillingPersistenceError(releaseError)
       }

@@ -27,43 +27,10 @@ export type GateOutcome
     | 'credits_unavailable'
     | 'insufficient_credits'
 
-interface ApiStatsTarget {
-  routeId: string
-  routeName: string
-  apiPath: string
-  upstreamTargetId: string | null
-  upstreamTargetUrl: string | null
-}
-
-export interface ApiStatsTracked {
-  startedAt: number
-  pathname: string
-  method: string
-  ip: string | null
-  requestSize: number | null
-  responseSize?: number | null
-  userAgent: string | null
-  referer: string | null
-  queryString: string | null
-  ignoredStatisticsStatusCodes?: number[]
-}
-
-interface ApiKeyContext {
-  id: number
-  userId: number
-  name: string
-}
-
 export interface ApiCreditReservationContext {
   id: number
   userId: number
   amount: number
-}
-
-interface ApiBillingContext {
-  costCredits: number
-  apiKeyUserId: number | null
-  creditReservation: ApiCreditReservationContext | null
 }
 
 interface ApiGateRejectionContext {
@@ -81,10 +48,6 @@ interface ApiFailureContext {
 }
 
 export interface AppEventContext {
-  apiStatsTarget?: ApiStatsTarget
-  apiStatsTracked?: ApiStatsTracked
-  apiKey?: ApiKeyContext | null
-  apiBilling?: ApiBillingContext
   apiGateRejection?: ApiGateRejectionContext
   apiFailure?: ApiFailureContext
   requestId?: string

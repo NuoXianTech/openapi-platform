@@ -107,6 +107,11 @@ Revision 是 Gateway 的安全运行边界，不是管理员必须手工编排�
 6. 配置变化时保存不可变 Routing Revision，并激活到 Platform Runtime。
 7. 通知 Gateway 刷新运行时缓存；数据库短暂不可用时最多使用 60 秒的上一个有效快照，超过窗口返回 `503 ROUTING_RUNTIME_UNAVAILABLE`，不伪装成 404。
 
+完整快照规则集中在 `server/services/routing-revision-compiler.ts`：发布范围、支撑 Route、
+父级治理、Target 就绪与历史回退、冲突校验共同生成已应用配置和可执行配置。
+编译不执行数据库操作；`routing-revision-service.ts` 在原发布锁和事务内读取所有编译资料，
+然后完成去重、写入和激活。历史 Revision 激活复用同一冲突校验，缓存仍在提交后失效。
+
 Route 行保存期望状态，活动 Revision 保存实际流量状态。接口目录的保存与“应用全部变更”分为两个事务：前者只更新控制面，后者校验完整配置并生成/复用快照；冲突校验或引用校验失败时，应用动作回滚，活动流量继续使用旧快照。其他需要立即生效的 Platform 管理对象仍使用单事务自动发布。
 
 Revision 的 `appliedRoutes` 保存最近明确应用的 Route 配置，包括因 Target 未就绪、Product / Version / Upstream 暂不可用而不能执行的 Route；`routes` 只保存当前可执行集合。自动刷新叠加当前分组、版本治理和基础设施状态，不读取待应用的 Route 启停或治理草稿。发现依据已应用的公开 Route 和当前契约维护支撑 Route；因此待停用的公开接口在明确应用前仍有完整支撑能力。回滚后继续以所激活 Revision 的已应用配置为基线。旧 Revision 缺少 `appliedRoutes` 时以其 `routes` 为基线，原 payload 和 checksum 不改写。去重同时比较已应用配置和可执行配置，确保未就绪 Route 的显式应用也可审计。
@@ -133,6 +138,13 @@ Gateway 按以下顺序处理公开请求：
 7. 选择 Upstream Target 并转发请求。
 8. 根据响应结果结算或释放积分预留。
 9. 写入 Route 调用明细、耗时和积分关联。
+
+`server/services/dynamic-gateway-call-service.ts` 持有每个请求私有的调用生命周期状态，
+统一接纳准入结果与观测、准备付费响应、释放预留，并在响应后写调用明细和结算。
+Gateway 和字节限制逻辑通过该模块报告观测，不再直接改写计费与统计的事件上下文字段。
+`api-call-stats.ts` 仅将 Nitro `afterResponse` 转交给收尾入口；并发或重复触发共享同一次收尾，
+不会重复写调用、累计使用量或结算。交付前持久化失败继续阻止付费成功内容发出；
+调用记录或结算失败保留已持久化的 pending 预留，由现有恢复任务重试。
 
 未命中活动 Route 时返回稳定的 `API_NOT_FOUND`，不会回退到 Platform 内部业务代码。
 
@@ -205,6 +217,12 @@ Target 支持内网地址、容器名、HTTP 与 HTTPS，公网 HTTP 会被拒�
 控制协议只约束发现、配置和认证等 Platform ↔ Service 通信。业务 Endpoint 的 `/v1`、`/v2` 由 OpenAPI 路径决定，可以并存；接口目录按实际路径创建和维护对应 API Version。
 
 业务配置保存后，Platform 使用乐观锁生成更高 Revision，分别向全部启用 Target 下发同一完整快照，并记录 `synced`、`drifted`、`error` 或 `unknown` 状态。部分 Target 失败不会被视为全部成功。
+
+发现和配置同步的 Target 观测统一进入 `platform-service-control-context.ts` 的
+`acceptServiceTargetResults`。该入口在指纹校验后的同一事务内，按当前期望配置判断状态，
+使用统一时间戳写入 Target，并拒绝重复或不属于原启用 Target 集合的观测。
+发现可以在这个事务中先更新契约，结果分类使用更新后的契约；网络失败保留上次观测事实，
+同时标记 error。配置同步只有全部启用 Target 匹配时才更新连接的整体同步时间。
 
 发现成功，或配置同步至少有一个 Target 成功后，Platform 自动重新计算运行配置。相同配置复用当前 Revision；只有验证通过的 Target 集合实际变化时才生成新 Revision。部分同步生成只包含成功 Target 的快照；如果某个 Upstream 的全部 Target 同步失败，则该 Upstream 在后续 Revision 中继续使用最后一个有效 Target 快照，其他 Upstream 仍可独立更新。没有历史有效快照的新 Upstream 会保持待发布状态，直到至少一个 Target 验证成功。期望配置与实际运行状态会保持可见差异，等待管理员修复后重试。发现不会自行创建公开 Route，但可以应用管理员此前已经明确发布、因 Target 尚未验证而等待的 Route。
 

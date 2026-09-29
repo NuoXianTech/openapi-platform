@@ -1,6 +1,7 @@
 import { EventEmitter } from 'node:events'
 import type { H3Event } from 'h3'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { gatewayCallService } from '~~/server/services/dynamic-gateway-call-service'
 import type { ResolvedDynamicRoute } from '~~/server/services/routing-runtime-service'
 
 const mocks = vi.hoisted(() => ({
@@ -125,11 +126,7 @@ function createEvent(): H3Event {
 }
 
 function installBilling(event: H3Event) {
-  event.context.apiBilling = {
-    costCredits: 2,
-    apiKeyUserId: 7,
-    creditReservation: { id: 11, userId: 7, amount: 2 }
-  }
+  gatewayCallService.acceptAccess(event, { id: 1, userId: 7, name: 'Test' }, { id: 11, userId: 7, amount: 2 })
 }
 
 beforeEach(() => {
@@ -200,7 +197,8 @@ describe('dynamic gateway streaming billing', () => {
     await expect(handling).resolves.toMatchObject({ matched: true })
     expect(mocks.releaseReservation).toHaveBeenCalledWith(11, 7)
     expect(mocks.markReservationPending).not.toHaveBeenCalled()
-    expect(event.context.apiBilling?.creditReservation).toBeNull()
+    await gatewayCallService.release(event)
+    expect(mocks.releaseReservation).toHaveBeenCalledOnce()
     expect(event.node.res.statusCode).toBe(499)
     expect(event.context.apiFailure).toEqual({
       errorCode: 'CLIENT_DISCONNECTED',

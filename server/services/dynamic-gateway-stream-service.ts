@@ -1,7 +1,6 @@
 import type { H3Event } from 'h3'
 import { getRequestWebStream } from 'h3'
 import { GatewayExecutionError } from '~~/server/errors/gateway-error'
-import { getAppEventContext } from '~~/server/utils/event-context'
 import { sanitizeGatewayResponseHeaders } from '~~/server/utils/gateway-response-headers'
 
 const PAYLOAD_METHODS = new Set(['PATCH', 'POST', 'PUT', 'DELETE'])
@@ -58,7 +57,8 @@ function limitGatewayByteStream(
 
 export function createGatewayRequestBody(
   event: H3Event,
-  maximumBytes: number
+  maximumBytes: number,
+  onBytes?: (receivedBytes: number) => void
 ): ReadableStream<Uint8Array> | undefined {
   if (!PAYLOAD_METHODS.has(event.method.toUpperCase())) return undefined
   const stream = getRequestWebStream(event)
@@ -67,10 +67,7 @@ export function createGatewayRequestBody(
     stream,
     maximumBytes,
     () => requestBodyLimitError(maximumBytes),
-    (receivedBytes) => {
-      const tracked = getAppEventContext(event).apiStatsTracked
-      if (tracked) tracked.requestSize = receivedBytes
-    }
+    onBytes
   )
 }
 

@@ -1,12 +1,23 @@
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http'
 import { createApp, eventHandler, toNodeListener, type H3Event } from 'h3'
-import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { gatewayCallService } from '~~/server/services/dynamic-gateway-call-service'
 import type { ResolvedDynamicRoute } from '~~/server/services/routing-runtime-service'
 
-const mocks = vi.hoisted(() => ({ authorize: vi.fn(), resolve: vi.fn(), mark: vi.fn(), release: vi.fn() }))
+const mocks = vi.hoisted(() => ({
+  authorize: vi.fn(), resolve: vi.fn(), mark: vi.fn(), release: vi.fn(),
+  record: vi.fn(), addCall: vi.fn(), link: vi.fn(), finalize: vi.fn(), usage: vi.fn()
+}))
 vi.mock('~~/server/services/dynamic-gateway-access-service', () => ({ dynamicGatewayAccessService: { authorize: mocks.authorize } }))
 vi.mock('~~/server/services/routing-runtime-service', () => ({ routingRuntimeService: { resolve: mocks.resolve, resolveAllowedMethods: async () => [] } }))
-vi.mock('~~/server/services/credit-service', () => ({ creditService: { markReservationPending: mocks.mark, releaseReservation: mocks.release } }))
+vi.mock('~~/server/services/credit-service', () => ({ creditService: {
+  markReservationPending: mocks.mark, releaseReservation: mocks.release,
+  linkApiCall: mocks.link, finalizeReservation: mocks.finalize
+} }))
+vi.mock('~~/server/services/api-call-service', () => ({ apiCallService: {
+  addCallAndUpsertDailyStat: mocks.record, addCall: mocks.addCall
+} }))
+vi.mock('~~/server/services/api-key-service', () => ({ apiKeyService: { recordUsage: mocks.usage } }))
 vi.mock('~~/server/services/upstream-service-token-service', () => ({ upstreamServiceTokenService: { get: async () => 'review-service-token' } }))
 vi.mock('~~/server/utils/redis', () => ({ getRedisClient: () => null, getRedisConfig: () => ({ keyPrefix: 'test:' }) }))
 const { dynamicGatewayService } = await import('~~/server/services/dynamic-gateway-service')
@@ -77,13 +88,14 @@ beforeEach(() => {
     return Promise.resolve(true)
   })
   mocks.release.mockResolvedValue(true)
+  mocks.record.mockResolvedValue(42)
+  mocks.addCall.mockResolvedValue([{ id: 42 }])
+  mocks.link.mockResolvedValue(undefined)
+  mocks.finalize.mockResolvedValue({ charged: 2 })
+  mocks.usage.mockResolvedValue(undefined)
   mocks.authorize.mockImplementation((event: H3Event) => {
     lastEvent = event
-    event.context.apiBilling = {
-      costCredits: match.route.creditsCost,
-      apiKeyUserId: 7,
-      creditReservation: match.route.creditsCost > 0 ? { id: 11, userId: 7, amount: 2 } : null
-    }
+    gatewayCallService.acceptAccess(event, { id: 1, userId: 7, name: 'Test' }, match.route.creditsCost > 0 ? { id: 11, userId: 7, amount: 2 } : null)
     return Promise.resolve({ passed: true })
   })
   upstreamHandler = (_req, res) => {
@@ -96,6 +108,7 @@ beforeEach(() => {
     res.end(JSON.stringify({ code: 'OK', data: 'paid-result' }))
   }
 })
+afterEach(() => { vi.restoreAllMocks() })
 afterAll(async () => {
   await closeSafeFetchTransports()
   await Promise.all([upstream, gateway].map(server => new Promise<void>(resolve => {
@@ -105,6 +118,78 @@ afterAll(async () => {
 })
 
 describe('gateway over HTTP', () => {
+  it('coalesces concurrent and repeated completion without replaying calls or settlement', async () => {
+    await (await fetch(url)).text()
+    let finishRecord!: (id: number) => void
+    mocks.record.mockImplementationOnce(() => new Promise<number>(resolve => { finishRecord = resolve }))
+    const first = gatewayCallService.complete(lastEvent)
+    const repeated = gatewayCallService.complete(lastEvent)
+    expect(repeated).toBe(first)
+    expect(mocks.record).toHaveBeenCalledOnce()
+    expect(mocks.finalize).not.toHaveBeenCalled()
+    finishRecord(42)
+    await Promise.all([first, repeated])
+    await gatewayCallService.complete(lastEvent)
+    await gatewayCallService.release(lastEvent)
+    expect(mocks.record).toHaveBeenCalledOnce()
+    expect(mocks.link).toHaveBeenCalledExactlyOnceWith(11, 42)
+    expect(mocks.finalize).toHaveBeenCalledExactlyOnceWith({
+      reservationId: 11, apiCallId: 42, remark: 'API 调用扣费 · /v1/stream'
+    })
+    expect(mocks.usage).toHaveBeenCalledOnce()
+    expect(mocks.release).not.toHaveBeenCalled()
+    expect(mocks.record.mock.calls[0]![0]).toMatchObject({
+      upstreamTargetId: match.upstream.targets[0]!.id,
+      upstreamTargetUrl: match.upstream.targets[0]!.baseUrl,
+      responseSize: new TextEncoder().encode(JSON.stringify({ code: 'OK', data: 'paid-result' })).length
+    })
+  })
+
+  it.each(['record', 'finalize'] as const)('leaves durable billing for recovery after %s fails', async (operation) => {
+    vi.spyOn(console, 'error').mockImplementation(() => undefined)
+    mocks[operation].mockRejectedValueOnce(new Error('database unavailable'))
+    await (await fetch(url)).text()
+    await gatewayCallService.complete(lastEvent)
+    await gatewayCallService.complete(lastEvent)
+    expect(mocks.mark).toHaveBeenCalledOnce()
+    expect(mocks.release).not.toHaveBeenCalled()
+    expect(mocks.record).toHaveBeenCalledOnce()
+    expect(mocks.finalize).toHaveBeenCalledTimes(operation === 'finalize' ? 1 : 0)
+  })
+
+  it('does not release failed-call credits again when the response hook repeats', async () => {
+    upstreamHandler = (_req, res) => { res.statusCode = 422; res.end('business-error') }
+    await (await fetch(url)).text()
+    await Promise.all([gatewayCallService.complete(lastEvent), gatewayCallService.complete(lastEvent)])
+    expect(mocks.release).toHaveBeenCalledOnce()
+    expect(mocks.finalize).not.toHaveBeenCalled()
+    expect(mocks.record).toHaveBeenCalledOnce()
+  })
+
+  it('retries a failed error-path release during completion without recording twice', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => undefined)
+    mocks.release.mockRejectedValueOnce(new Error('release temporarily unavailable'))
+    mocks.mark.mockRejectedValueOnce(new Error('billing temporarily unavailable'))
+    const response = await fetch(url)
+    expect(response.status).toBe(503)
+    await response.text()
+    await gatewayCallService.complete(lastEvent)
+    await gatewayCallService.complete(lastEvent)
+    expect(mocks.release).toHaveBeenCalledTimes(2)
+    expect(mocks.record).toHaveBeenCalledOnce()
+    expect(mocks.finalize).not.toHaveBeenCalled()
+  })
+
+  it('keeps successful billing recoverable when statistics are disabled', async () => {
+    match.route.isStatistics = false
+    await (await fetch(url)).text()
+    await gatewayCallService.complete(lastEvent)
+    expect(mocks.mark).toHaveBeenCalledOnce()
+    expect(mocks.record).not.toHaveBeenCalled()
+    expect(mocks.finalize).not.toHaveBeenCalled()
+    expect(mocks.release).not.toHaveBeenCalled()
+  })
+
   it('waits for the whole paid body and durable billing before sending any bytes', async () => {
     let upstreamResponse: ServerResponse | undefined
     upstreamHandler = (_req, res) => {

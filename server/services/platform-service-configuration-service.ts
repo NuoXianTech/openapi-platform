@@ -17,6 +17,7 @@ import {
   type PlatformServiceControlContext,
   loadServiceControlContext,
   commitServiceControlContext,
+  acceptServiceTargetResults,
   safeServiceControlError,
   serviceTargetControlState
 } from '~~/server/services/platform-service-control-context'
@@ -208,10 +209,6 @@ async function pushConfiguration(
         token,
         { revision, values }
       )
-      const matches = response.data.serviceId === serviceId
-        && response.data.schemaSha256 === schemaSha256
-        && response.data.revision === revision
-        && response.data.configurationSha256 === configurationHash
       const state = redactedStateFromValues({
         serviceId: response.data.serviceId,
         schemaSha256: response.data.schemaSha256,
@@ -221,12 +218,11 @@ async function pushConfiguration(
         definition,
         updatedAt: response.data.updatedAt
       })
-      return { ok: true as const, targetId: target.id, matches, state }
+      return { ok: true as const, targetId: target.id, state }
     } catch (error) {
       return {
         ok: false as const,
         targetId: target.id,
-        matches: false as const,
         conflictingRevision: serviceConflictRevision(error),
         error: safeServiceControlError(error)
       }
@@ -248,44 +244,7 @@ async function pushConfiguration(
     throw new ServiceConfigurationRevisionAheadError(conflictingRevision)
   }
 
-  const successful = results.filter(result => result.ok && result.matches).length
-  const status = successful === enabledTargets.length
-    ? 'synced'
-    : successful > 0 ? 'partial' : 'failed'
-  await commitServiceControlContext(context, 'configuration', async (tx, _current, synchronizedAt) => {
-    for (const result of results) {
-      if (result.ok) {
-        await tx.update(upstreamTargets).set({
-          configurationRevision: result.state.revision,
-          configurationHash: result.state.configurationSha256,
-          configurationStatus: result.matches ? 'synced' : 'drifted',
-          configurationState: result.state,
-          lastConfigurationSyncAt: synchronizedAt,
-          lastError: result.matches
-            ? null
-            : 'Service configuration ACK mismatch',
-          updatedAt: synchronizedAt
-        }).where(eq(upstreamTargets.id, result.targetId))
-      } else {
-        await tx.update(upstreamTargets).set({
-          configurationStatus: 'error',
-          lastConfigurationSyncAt: synchronizedAt,
-          lastError: result.error,
-          updatedAt: synchronizedAt
-        }).where(eq(upstreamTargets.id, result.targetId))
-      }
-    }
-
-    if (status === 'synced') {
-      await tx.update(upstreamServiceConnections).set({
-        lastConfigurationSyncAt: synchronizedAt,
-        updatedAt: synchronizedAt
-      }).where(eq(
-        upstreamServiceConnections.upstreamServiceId,
-        context.service.id
-      ))
-    }
-  })
+  const status = await acceptServiceTargetResults(context, 'configuration', results)
   const refreshed = await loadServiceControlContext(context.service.id)
   return {
     status,

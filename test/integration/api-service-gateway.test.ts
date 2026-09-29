@@ -67,11 +67,8 @@ const { platformRuntimeService } = await import(
 const { routingRevisionService } = await import(
   '~~/server/services/routing-revision-service'
 )
-const { recordApiCall } = await import(
-  '~~/server/plugins/api-call-stats'
-)
-const { getAppEventContext } = await import(
-  '~~/server/utils/event-context'
+const { gatewayCallService } = await import(
+  '~~/server/services/dynamic-gateway-call-service'
 )
 const { gatewayFail } = await import(
   '~~/server/utils/gateway-response'
@@ -307,8 +304,7 @@ beforeAll(async () => {
   gateway.use(eventHandler(async (event) => {
     setPublicApiCors(event)
     const result = await dynamicGatewayService.tryHandle(event)
-    const tracked = getAppEventContext(event).apiStatsTracked
-    if (tracked) await recordApiCall(event, tracked)
+    await gatewayCallService.complete(event)
     if (result.matched) return result.response
     return gatewayFail(event, 404, 'API_NOT_FOUND', '接口不存在')
   }))

@@ -1,5 +1,6 @@
 import { and, eq } from 'drizzle-orm'
 import type {
+  RedactedServiceConfigurationState,
   ServiceAvailability,
   ServiceConfigurationDefinition,
   ServiceConfigurationValue,
@@ -204,6 +205,76 @@ export async function commitServiceControlContext<T>(
       Math.max(current.connection.updatedAt.getTime(), current.service.updatedAt.getTime())
     )
     return commit(tx, current, new Date(Math.max(Date.now(), lastChange + 1)))
+  })
+}
+
+type ServiceTargetResult
+  = { ok: true, targetId: string, state: RedactedServiceConfigurationState }
+    | { ok: false, targetId: string, error: string }
+
+/** Accept a network observation and its Target state changes under the same
+ * context lock. Discovery may update the contract first, in this transaction. */
+export async function acceptServiceTargetResults(
+  expected: PlatformServiceControlContext,
+  operation: 'discovery' | 'configuration',
+  results: readonly ServiceTargetResult[],
+  updateConnection?: (
+    tx: DatabaseTransaction,
+    current: PlatformServiceControlContext,
+    changedAt: Date
+  ) => Promise<PlatformServiceControlContext['connection']>
+): Promise<'synced' | 'partial' | 'failed'> {
+  return commitServiceControlContext(expected, operation, async (tx, current, changedAt) => {
+    const enabledIds = new Set(current.targets.filter(target => target.enabled).map(target => target.id))
+    const observedIds = new Set<string>()
+    for (const result of results) {
+      if (!enabledIds.has(result.targetId) || observedIds.has(result.targetId)) {
+        throw new Error('Target observation must belong to one enabled Target in the accepted context')
+      }
+      observedIds.add(result.targetId)
+    }
+    const connection = updateConnection
+      ? await updateConnection(tx, current, changedAt)
+      : current.connection
+    let successful = 0
+    for (const result of results) {
+      const state = result.ok ? result.state : null
+      const matches = state !== null
+        && connection.configurationHash !== null
+        && connection.configurationRevision > 0
+        && state.serviceId === connection.serviceId
+        && state.schemaSha256 === connection.configurationSchemaSha256
+        && state.revision === connection.configurationRevision
+        && state.configurationSha256 === connection.configurationHash
+      if (matches) successful += 1
+      await tx.update(upstreamTargets).set({
+        ...(state ? {
+          configurationRevision: state.revision,
+          configurationHash: state.configurationSha256,
+          configurationState: state
+        } : {}),
+        configurationStatus: !result.ok ? 'error'
+          : !connection.configurationHash ? 'unknown'
+              : matches ? 'synced' : 'drifted',
+        lastError: !result.ok ? result.error
+          : operation === 'configuration' && !matches ? 'Service configuration ACK mismatch' : null,
+        lastConfigurationSyncAt: changedAt,
+        updatedAt: changedAt
+      }).where(and(
+        eq(upstreamTargets.id, result.targetId),
+        eq(upstreamTargets.upstreamServiceId, current.service.id)
+      ))
+    }
+    const status = successful > 0 && successful === enabledIds.size
+      ? 'synced'
+      : successful > 0 ? 'partial' : 'failed'
+    if (operation === 'configuration' && status === 'synced') {
+      await tx.update(upstreamServiceConnections).set({
+        lastConfigurationSyncAt: changedAt,
+        updatedAt: changedAt
+      }).where(eq(upstreamServiceConnections.upstreamServiceId, current.service.id))
+    }
+    return status
   })
 }
 

@@ -20,6 +20,7 @@ const { synchronizePlatformServiceConfiguration, updatePlatformServiceConfigurat
 const { serviceControlClient } = await import('~~/server/utils/service-control-client')
 const { refreshPlatformRevision } = await import('~~/server/services/platform-endpoint-publication-service')
 const { discoverPlatformService } = await import('~~/server/services/platform-service-discovery-service')
+const { acceptServiceTargetResults, loadServiceControlContext } = await import('~~/server/services/platform-service-control-context')
 let client: PGlite
 let database: ReturnType<typeof drizzle<typeof schema>>
 const schemaHash = 'a'.repeat(64)
@@ -72,6 +73,65 @@ function response(revision = 1): Awaited<ReturnType<typeof serviceControlClient.
 }
 
 describe('configuration result acceptance', () => {
+  it.each(['discovery', 'configuration'] as const)('accepts mixed %s observations with one timestamp and preserves failed Target facts', async (operation) => {
+    const upstream = await configuredUpstream()
+    const { target: drifted } = await platformUpstreamService.createTarget(upstream.id, { baseUrl: 'http://127.0.0.1:9090', weight: 1, enabled: true })
+    const { target: failed } = await platformUpstreamService.createTarget(upstream.id, { baseUrl: 'http://127.0.0.1:9091', weight: 1, enabled: true })
+    await database.update(schema.upstreamTargets).set({
+      configurationRevision: 1, configurationHash: hash, configurationState: response().data
+    }).where(eq(schema.upstreamTargets.id, failed.id))
+    const expected = await loadServiceControlContext(upstream.id)
+    const lastChange = Math.max(expected.connection.updatedAt.getTime(), ...expected.targets.map(target => target.updatedAt.getTime()))
+    const status = await acceptServiceTargetResults(expected, operation, [
+      { ok: true, targetId: upstream.targets[0]!.id, state: response().data },
+      { ok: true, targetId: drifted.id, state: { ...response().data, configurationSha256: 'c'.repeat(64) } },
+      { ok: false, targetId: failed.id, error: 'offline' }
+    ])
+    expect(status).toBe('partial')
+    const current = await loadServiceControlContext(upstream.id)
+    const byId = new Map(current.targets.map(target => [target.id, target]))
+    expect(byId.get(upstream.targets[0]!.id)).toMatchObject({ configurationStatus: 'synced', lastError: null })
+    expect(byId.get(drifted.id)).toMatchObject({
+      configurationStatus: 'drifted', lastError: operation === 'configuration' ? 'Service configuration ACK mismatch' : null
+    })
+    expect(byId.get(failed.id)).toMatchObject({
+      configurationStatus: 'error', lastError: 'offline', configurationRevision: 1, configurationHash: hash,
+      configurationState: { serviceId: 'workflow' }
+    })
+    expect(new Set(current.targets.map(target => target.updatedAt.getTime())).size).toBe(1)
+    expect(current.targets[0]!.updatedAt.getTime()).toBeGreaterThan(lastChange)
+    expect(current.connection.lastConfigurationSyncAt).toEqual(expected.connection.lastConfigurationSyncAt)
+  })
+
+  it('classifies discovery against the contract committed in the same acceptance transaction', async () => {
+    const upstream = await configuredUpstream()
+    const expected = await loadServiceControlContext(upstream.id)
+    await acceptServiceTargetResults(expected, 'discovery', [
+      { ok: true, targetId: upstream.targets[0]!.id, state: response().data }
+    ], async (tx, current, changedAt) => {
+      const [connection] = await tx.update(schema.upstreamServiceConnections).set({
+        configurationHash: null, updatedAt: changedAt
+      }).where(eq(schema.upstreamServiceConnections.upstreamServiceId, current.service.id)).returning()
+      return connection!
+    })
+    const current = await loadServiceControlContext(upstream.id)
+    expect(current.targets[0]).toMatchObject({ configurationStatus: 'unknown', lastError: null })
+    expect(isServiceTargetReady(current.targets[0]!, current.connection)).toBe(true)
+  })
+
+  it.each(['foreign', 'duplicate'] as const)('rejects %s observations before any accepted write', async (kind) => {
+    const upstream = await configuredUpstream()
+    const expected = await loadServiceControlContext(upstream.id)
+    const targetId = kind === 'foreign' ? 'unknown-target' : upstream.targets[0]!.id
+    const observation = { ok: true as const, targetId, state: response().data }
+    const update = vi.fn(async () => expected.connection)
+    await expect(acceptServiceTargetResults(expected, 'discovery',
+      kind === 'duplicate' ? [observation, observation] : [observation], update
+    )).rejects.toThrow('Target observation')
+    expect(update).not.toHaveBeenCalled()
+    expect(await loadServiceControlContext(upstream.id)).toEqual(expected)
+  })
+
   it.each([false, true])('only records discovery failure in its original context (changed=%s)', async (changed) => {
     const upstream = await configuredUpstream()
     const started = deferred<undefined>()

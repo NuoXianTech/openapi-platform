@@ -6,14 +6,13 @@ import type {
   ServiceDescription
 } from '#shared/types/service-control'
 import {
-  upstreamServiceConnections,
-  upstreamTargets
+  upstreamServiceConnections
 } from '~~/server/db/schema'
 import { createApplicationError } from '~~/server/errors/application-error'
 import {
   buildServiceControlView,
   loadServiceControlContext,
-  commitServiceControlContext,
+  acceptServiceTargetResults,
   safeServiceControlError,
   type PlatformServiceControlContext
 } from '~~/server/services/platform-service-control-context'
@@ -312,30 +311,28 @@ async function recordDiscoveryFailure(
   context: PlatformServiceControlContext,
   failure: DiscoveryFetchFailure
 ) {
-  await commitServiceControlContext(context, 'discovery', async (tx, _current, now) => {
-    for (const [targetId, message] of failure.targetErrors) {
-      await tx.update(upstreamTargets).set({
-        configurationStatus: 'error',
-        lastError: message,
-        lastConfigurationSyncAt: now,
+  await acceptServiceTargetResults(context, 'discovery',
+    [...failure.targetErrors].map(([targetId, error]) => ({ ok: false, targetId, error })),
+    async (tx, current, now) => {
+      await tx.update(upstreamServiceConnections).set({
+        lastDiscoveryError: safeServiceControlError(failure.error),
         updatedAt: now
-      }).where(eq(upstreamTargets.id, targetId))
-    }
-    await tx.update(upstreamServiceConnections).set({
-      lastDiscoveryError: safeServiceControlError(failure.error),
-      updatedAt: now
-    }).where(eq(
-      upstreamServiceConnections.upstreamServiceId,
-      context.service.id
-    ))
-  }).catch(() => undefined)
+      }).where(eq(
+        upstreamServiceConnections.upstreamServiceId,
+        context.service.id
+      ))
+      return current.connection
+    }).catch(() => undefined)
 }
 
 async function commitServiceSnapshot(
   context: PlatformServiceControlContext,
   snapshot: DiscoveryFetchSuccess
 ) {
-  await commitServiceControlContext(context, 'discovery', async (tx, current, now) => {
+  await acceptServiceTargetResults(context, 'discovery', [
+    ...snapshot.targets.map(item => ({ ok: true as const, targetId: item.targetId, state: item.state })),
+    ...[...snapshot.targetErrors].map(([targetId, error]) => ({ ok: false as const, targetId, error }))
+  ], async (tx, current, now) => {
     const first = snapshot.targets[0]!
     const schemaChanged = Boolean(
       current.connection.configurationSchemaSha256
@@ -393,31 +390,7 @@ async function commitServiceSnapshot(
       throw new Error('Service connection disappeared during discovery')
     }
 
-    for (const item of snapshot.targets) {
-      const matchesDesired = updatedConnection.configurationHash !== null
-        && updatedConnection.configurationRevision > 0
-        && item.state.revision === updatedConnection.configurationRevision
-        && item.state.configurationSha256 === updatedConnection.configurationHash
-      await tx.update(upstreamTargets).set({
-        configurationRevision: item.state.revision,
-        configurationHash: item.state.configurationSha256,
-        configurationStatus: !updatedConnection.configurationHash
-          ? 'unknown'
-          : matchesDesired ? 'synced' : 'drifted',
-        configurationState: item.state,
-        lastConfigurationSyncAt: now,
-        lastError: null,
-        updatedAt: now
-      }).where(eq(upstreamTargets.id, item.targetId))
-    }
-    for (const [targetId, message] of snapshot.targetErrors) {
-      await tx.update(upstreamTargets).set({
-        configurationStatus: 'error',
-        lastConfigurationSyncAt: now,
-        lastError: message,
-        updatedAt: now
-      }).where(eq(upstreamTargets.id, targetId))
-    }
+    return updatedConnection
   })
   upstreamServiceTokenService.invalidate(context.service.id)
 }
