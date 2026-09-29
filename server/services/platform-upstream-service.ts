@@ -1,5 +1,6 @@
 import { and, asc, count, eq, inArray, isNull, ne } from 'drizzle-orm'
 import { db, type DatabaseTransaction } from '~~/server/db/client'
+import { afterCommit, withCommittedTransaction } from '~~/server/utils/committed-transaction'
 import {
   upstreamServiceConnections,
   upstreamServices,
@@ -11,7 +12,6 @@ import { toServiceConnectionView } from '~~/server/services/platform-service-con
 import { resolveServiceAvailability } from '~~/server/services/service-availability-service'
 import { getSqlState } from '~~/server/utils/database-error'
 import { firstRow } from '~~/server/utils/row'
-import { encryptStoredSecret } from '~~/server/utils/stored-secret'
 import { upstreamServiceTokenService } from '~~/server/services/upstream-service-token-service'
 import { routingReferenceService } from '~~/server/services/routing-reference-service'
 import { isServiceTargetReady } from '~~/server/utils/service-upstream-readiness'
@@ -48,18 +48,6 @@ interface UpdateTargetInput {
   baseUrl?: string
   weight?: number
   enabled?: boolean
-}
-
-function normalizeServiceToken(value: string | undefined): string {
-  const token = value?.trim() ?? ''
-  if (token.length < 32 || token.length > 4096) {
-    throw createApplicationError({
-      statusCode: 400,
-      message: 'upstreams require a Service Token with 32 to 4096 characters',
-      data: { code: 'SERVICE_TOKEN_REQUIRED' }
-    })
-  }
-  return token
 }
 
 async function findTargetBindingForUpdate(
@@ -109,24 +97,6 @@ async function assertCanDisableLastTarget(
     message: 'an active upstream route requires at least one ready target',
     data: { code: 'UPSTREAM_LAST_TARGET_REQUIRED' }
   })
-}
-
-/** Stage credentials in the caller's transaction; only discovery promotes them. */
-async function stageServiceToken(tx: DatabaseTransaction, id: string, token: string) {
-  const normalizedToken = normalizeServiceToken(token)
-  const service = await platformUpstreamService.findById(id, { transaction: tx })
-  if (!service || service.deletedAt) {
-    throw createApplicationError({ statusCode: 404, message: 'upstream not found', data: { code: 'UPSTREAM_NOT_FOUND' } })
-  }
-  const updated = firstRow(await tx.update(upstreamServiceConnections).set({
-    pendingServiceTokenCiphertext: encryptStoredSecret(normalizedToken, 'service-token'),
-    lastDiscoveryError: 'Service Token changed; run discovery to verify the connection',
-    updatedAt: new Date()
-  }).where(eq(upstreamServiceConnections.upstreamServiceId, id)).returning())
-  if (!updated) {
-    throw createApplicationError({ statusCode: 404, message: 'upstream not found', data: { code: 'SERVICE_CONNECTION_NOT_FOUND' } })
-  }
-  return updated
 }
 
 export const platformUpstreamService = {
@@ -215,13 +185,12 @@ export const platformUpstreamService = {
   },
 
   async create(input: CreateUpstreamInput) {
-    const serviceToken = normalizeServiceToken(input.serviceToken)
     const normalizedTargets = input.targets.map(target => ({
       ...target,
       url: normalizeUpstreamTargetUrl(target.baseUrl)
     }))
     try {
-      return await db.transaction(async (tx) => {
+      return await withCommittedTransaction(async (tx) => {
         const service = firstRow(await tx.insert(upstreamServices).values({
           slug: input.slug,
           name: input.name,
@@ -234,11 +203,7 @@ export const platformUpstreamService = {
           baseUrl: target.url.toString(),
           weight: target.weight
         }))).returning()
-        const connection = firstRow(await tx.insert(upstreamServiceConnections).values({
-          upstreamServiceId: service.id,
-          serviceTokenCiphertext: encryptStoredSecret(serviceToken, 'service-token')
-        }).returning())
-        if (!connection) throw new Error('Service connection insert returned no row')
+        const connection = await upstreamServiceTokenService.initialize(tx, service.id, input.serviceToken)
         return {
           ...service,
           targets,
@@ -398,6 +363,9 @@ export const platformUpstreamService = {
           updatedAt: new Date(Math.max(Date.now(), binding.target.updatedAt.getTime() + 1))
         }).where(eq(upstreamTargets.id, id)).returning())
         if (!target) throw new Error('target update returned no row')
+        if (input.baseUrl !== undefined || input.enabled !== undefined) {
+          afterCommit(tx, () => resetGatewayTargetHealthForTarget(target.upstreamServiceId, target.id))
+        }
         const disablingPublishedTarget = binding.target.enabled
           && target.enabled === false
         const updatingPublishedTarget = !resetServiceState
@@ -412,16 +380,7 @@ export const platformUpstreamService = {
       }
       const result = options.transaction
         ? await update(options.transaction)
-        : await db.transaction(update)
-      if (
-        input.baseUrl !== undefined
-        || input.enabled !== undefined
-      ) {
-        resetGatewayTargetHealthForTarget(
-          result.target.upstreamServiceId,
-          result.target.id
-        )
-      }
+        : await withCommittedTransaction(update)
       return result
     } catch (error) {
       if (getSqlState(error) === '23505') {
@@ -459,21 +418,17 @@ export const platformUpstreamService = {
         )
       }
       await tx.delete(upstreamTargets).where(eq(upstreamTargets.id, id))
+      afterCommit(tx, () => resetGatewayTargetHealthForTarget(binding.target.upstreamServiceId, binding.target.id))
       return binding.target
     }
     const removed = options.transaction
       ? await remove(options.transaction)
-      : await db.transaction(remove)
-    resetGatewayTargetHealthForTarget(
-      removed.upstreamServiceId,
-      removed.id
-    )
+      : await withCommittedTransaction(remove)
     return removed
   },
 
   async updateServiceToken(id: string, serviceToken: string) {
-    const connection = await db.transaction(tx => stageServiceToken(tx, id, serviceToken))
-    upstreamServiceTokenService.invalidate(id)
+    const connection = await withCommittedTransaction(tx => upstreamServiceTokenService.stage(tx, id, serviceToken))
     return toServiceConnectionView(connection)
   },
 
@@ -485,10 +440,9 @@ export const platformUpstreamService = {
     const { serviceToken, ...patch } = input
     const committed = await applyPlatformMutation(createdBy, async (tx) => {
       const upstream = await platformUpstreamService.update(id, patch, { transaction: tx })
-      if (serviceToken !== undefined) await stageServiceToken(tx, id, serviceToken)
+      if (serviceToken !== undefined) await upstreamServiceTokenService.stage(tx, id, serviceToken)
       return { value: upstream, publishRouting: Object.keys(patch).length > 0 }
     })
-    if (serviceToken !== undefined) upstreamServiceTokenService.invalidate(id)
     const { value: upstream, ...publication } = committed
     return { upstream, ...publication }
   },

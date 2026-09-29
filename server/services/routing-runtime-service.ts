@@ -16,6 +16,7 @@ import {
   type ParsedRoutePattern
 } from '~~/server/utils/route-pattern'
 import { findRoutingRouteConflict } from '~~/server/utils/routing-conflict'
+import { createLocalSnapshot } from '~~/server/utils/local-snapshot'
 
 const CACHE_TTL_MS = 1_000
 // A previously verified snapshot may continue serving traffic during a short
@@ -55,20 +56,15 @@ export interface ResolvedDynamicRoute {
   params: Record<string, string>
 }
 
-interface RuntimeCache {
-  generation: number
-  expiresAt: number
+interface RuntimeSnapshot {
   runtime: CompiledRuntime | null
-  staleUntil: number
+  verifiedAt: number
 }
 
-let runtimeCache: RuntimeCache | null = null
-let runtimeGeneration = 0
-let runtimeLoad: Promise<CompiledRuntime | null> | null = null
 let lastRuntimeFailureLogAt = 0
 
 export function invalidateRoutingRuntimeCache(): void {
-  runtimeGeneration += 1
+  runtimeSnapshot.invalidate('runtime', { keepStale: true })
 }
 
 function validateChecksum(payload: RoutingRevisionPayload, checksum: string): void {
@@ -143,37 +139,23 @@ async function loadCompiledRuntime(): Promise<CompiledRuntime | null> {
   return compiled
 }
 
-async function getCompiledRuntime(): Promise<CompiledRuntime | null> {
-  const now = Date.now()
-  const generation = runtimeGeneration
-  if (runtimeCache && runtimeCache.generation === generation && runtimeCache.expiresAt > now) {
-    return runtimeCache.runtime
-  }
-
-  if (runtimeLoad) return runtimeLoad
-
-  const loading = (async () => {
+const runtimeSnapshot = createLocalSnapshot<string, RuntimeSnapshot>({
+  ttlMs: CACHE_TTL_MS,
+  maxEntries: 1,
+  async load(_key, previous) {
     try {
-      const compiled = await loadCompiledRuntime()
-      runtimeCache = {
-        generation,
-        expiresAt: now + CACHE_TTL_MS,
-        runtime: compiled,
-        staleUntil: compiled ? now + MAX_STALE_RUNTIME_MS : now
-      }
-      return compiled
+      return { runtime: await loadCompiledRuntime(), verifiedAt: Date.now() }
     } catch (error) {
-      const cached = runtimeCache
-      const staleRuntime = cached?.runtime
-      if (staleRuntime && cached.staleUntil > now) {
+      const now = Date.now()
+      if (previous?.runtime && previous.verifiedAt + MAX_STALE_RUNTIME_MS > now) {
         if (now - lastRuntimeFailureLogAt >= 10_000) {
           lastRuntimeFailureLogAt = now
           console.error('[gateway] Failed to load the active routing revision; serving the last valid runtime temporarily.', {
             error: error instanceof Error ? error.message : String(error)
           })
         }
-        cached.expiresAt = now + CACHE_TTL_MS
-        return staleRuntime
+        // Preserve the last successful verification time across fallback reads.
+        return previous
       }
       if (now - lastRuntimeFailureLogAt >= 10_000) {
         lastRuntimeFailureLogAt = now
@@ -183,13 +165,16 @@ async function getCompiledRuntime(): Promise<CompiledRuntime | null> {
       }
       throw new RoutingRuntimeUnavailableError(error)
     }
-  })()
-  runtimeLoad = loading
-  try {
-    return await loading
-  } finally {
-    if (runtimeLoad === loading) runtimeLoad = null
   }
+})
+
+async function getCompiledRuntime(): Promise<CompiledRuntime | null> {
+  const snapshot = await runtimeSnapshot.get('runtime')
+  // A cached fallback must not extend the 60-second window by another TTL.
+  if (snapshot.runtime && snapshot.verifiedAt + MAX_STALE_RUNTIME_MS <= Date.now()) {
+    throw new RoutingRuntimeUnavailableError()
+  }
+  return snapshot.runtime
 }
 
 function routeHostSpecificity(

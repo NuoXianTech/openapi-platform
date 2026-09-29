@@ -370,13 +370,6 @@ async function commitServiceSnapshot(
         configurationSchemaSha256:
           snapshot.description.configuration.schemaSha256,
         configurationSchema: first.definition,
-        ...(current.connection.pendingServiceTokenCiphertext
-          ? {
-              serviceTokenCiphertext:
-                current.connection.pendingServiceTokenCiphertext,
-              pendingServiceTokenCiphertext: null
-            }
-          : {}),
         ...(schemaChanged ? { configurationHash: null } : {}),
         lastDiscoveredAt: now,
         lastDiscoveryError: discoveryError,
@@ -390,9 +383,8 @@ async function commitServiceSnapshot(
       throw new Error('Service connection disappeared during discovery')
     }
 
-    return updatedConnection
+    return upstreamServiceTokenService.promoteVerified(tx, updatedConnection)
   })
-  upstreamServiceTokenService.invalidate(context.service.id)
 }
 
 async function performPlatformServiceDiscovery(upstreamServiceId: string) {
@@ -404,7 +396,7 @@ async function performPlatformServiceDiscovery(upstreamServiceId: string) {
       data: { code: 'SERVICE_HAS_NO_TARGETS' }
     })
   }
-  const token = await upstreamServiceTokenService.getForControl(upstreamServiceId)
+  const token = upstreamServiceTokenService.forVerification(context.connection)
   if (!token) {
     throw createApplicationError({
       statusCode: 409,

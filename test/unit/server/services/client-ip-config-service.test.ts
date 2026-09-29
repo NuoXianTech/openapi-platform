@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { createSystemSettingsDefaults } from '~~/server/config/system-settings'
 
 const mocks = vi.hoisted(() => ({
   getSettings: vi.fn()
@@ -31,6 +32,30 @@ describe('client IP configuration service', () => {
 
   afterEach(() => {
     vi.restoreAllMocks()
+  })
+
+  it.each(['success', 'failure'] as const)('preserves saved settings when an older database read ends in %s', async (outcome) => {
+    vi.spyOn(console, 'warn').mockImplementation(() => undefined)
+    let finish!: (value: ReturnType<typeof settings>) => void
+    let fail!: (error: Error) => void
+    mocks.getSettings.mockReturnValueOnce(new Promise((resolve, reject) => { finish = resolve; fail = reject }))
+    const service = await loadService()
+    const old = service.getEffectiveConfig()
+    await vi.waitFor(() => expect(mocks.getSettings).toHaveBeenCalledOnce())
+    service.refreshFromSettings({ ...createSystemSettingsDefaults(), clientIpSource: 'direct' })
+    if (outcome === 'success') finish(settings())
+    else fail(new Error('old read failed'))
+    await old
+    await expect(service.getEffectiveConfig()).resolves.toMatchObject({ source: 'direct', trustedProxyCidrs: [] })
+    expect(mocks.getSettings).toHaveBeenCalledOnce()
+  })
+
+  it('keeps explicit environment settings ahead of database replacements', async () => {
+    const service = await loadService()
+    service.configureEnvironment({ source: 'direct' })
+    service.refreshFromSettings({ ...createSystemSettingsDefaults(), clientIpSource: 'x_forwarded_for', trustedProxyCidrs: '127.0.0.1/32' })
+    await expect(service.getEffectiveConfig()).resolves.toMatchObject({ source: 'direct', managedBy: 'environment' })
+    expect(mocks.getSettings).not.toHaveBeenCalled()
   })
 
   it('backs off after a database refresh failure instead of retrying on every request', async () => {

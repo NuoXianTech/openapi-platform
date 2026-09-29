@@ -11,6 +11,7 @@ import type {
   StoredServiceConfigurationValues
 } from '#shared/types/service-control'
 import { db, type DatabaseTransaction } from '~~/server/db/client'
+import { withCommittedTransaction } from '~~/server/utils/committed-transaction'
 import {
   openapiDocuments,
   upstreamServiceConnections,
@@ -183,7 +184,7 @@ export async function commitServiceControlContext<T>(
   operation: 'discovery' | 'configuration',
   commit: (tx: DatabaseTransaction, current: PlatformServiceControlContext, changedAt: Date) => Promise<T>
 ): Promise<T> {
-  return db.transaction(async (tx) => {
+  return withCommittedTransaction(async (tx) => {
     const current = await loadServiceControlContext(expected.service.id, {
       transaction: tx,
       forUpdate: true

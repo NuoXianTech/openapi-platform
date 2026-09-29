@@ -6,6 +6,7 @@ import {
   type RuntimeProxyConfigInput
 } from '~~/server/config/client-ip'
 import { systemSettingsService } from '~~/server/services/system-settings-service'
+import { createLocalSnapshot } from '~~/server/utils/local-snapshot'
 
 const DATABASE_CONFIG_TTL_MS = 5_000
 
@@ -39,14 +40,11 @@ function fromSystemSettings(settings: SystemSettings): EffectiveClientIpConfig {
 }
 
 let environmentConfig: EffectiveClientIpConfig | null = null
-let databaseSnapshot: { value: EffectiveClientIpConfig, expiresAt: number } | null = null
-let pendingDatabaseLoad: Promise<EffectiveClientIpConfig> | null = null
 let loggedDatabaseFailure = false
 
-async function loadDatabaseConfig(): Promise<EffectiveClientIpConfig> {
+async function loadDatabaseConfig(previous: EffectiveClientIpConfig | undefined): Promise<EffectiveClientIpConfig> {
   try {
     const value = fromSystemSettings(await systemSettingsService.getSettings())
-    databaseSnapshot = { value, expiresAt: Date.now() + DATABASE_CONFIG_TTL_MS }
     loggedDatabaseFailure = false
     return value
   } catch (error) {
@@ -56,12 +54,17 @@ async function loadDatabaseConfig(): Promise<EffectiveClientIpConfig> {
         error: error instanceof Error ? error.message : String(error)
       })
     }
-    const value = databaseSnapshot?.value ?? directDatabaseConfig(true)
+    const value = previous ?? directDatabaseConfig(true)
     // 数据库异常时短暂缓存旧值或安全回退，避免请求钩子在每个请求上重复访问故障数据库。
-    databaseSnapshot = { value, expiresAt: Date.now() + DATABASE_CONFIG_TTL_MS }
     return value
   }
 }
+
+const databaseSnapshot = createLocalSnapshot<string, EffectiveClientIpConfig>({
+  ttlMs: DATABASE_CONFIG_TTL_MS,
+  maxEntries: 1,
+  load: (_key, previous) => loadDatabaseConfig(previous)
+})
 
 export const clientIpConfigService = {
   configureEnvironment(input: RuntimeProxyConfigInput): void {
@@ -70,24 +73,11 @@ export const clientIpConfigService = {
 
   async getEffectiveConfig(): Promise<EffectiveClientIpConfig> {
     if (environmentConfig) return environmentConfig
-    if (databaseSnapshot && databaseSnapshot.expiresAt > Date.now()) {
-      return databaseSnapshot.value
-    }
-    if (pendingDatabaseLoad) return pendingDatabaseLoad
-
-    pendingDatabaseLoad = loadDatabaseConfig()
-    try {
-      return await pendingDatabaseLoad
-    } finally {
-      pendingDatabaseLoad = null
-    }
+    return databaseSnapshot.get('database')
   },
 
   refreshFromSettings(settings: SystemSettings): void {
-    databaseSnapshot = {
-      value: fromSystemSettings(settings),
-      expiresAt: Date.now() + DATABASE_CONFIG_TTL_MS
-    }
+    databaseSnapshot.replace('database', fromSystemSettings(settings))
     loggedDatabaseFailure = false
   }
 }

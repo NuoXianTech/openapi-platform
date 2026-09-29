@@ -1,4 +1,5 @@
-import { db, type DatabaseTransaction } from '~~/server/db/client'
+import type { DatabaseTransaction } from '~~/server/db/client'
+import { withCommittedTransaction } from '~~/server/utils/committed-transaction'
 import {
   invalidateRoutingPublicationCaches,
   lockPlatformRuntime,
@@ -40,7 +41,7 @@ export async function applyPlatformMutation<T>(
     applyRouteIds?: readonly string[]
   }>
 ) {
-  const committed = await db.transaction(async (tx: DatabaseTransaction) => {
+  const committed = await withCommittedTransaction(async (tx: DatabaseTransaction) => {
     await lockPlatformRuntime(tx)
     const mutation = await mutate(tx)
     const revision = mutation.publishRouting === false

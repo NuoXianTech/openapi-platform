@@ -1,117 +1,129 @@
-import { eq } from 'drizzle-orm'
+import { and, eq, isNull } from 'drizzle-orm'
+import type { DatabaseTransaction } from '~~/server/db/client'
 import { db } from '~~/server/db/client'
-import { upstreamServiceConnections } from '~~/server/db/schema'
-import { decryptStoredSecret } from '~~/server/utils/stored-secret'
+import { upstreamServiceConnections, upstreamServices } from '~~/server/db/schema'
+import { createApplicationError } from '~~/server/errors/application-error'
+import { decryptStoredSecret, encryptStoredSecret } from '~~/server/utils/stored-secret'
 import { firstRow } from '~~/server/utils/row'
+import { afterCommit } from '~~/server/utils/committed-transaction'
+import { createLocalSnapshot } from '~~/server/utils/local-snapshot'
 
+type ServiceConnection = typeof upstreamServiceConnections.$inferSelect
 const TOKEN_CACHE_TTL_MS = 5_000
 const MAX_TOKEN_CACHE_ENTRIES = 1_000
 
-interface TokenCacheEntry {
-  ciphertext: string
-  token: string
-  expiresAt: number
+function normalizeToken(value: string): string {
+  const token = value?.trim() ?? ''
+  if (token.length < 32 || token.length > 4096) {
+    throw createApplicationError({
+      statusCode: 400,
+      message: 'upstreams require a Service Token with 32 to 4096 characters',
+      data: { code: 'SERVICE_TOKEN_REQUIRED' }
+    })
+  }
+  return token
 }
 
-// The cache is deliberately process-local: plaintext Service Tokens never go
-// into Redis or another shared store.  A short TTL bounds cross-instance
-// staleness, while update/promote paths invalidate the local entry immediately.
-const activeTokenCache = new Map<string, TokenCacheEntry>()
-const controlTokenCache = new Map<string, TokenCacheEntry>()
-const pendingTokenLoads = new Map<string, Promise<string>>()
-const tokenCacheEpoch = new Map<string, number>()
-
-function pruneCache(cache: Map<string, TokenCacheEntry>): void {
-  const now = Date.now()
-  for (const [key, entry] of cache) {
-    if (entry.expiresAt <= now) cache.delete(key)
-  }
-  while (cache.size > MAX_TOKEN_CACHE_ENTRIES) {
-    const oldest = cache.keys().next().value as string | undefined
-    if (!oldest) break
-    cache.delete(oldest)
-  }
+// Plaintext is kept only in bounded process-local snapshots, never Redis.
+function tokenCache(includePending: boolean) {
+  return createLocalSnapshot<string, string>({
+    ttlMs: TOKEN_CACHE_TTL_MS,
+    maxEntries: MAX_TOKEN_CACHE_ENTRIES,
+    async load(id) {
+      const connection = firstRow(await db.select({
+        active: upstreamServiceConnections.serviceTokenCiphertext,
+        pending: upstreamServiceConnections.pendingServiceTokenCiphertext
+      }).from(upstreamServiceConnections)
+        .where(eq(upstreamServiceConnections.upstreamServiceId, id)).limit(1))
+      const ciphertext = includePending ? connection?.pending ?? connection?.active : connection?.active
+      return ciphertext ? decryptStoredSecret(ciphertext, 'service-token') : ''
+    }
+  })
 }
+const activeTokens = tokenCache(false)
+const controlTokens = tokenCache(true)
 
-async function loadToken(
-  upstreamServiceId: string,
-  includePending: boolean,
-  cache: Map<string, TokenCacheEntry>
-): Promise<string> {
-  const cached = cache.get(upstreamServiceId)
-  if (cached && cached.expiresAt > Date.now()) return cached.token
-  if (cached) cache.delete(upstreamServiceId)
-
-  const loadKey = `${includePending ? 'control' : 'active'}:${upstreamServiceId}`
-  const epoch = tokenCacheEpoch.get(loadKey) ?? 0
-  const pending = pendingTokenLoads.get(loadKey)
-  if (pending) return pending
-
-  const loading = (async () => {
-    const connection = firstRow(await db.select({
-      activeCiphertext: upstreamServiceConnections.serviceTokenCiphertext,
-      pendingCiphertext: upstreamServiceConnections.pendingServiceTokenCiphertext
-    }).from(upstreamServiceConnections)
-      .where(eq(
-        upstreamServiceConnections.upstreamServiceId,
-        upstreamServiceId
-      ))
-      .limit(1))
-    if (!connection) return ''
-
-    const ciphertext = includePending
-      ? connection.pendingCiphertext ?? connection.activeCiphertext
-      : connection.activeCiphertext
-    if (!ciphertext) return ''
-
-    const token = decryptStoredSecret(ciphertext, 'service-token')
-    // A rotation can complete while the database read is in flight. Do not
-    // let that old read repopulate a cache entry invalidated by the writer.
-    if ((tokenCacheEpoch.get(loadKey) ?? 0) === epoch) {
-      cache.set(upstreamServiceId, {
-        ciphertext,
-        token,
-        expiresAt: Date.now() + TOKEN_CACHE_TTL_MS
-      })
-      pruneCache(cache)
-    }
-    return token
-  })()
-  pendingTokenLoads.set(loadKey, loading)
-  try {
-    return await loading
-  } finally {
-    if (pendingTokenLoads.get(loadKey) === loading) {
-      pendingTokenLoads.delete(loadKey)
-    }
-  }
+function invalidateAfterCommit(tx: DatabaseTransaction, id: string): void {
+  afterCommit(tx, () => upstreamServiceTokenService.invalidate(id))
 }
 
 export const upstreamServiceTokenService = {
-  /** Token used by live Gateway traffic (the last verified active token). */
-  get(upstreamServiceId: string): Promise<string> {
-    return loadToken(upstreamServiceId, false, activeTokenCache)
+  async initialize(tx: DatabaseTransaction, id: string, value: string): Promise<ServiceConnection> {
+    const token = normalizeToken(value)
+    const connection = firstRow(await tx.insert(upstreamServiceConnections).values({
+      upstreamServiceId: id,
+      serviceTokenCiphertext: encryptStoredSecret(token, 'service-token')
+    }).returning())
+    if (!connection) throw new Error('Service connection insert returned no row')
+    invalidateAfterCommit(tx, id)
+    return connection
   },
 
-  /** Token used by discovery/configuration control calls (pending first). */
-  getForControl(upstreamServiceId: string): Promise<string> {
-    return loadToken(upstreamServiceId, true, controlTokenCache)
-  },
-
-  invalidate(upstreamServiceId: string): void {
-    activeTokenCache.delete(upstreamServiceId)
-    controlTokenCache.delete(upstreamServiceId)
-    for (const mode of ['active', 'control'] as const) {
-      const key = `${mode}:${upstreamServiceId}`
-      tokenCacheEpoch.set(key, (tokenCacheEpoch.get(key) ?? 0) + 1)
-      pendingTokenLoads.delete(key)
+  async stage(tx: DatabaseTransaction, id: string, value: string): Promise<ServiceConnection> {
+    const token = normalizeToken(value)
+    const service = firstRow(await tx.select({ id: upstreamServices.id }).from(upstreamServices)
+      .where(and(eq(upstreamServices.id, id), isNull(upstreamServices.deletedAt))).limit(1))
+    if (!service) {
+      throw createApplicationError({ statusCode: 404, message: 'upstream not found', data: { code: 'UPSTREAM_NOT_FOUND' } })
     }
+    const connection = firstRow(await tx.update(upstreamServiceConnections).set({
+      pendingServiceTokenCiphertext: encryptStoredSecret(token, 'service-token'),
+      lastDiscoveryError: 'Service Token changed; run discovery to verify the connection',
+      updatedAt: new Date()
+    }).where(eq(upstreamServiceConnections.upstreamServiceId, id)).returning())
+    if (!connection) {
+      throw createApplicationError({ statusCode: 404, message: 'upstream not found', data: { code: 'SERVICE_CONNECTION_NOT_FOUND' } })
+    }
+    invalidateAfterCommit(tx, id)
+    return connection
+  },
+
+  /** Discovery must verify this exact observed credential, even when another
+   * instance staged it more recently than the control cache TTL. */
+  forVerification(connection: Pick<ServiceConnection, 'serviceTokenCiphertext' | 'pendingServiceTokenCiphertext'>): string {
+    const ciphertext = connection.pendingServiceTokenCiphertext ?? connection.serviceTokenCiphertext
+    return ciphertext ? decryptStoredSecret(ciphertext, 'service-token') : ''
+  },
+
+  /** Called inside discovery's fingerprint-checked transaction. A mismatched
+   * pending credential cannot be promoted, even if a caller supplies stale data. */
+  async promoteVerified(tx: DatabaseTransaction, observed: ServiceConnection): Promise<ServiceConnection> {
+    const pending = observed.pendingServiceTokenCiphertext
+    if (!pending) return observed
+    const connection = firstRow(await tx.update(upstreamServiceConnections).set({
+      serviceTokenCiphertext: pending,
+      pendingServiceTokenCiphertext: null,
+      updatedAt: observed.updatedAt
+    }).where(and(
+      eq(upstreamServiceConnections.upstreamServiceId, observed.upstreamServiceId),
+      eq(upstreamServiceConnections.pendingServiceTokenCiphertext, pending)
+    )).returning())
+    if (!connection) {
+      throw createApplicationError({
+        statusCode: 409,
+        message: 'Service changed while discovery was running; retry discovery',
+        data: { code: 'SERVICE_DISCOVERY_CONFLICT' }
+      })
+    }
+    invalidateAfterCommit(tx, observed.upstreamServiceId)
+    return connection
+  },
+
+  get(id: string): Promise<string> {
+    return activeTokens.get(id)
+  },
+
+  getForControl(id: string): Promise<string> {
+    return controlTokens.get(id)
+  },
+
+  invalidate(id: string): void {
+    activeTokens.invalidate(id)
+    controlTokens.invalidate(id)
   },
 
   clearCache(): void {
-    activeTokenCache.clear()
-    controlTokenCache.clear()
-    pendingTokenLoads.clear()
-    tokenCacheEpoch.clear()
+    activeTokens.clear()
+    controlTokens.clear()
   }
 }

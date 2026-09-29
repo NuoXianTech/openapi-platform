@@ -5,6 +5,9 @@ import { drizzle } from 'drizzle-orm/pglite'
 import { migrate } from 'drizzle-orm/pglite/migrator'
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import * as schema from '~~/server/db/schema'
+import * as gatewayTargets from '~~/server/services/dynamic-gateway-target-service'
+import { withCommittedTransaction } from '~~/server/utils/committed-transaction'
+import { encryptStoredSecret } from '~~/server/utils/stored-secret'
 
 const testContext = vi.hoisted(() => ({ database: null as unknown }))
 
@@ -27,6 +30,7 @@ const { upstreamServiceTokenService } = await import(
   '~~/server/services/upstream-service-token-service'
 )
 const { routingRevisionService } = await import('~~/server/services/routing-revision-service')
+const { loadServiceControlContext, commitServiceControlContext } = await import('~~/server/services/platform-service-control-context')
 
 let client: PGlite
 let database: ReturnType<typeof drizzle<typeof schema>>
@@ -106,6 +110,103 @@ async function createActiveRoute(upstreamServiceId: string) {
 }
 
 describe('Platform upstream target state', () => {
+  it.each(['update', 'remove'] as const)('preserves Target health when %s is rolled back by publication failure', async (operation) => {
+    const target = await createConfiguredTarget()
+    const reset = vi.spyOn(gatewayTargets, 'resetGatewayTargetHealthForTarget')
+    vi.spyOn(routingRevisionService, 'publish').mockRejectedValueOnce(new Error('publication rejected'))
+    const mutation = operation === 'update'
+      ? platformUpstreamService.updateTargetAndPublish(target.id, { enabled: false }, null)
+      : platformUpstreamService.removeTargetAndPublish(target.id, null)
+    await expect(mutation).rejects.toThrow('publication rejected')
+    expect(reset).not.toHaveBeenCalled()
+    expect((await database.select().from(schema.upstreamTargets).where(eq(schema.upstreamTargets.id, target.id)))[0])
+      .toMatchObject({ id: target.id, enabled: true })
+  })
+
+  it.each(['update', 'remove'] as const)('clears Target health once, after the %s publication commits', async (operation) => {
+    const target = await createConfiguredTarget()
+    const reset = vi.spyOn(gatewayTargets, 'resetGatewayTargetHealthForTarget')
+    const publish = routingRevisionService.publish
+    vi.spyOn(routingRevisionService, 'publish').mockImplementation(async (...args) => {
+      expect(reset).not.toHaveBeenCalled()
+      return publish(...args)
+    })
+    if (operation === 'update') await platformUpstreamService.updateTargetAndPublish(target.id, { enabled: false }, null)
+    else await platformUpstreamService.removeTargetAndPublish(target.id, null)
+    expect(reset).toHaveBeenCalledExactlyOnceWith(target.upstreamServiceId, target.id)
+  })
+
+  it('also clears health for a standalone Target update after its transaction commits', async () => {
+    const target = await createConfiguredTarget()
+    const reset = vi.spyOn(gatewayTargets, 'resetGatewayTargetHealthForTarget')
+    await platformUpstreamService.updateTarget(target.id, { baseUrl: 'http://127.0.0.1:9090' })
+    expect(reset).toHaveBeenCalledExactlyOnceWith(target.upstreamServiceId, target.id)
+  })
+
+  it('promotes a verified Token and invalidates its cache only after the outer commit', async () => {
+    const target = await createConfiguredTarget()
+    const id = target.upstreamServiceId
+    const active = await upstreamServiceTokenService.get(id)
+    const replacement = 'replacement-token-to-verify-with-32-characters'
+    await platformUpstreamService.updateServiceToken(id, replacement)
+    await expect(upstreamServiceTokenService.get(id)).resolves.toBe(active)
+    const expected = await loadServiceControlContext(id)
+    const invalidate = vi.spyOn(upstreamServiceTokenService, 'invalidate')
+    await commitServiceControlContext(expected, 'discovery', async (tx, current) => {
+      const promoted = await upstreamServiceTokenService.promoteVerified(tx, current.connection)
+      expect(invalidate).not.toHaveBeenCalled()
+      await expect(upstreamServiceTokenService.get(id)).resolves.toBe(active)
+      return promoted
+    })
+    expect(invalidate).toHaveBeenCalledExactlyOnceWith(id)
+    await expect(upstreamServiceTokenService.get(id)).resolves.toBe(replacement)
+    await expect(upstreamServiceTokenService.getForControl(id)).resolves.toBe(replacement)
+    expect((await loadServiceControlContext(id)).connection.pendingServiceTokenCiphertext).toBeNull()
+  })
+
+  it('does not expose a promoted Token when the enclosing discovery transaction rolls back', async () => {
+    const target = await createConfiguredTarget()
+    const id = target.upstreamServiceId
+    const original = await upstreamServiceTokenService.get(id)
+    const replacement = 'replacement-token-to-verify-with-32-characters'
+    await platformUpstreamService.updateServiceToken(id, replacement)
+    const expected = await loadServiceControlContext(id)
+    const invalidate = vi.spyOn(upstreamServiceTokenService, 'invalidate')
+    await expect(commitServiceControlContext(expected, 'discovery', async (tx, current) => {
+      await upstreamServiceTokenService.promoteVerified(tx, current.connection)
+      throw new Error('Target persistence failed')
+    })).rejects.toThrow('Target persistence failed')
+    expect(invalidate).not.toHaveBeenCalled()
+    expect((await loadServiceControlContext(id)).connection).toEqual(expected.connection)
+    await expect(upstreamServiceTokenService.get(id)).resolves.toBe(original)
+    await expect(upstreamServiceTokenService.getForControl(id)).resolves.toBe(replacement)
+  })
+
+  it('verifies the observed Token rather than a control cache predating another instance rotation', async () => {
+    const target = await createConfiguredTarget()
+    const id = target.upstreamServiceId
+    const cached = await upstreamServiceTokenService.getForControl(id)
+    const replacement = 'externally-staged-token-with-at-least-32-characters'
+    await database.update(schema.upstreamServiceConnections).set({
+      pendingServiceTokenCiphertext: encryptStoredSecret(replacement, 'service-token')
+    }).where(eq(schema.upstreamServiceConnections.upstreamServiceId, id))
+    const observed = await loadServiceControlContext(id)
+    await expect(upstreamServiceTokenService.getForControl(id)).resolves.toBe(cached)
+    expect(upstreamServiceTokenService.forVerification(observed.connection)).toBe(replacement)
+  })
+
+  it('cannot promote a stale pending credential over a newer rotation', async () => {
+    const target = await createConfiguredTarget()
+    const id = target.upstreamServiceId
+    await platformUpstreamService.updateServiceToken(id, 'first-pending-token-with-at-least-32-characters')
+    const old = await loadServiceControlContext(id)
+    const replacement = 'second-pending-token-with-at-least-32-characters'
+    await platformUpstreamService.updateServiceToken(id, replacement)
+    await expect(withCommittedTransaction(tx => upstreamServiceTokenService.promoteVerified(tx, old.connection)))
+      .rejects.toMatchObject({ data: { code: 'SERVICE_DISCOVERY_CONFLICT' } })
+    await expect(upstreamServiceTokenService.getForControl(id)).resolves.toBe(replacement)
+  })
+
   it('commits metadata and a pending Token together while preserving the live credential', async () => {
     const target = await createConfiguredTarget()
     const id = target.upstreamServiceId
