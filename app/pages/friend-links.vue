@@ -63,24 +63,30 @@ const visibleCount = computed(() => filteredItems.value.length)
 <template>
   <div class="public-page">
     <CommonSiteHeader />
-    <main class="friend-links-main">
+    <main class="friend-links-main public-content">
       <CommonFriendLinksHero
         :total-count="totalCount"
         :active-count="activeCount"
+        :loading="loading"
+        :has-error="Boolean(error)"
       />
 
       <section class="friend-links-browser">
-        <div class="friend-links-toolbar">
+        <div class="friend-links-toolbar public-filter-panel">
           <div class="friend-links-search">
-            <CommonSearchBar
-              v-model="query"
-              :placeholder="t('public.friendLinks.searchPlaceholder')"
-              size="lg"
-            />
+            <span class="public-filter-label">{{ $t('public.friendLinks.searchLabel') }}</span>
+            <div class="public-search-control">
+              <CommonSearchBar
+                v-model="query"
+                :placeholder="t('public.friendLinks.searchPlaceholder')"
+                size="sm"
+                variant="none"
+              />
+            </div>
           </div>
 
           <div class="friend-links-status-filter">
-            <span class="friend-links-filter-label">
+            <span class="public-filter-label">
               <UIcon
                 name="i-mdi-pulse"
                 class="size-3.5"
@@ -128,16 +134,16 @@ const visibleCount = computed(() => filteredItems.value.length)
           <section
             v-if="resultState === 'loading'"
             key="loading"
-            class="grid gap-3.5 sm:grid-cols-2 lg:grid-cols-3"
+            class="grid gap-4 sm:grid-cols-2 lg:grid-cols-3"
             aria-hidden="true"
           >
-            <USkeleton v-for="index in 6" :key="index" class="h-44 rounded-lg" />
+            <USkeleton v-for="index in 6" :key="index" class="h-60 rounded-xl" />
           </section>
 
           <section
             v-else-if="resultState === 'error'"
             key="error"
-            class="friend-links-state"
+            class="public-empty"
           >
             <UEmpty
               icon="i-mdi-alert-circle-outline"
@@ -152,7 +158,7 @@ const visibleCount = computed(() => filteredItems.value.length)
           <section
             v-else-if="resultState === 'empty'"
             key="empty"
-            class="friend-links-state"
+            class="public-empty"
           >
             <UEmpty
               icon="i-mdi-link-variant-off"
@@ -166,7 +172,7 @@ const visibleCount = computed(() => filteredItems.value.length)
           <section
             v-else-if="resultState === 'filtered-empty'"
             key="filtered-empty"
-            class="friend-links-state"
+            class="public-empty"
           >
             <UEmpty
               icon="i-mdi-magnify-close"
@@ -193,90 +199,38 @@ const visibleCount = computed(() => filteredItems.value.length)
 </template>
 
 <style scoped>
-.friend-links-main {
-  width: calc(100% - 2rem);
-  max-width: 73.75rem;
-  flex: 1;
-  margin-inline: auto;
-  padding-block: 3.5rem 2rem;
-}
-
-.friend-links-browser {
-  margin-top: 3rem;
-}
-
-.friend-links-toolbar {
-  display: grid;
-  gap: 1rem;
-}
-
-.friend-links-search {
-  min-width: 0;
-}
-
-.friend-links-status-filter {
-  min-width: 0;
-}
-
-.friend-links-filter-label {
-  display: inline-flex;
-  margin-bottom: 0.45rem;
-  align-items: center;
-  gap: 0.35rem;
-  color: var(--ui-text-dimmed);
-  font-family: var(--font-code);
-  font-size: 0.62rem;
-  font-weight: 650;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-}
+.friend-links-browser { margin-top: 32px; }
+.friend-links-search,
+.friend-links-status-filter,
+.friend-links-results { min-width: 0; }
 
 .friend-links-result-meta {
   display: flex;
-  margin-block: 1.25rem 0.75rem;
   align-items: center;
   justify-content: space-between;
-  gap: 1rem;
+  gap: 16px;
+  margin-block: 32px 16px;
   color: var(--ui-text-muted);
-  font-size: 0.72rem;
+  font-size: 12px;
 }
 
 .friend-links-result-meta span {
   display: inline-flex;
   align-items: center;
-  gap: 0.4rem;
+  gap: 6px;
 }
 
-.friend-links-results {
-  min-width: 0;
-}
-
-.friend-links-result-state {
-  min-height: 16rem;
-}
-
-.friend-links-state {
-  padding-block: 3rem;
-}
+.friend-links-result-state { min-height: 280px; margin-top: 24px; }
+.friend-links-result-meta + .friend-links-result-state { margin-top: 0; }
 
 @media (width >= 800px) {
   .friend-links-toolbar {
-    grid-template-columns: minmax(0, 1fr) minmax(20rem, 22rem);
-    align-items: end;
+    grid-template-columns: minmax(0, 1fr) minmax(320px, 0.75fr);
+    align-items: start;
   }
 }
 
 @media (width < 640px) {
-  .friend-links-main {
-    padding-top: 2.75rem;
-  }
-
-  .friend-links-browser {
-    margin-top: 2.25rem;
-  }
-
-  .friend-links-result-hint {
-    display: none !important;
-  }
+  .friend-links-result-hint { display: none !important; }
 }
 </style>

@@ -10,13 +10,20 @@
     "home": {
       "defaultDescription": "A free platform for network data APIs",
       "introTitle": "Reliable, straightforward public APIs, ready to use",
+      "hero": {
+        "title": "Connect to possibility.",
+        "titleAccent": "Start with one API.",
+        "guide": "Read the quick start",
+        "request": "Example request",
+        "demoHint": "Simulated example. No usage credits required."
+      },
       "uptimeLabel": "Platform uptime",
       "uptimeLessThanDay": "Less than a day",
       "processedRequests": "Processed {count} API requests",
       "catalogDescription": "Find APIs by capability, status, and access cost, then inspect the request contract.",
       "popularKicker": "MOST USED",
       "popularTitle": "Popular APIs",
-      "popularDescription": "The most-used APIs from the last 30 days, with up to six shown.",
+      "popularDescription": "Find your next building block among the APIs developers used most in the last 30 days.",
       "viewAllApis": "View all {count} APIs",
       "popularEmptyTitle": "Explore the API catalog",
       "popularEmptyDescription": "Browse by category to find the capability you need, then view request parameters and usage details.",
@@ -141,6 +148,7 @@
       }
     },
     "stats": {
+      "kicker": "API ANALYTICS",
       "pageTitle": "Statistics",
       "seoTitle": "Usage statistics",
       "seoDescription": "Public API statistics including call counts, success rate, seven-day trends, and rankings.",
@@ -192,6 +200,8 @@
       }
     },
     "friendLinks": {
+      "kicker": "CONNECTED COMMUNITY",
+      "searchLabel": "Search sites",
       "title": "Partner links",
       "description": "Independent sites are information islands; partner links help connect them.",
       "seoDescription": "Partner links connecting independent websites.",

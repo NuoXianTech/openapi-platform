@@ -44,15 +44,10 @@ const isActive = computed(() => props.status === 1)
   <a
     :href="safeUrl"
     target="_blank"
-    rel="noopener"
+    rel="noopener noreferrer"
     class="link-card group"
     :class="{ 'link-card--inactive': !isActive }"
   >
-    <span
-      class="link-card__spotlight"
-      aria-hidden="true"
-    />
-
     <div class="link-card__top">
       <UAvatar
         :text="displayInitial"
@@ -60,10 +55,10 @@ const isActive = computed(() => props.status === 1)
         class="link-card__avatar"
       />
       <UBadge
-        :color="isActive ? 'success' : 'error'"
-        variant="soft"
+        :color="isActive ? 'neutral' : 'error'"
+        variant="outline"
         size="sm"
-        class="rounded-md"
+        class="link-card__status"
       >
         <span
           class="link-card__dot"
@@ -113,174 +108,122 @@ const isActive = computed(() => props.status === 1)
 
 <style scoped>
 .link-card {
-  position: relative;
   display: flex;
+  min-width: 0;
+  min-height: 240px;
   flex-direction: column;
-  gap: 12px;
-  border: 1px solid color-mix(in srgb, var(--ui-border) 86%, transparent);
-  background: var(--ui-bg-elevated);
-  border-radius: 8px;
-  padding: 16px;
-  text-decoration: none;
-  color: inherit;
+  gap: 24px;
+  padding: 24px;
   overflow: hidden;
-  isolation: isolate;
-  min-height: 168px;
-  transition: border-color 160ms ease, background-color 160ms ease;
-}
-
-.dark .link-card {
+  border: 1px solid var(--ui-border);
+  border-radius: 12px;
   background: var(--ui-bg-elevated);
+  color: var(--ui-text-highlighted);
+  text-decoration: none;
+  transition: border-color 160ms ease;
 }
 
-.link-card::after { display: none; }
+.link-card:hover { border-color: var(--ui-border-accented); }
+.link-card:focus-visible { outline: 2px solid var(--ui-ring); outline-offset: 4px; }
 
-.link-card:hover {
-  border-color: color-mix(in oklab, var(--ui-primary) 32%, var(--ui-border));
-  background: color-mix(in oklab, var(--ui-primary) 3%, var(--ui-bg-elevated));
-}
-
-.dark .link-card:hover {
-  box-shadow: none;
-}
-
-.link-card__spotlight {
-  position: absolute;
-  inset: -1px;
-  pointer-events: none;
-  border-radius: inherit;
-  background: transparent;
-  opacity: 0;
-  transition: opacity 240ms ease;
-  z-index: 0;
-}
-
-.link-card:hover .link-card__spotlight {
-  opacity: 1;
-}
-
-.link-card__top {
-  position: relative;
-  z-index: 1;
+.link-card__top,
+.link-card__footer {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   justify-content: space-between;
-  gap: 10px;
+  gap: 12px;
 }
 
 .link-card__avatar {
-  transition: border-color 160ms ease;
-  background: color-mix(in srgb, var(--ui-primary) 12%, transparent) !important;
-  color: var(--ui-text) !important;
-  border: 1px solid color-mix(in srgb, var(--ui-border) 82%, transparent);
+  border: 1px solid var(--ui-border);
+  border-radius: 6px;
+  background: var(--ui-bg);
+  color: var(--ui-text-highlighted);
 }
 
-.link-card:hover .link-card__avatar {
-  border-color: color-mix(in oklab, var(--ui-primary) 38%, var(--ui-border));
+.link-card__status {
+  gap: 6px;
+  padding: 0;
+  border-radius: 0;
+  background: transparent;
+  font-size: 11px;
+  font-weight: 400;
+  box-shadow: none;
 }
 
 .link-card__dot {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
+  width: 5px;
+  height: 5px;
   flex-shrink: 0;
-  display: inline-block;
-  margin-right: 4px;
+  border-radius: 50%;
 }
 
-.link-card__dot--ok {
-  background: var(--ui-success);
-  box-shadow: 0 0 0 2px color-mix(in srgb, var(--ui-success) 28%, transparent);
-}
-
-.link-card__dot--err {
-  background: var(--ui-error);
-  box-shadow: 0 0 0 2px color-mix(in srgb, var(--ui-error) 28%, transparent);
-}
+.link-card__dot--ok { background: var(--ui-text-toned); }
+.link-card__dot--err { background: var(--ui-error); }
 
 .link-card__body {
-  position: relative;
-  z-index: 1;
   display: flex;
-  flex-direction: column;
-  gap: 4px;
+  min-width: 0;
   flex: 1;
+  flex-direction: column;
+  gap: 8px;
 }
 
 .link-card__title {
   margin: 0;
-  font-size: 16px;
-  font-weight: 600;
-  letter-spacing: 0;
-  color: var(--ui-text);
-  line-height: 1.4;
-  display: -webkit-box;
-  -webkit-line-clamp: 1;
-  -webkit-box-orient: vertical;
   overflow: hidden;
+  color: var(--ui-text-highlighted);
+  font-size: 20px;
+  font-weight: 600;
+  line-height: 28px;
+  letter-spacing: -0.4px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .link-card__desc {
-  margin: 0;
-  font-size: 12.5px;
-  color: var(--ui-text-muted);
-  line-height: 1.55;
   display: -webkit-box;
+  margin: 0;
+  overflow: hidden;
+  color: var(--ui-text-muted);
+  font-size: 14px;
+  line-height: 22px;
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
-  overflow: hidden;
 }
 
 .link-card__footer {
-  position: relative;
-  z-index: 1;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-  padding-top: 10px;
-  border-top: 1px dashed var(--ui-border);
+  padding-top: 16px;
+  border-top: 1px solid var(--ui-border);
   font-size: 12px;
 }
 
 .link-card__host {
   display: inline-flex;
+  min-width: 0;
   align-items: center;
-  gap: 5px;
-  color: var(--ui-text-muted);
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  gap: 6px;
   overflow: hidden;
+  color: var(--ui-text-muted);
   text-overflow: ellipsis;
   white-space: nowrap;
-  min-width: 0;
 }
 
 .link-card__cta {
   display: inline-flex;
-  align-items: center;
-  gap: 3px;
-  color: var(--ui-text-muted);
-  font-weight: 500;
-  transition: color 200ms ease, gap 200ms ease;
   flex-shrink: 0;
-}
-
-.link-card:hover .link-card__cta {
-  color: var(--ui-text);
+  align-items: center;
   gap: 6px;
+  color: var(--ui-text-toned);
 }
 
-.link-card--inactive .link-card__avatar {
-  background: color-mix(in srgb, var(--ui-text-muted) 18%, transparent) !important;
-  color: var(--ui-text-muted) !important;
-}
-
-.link-card--inactive .link-card__title {
-  color: var(--ui-text-muted);
-}
+.link-card__cta :deep(.iconify) { transition: transform 160ms ease; }
+.link-card:hover .link-card__cta :deep(.iconify) { transform: translate(2px, -2px); }
+.link-card--inactive .link-card__avatar { color: var(--ui-text-muted); }
 
 @media (prefers-reduced-motion: reduce) {
-  .link-card__cta { transition: none; }
-  .link-card:hover .link-card__cta { gap: 3px; }
+  .link-card,
+  .link-card__cta :deep(.iconify) { transition: none; }
+  .link-card:hover .link-card__cta :deep(.iconify) { transform: none; }
 }
 </style>

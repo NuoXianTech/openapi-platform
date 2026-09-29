@@ -10,13 +10,20 @@
     "home": {
       "defaultDescription": "免费为用户提供网络数据接口调用的服务平台",
       "introTitle": "开发者需要的公共接口，一站式免费调用",
+      "hero": {
+        "title": "连接每一种可能。",
+        "titleAccent": "从一个 API 开始。",
+        "guide": "查看接入指南",
+        "request": "请求示例",
+        "demoHint": "模拟演示，不消耗调用额度"
+      },
       "uptimeLabel": "平台稳定运行",
       "uptimeLessThanDay": "不足 1 天",
       "processedRequests": "累计已处理 {count} 次接口请求",
       "catalogDescription": "按能力、状态和接入成本查找接口，打开详情即可查看请求契约。",
       "popularKicker": "MOST USED",
       "popularTitle": "热门接口",
-      "popularDescription": "展示近 30 天调用量最高的接口，最多六个。",
+      "popularDescription": "从开发者近 30 天最常调用的接口中，找到你的下一项能力。",
       "viewAllApis": "查看全部 {count} 个接口",
       "popularEmptyTitle": "探索接口目录",
       "popularEmptyDescription": "按分类查找所需能力，查看请求参数和调用说明。",
@@ -141,6 +148,7 @@
       }
     },
     "stats": {
+      "kicker": "API ANALYTICS",
       "pageTitle": "数据统计",
       "seoTitle": "调用统计",
       "seoDescription": "公开 API 调用统计：调用次数、成功率、近 7 日趋势及调用排行。",
@@ -192,6 +200,8 @@
       }
     },
     "friendLinks": {
+      "kicker": "CONNECTED COMMUNITY",
+      "searchLabel": "搜索站点",
       "title": "友情链接",
       "description": "每一个独立站点都是一个信息孤岛，交换友情链接就是一种很棒的架桥方式。",
       "seoDescription": "友情链接 — 每一个独立站点都是一个信息孤岛，交换友情链接就是一种很棒的架桥方式。",

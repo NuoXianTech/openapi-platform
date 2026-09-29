@@ -99,6 +99,7 @@ function selectFromPopover(value: string | number) {
         size="sm"
         class="filter-tab cursor-pointer"
         :class="{ 'is-active': isActive(tab.value) }"
+        :aria-pressed="isActive(tab.value)"
         :ui="{ label: 'truncate' }"
         @click="selectTab(tab.value)"
       >
@@ -143,6 +144,7 @@ function selectFromPopover(value: string | number) {
                 type="button"
                 class="filter-tabs-option"
                 :class="{ 'is-active': isActive(tab.value) }"
+                :aria-pressed="isActive(tab.value)"
                 @click="selectFromPopover(tab.value)"
               >
                 <span class="truncate">{{ tab.label }}</span>

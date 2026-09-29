@@ -64,6 +64,7 @@ const emptyActions = computed(() => [{
         color="neutral"
         variant="outline"
         trailing-icon="i-mdi-arrow-right"
+        class="popular-apis__browse"
       >
         {{ $t('public.home.viewAllApis', { count: props.totalApiCount }) }}
       </UButton>
@@ -79,7 +80,7 @@ const emptyActions = computed(() => [{
         <USkeleton
           v-for="index in 6"
           :key="index"
-          class="h-52 w-full rounded-lg"
+          class="h-60 w-full rounded-xl"
         />
       </div>
 
@@ -117,10 +118,11 @@ const emptyActions = computed(() => [{
 
 <style scoped>
 .popular-apis {
-  width: calc(100% - 2rem);
+  scroll-margin-top: 96px;
+  width: calc(100% - 48px);
   max-width: 1180px;
   margin-inline: auto;
-  padding-block: 4.5rem;
+  padding-block: 72px;
 }
 
 .popular-apis__heading {
@@ -132,20 +134,21 @@ const emptyActions = computed(() => [{
 
 .popular-apis__kicker {
   display: block;
-  margin-bottom: 0.4rem;
-  color: var(--ui-text-highlighted);
+  margin-bottom: 16px;
+  color: var(--ui-text-dimmed);
   font-family: var(--font-code);
-  font-size: 0.65rem;
-  font-weight: 700;
-  letter-spacing: 0.08em;
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: 0;
 }
 
 .popular-apis h2 {
   margin: 0;
   color: var(--ui-text-highlighted);
-  font-size: clamp(1.75rem, 4vw, 2.25rem);
-  font-weight: 650;
-  line-height: 1.2;
+  font-size: 32px;
+  font-weight: 600;
+  line-height: 40px;
+  letter-spacing: -1.28px;
 }
 
 .popular-apis p {
@@ -157,7 +160,7 @@ const emptyActions = computed(() => [{
 }
 
 .popular-apis__results {
-  margin-top: 2rem;
+  margin-top: 32px;
   min-height: 16rem;
 }
 
@@ -167,6 +170,18 @@ const emptyActions = computed(() => [{
   gap: 1rem;
 }
 
+.popular-apis__browse {
+  min-height: 44px;
+  border-radius: 100px;
+  padding-inline: 20px;
+  background: var(--ui-bg-elevated);
+}
+.popular-apis__state {
+  min-height: 240px;
+  border: 1px solid var(--ui-border);
+  border-radius: 12px;
+  background: var(--ui-bg-elevated);
+}
 @media (width >= 640px) {
   .popular-apis__grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -181,7 +196,8 @@ const emptyActions = computed(() => [{
 
 @media (width < 640px) {
   .popular-apis {
-    padding-block: 3.5rem;
+    width: calc(100% - 32px);
+    padding-block: 64px;
   }
 
   .popular-apis__heading {

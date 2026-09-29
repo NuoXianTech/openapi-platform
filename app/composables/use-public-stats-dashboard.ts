@@ -1,6 +1,6 @@
 import type { PublicCallStatsDashboard } from '#shared/types/public-stats'
 import type { DashboardMetricTone } from '~/types/dashboard-metric'
-import { formatCompactCount, formatCount, formatPercent } from '~/utils/number-format'
+import { formatCompactCount, formatCount as formatLocalizedCount, formatPercent } from '~/utils/number-format'
 
 interface PublicStatsOverviewCard {
   key: string
@@ -21,6 +21,8 @@ function roundPercent(value: number): number {
 
 export function usePublicStatsDashboard() {
   const { t, locale } = useI18n()
+  const formatCount = (value: number) => formatLocalizedCount(value, locale.value)
+  const formatCompact = (value: number) => formatCompactCount(value, locale.value)
   const {
     data: requestData,
     pending: isPending,
@@ -56,9 +58,11 @@ export function usePublicStatsDashboard() {
     return t('public.stats.comparedYesterday', { value: `${prefix}${formatCount(todayDelta.value)}` })
   })
 
-  const failureRate = computed(() => roundPercent(clampPercent(
-    100 - (overview.value?.successRate ?? 0)
-  )))
+  const failureRate = computed(() => {
+    const total = overview.value?.totalCalls ?? 0
+    if (total <= 0) return 0
+    return roundPercent(clampPercent(((overview.value?.failureCalls ?? 0) / total) * 100))
+  })
   const trackedApiRatio = computed(() => {
     if (!overview.value?.trackedApiCount) return 0
     return roundPercent(clampPercent(
@@ -155,7 +159,7 @@ export function usePublicStatsDashboard() {
 
   return {
     error,
-    formatCompact: formatCompactCount,
+    formatCompact,
     formatCount,
     formatRate: formatPercent,
     generatedAtLabel,

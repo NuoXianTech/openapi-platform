@@ -109,18 +109,17 @@ useSeoMeta({
 </script>
 
 <template>
-  <div class="public-page">
+  <div class="public-page home-page">
     <CommonSiteHeader />
-    <CommonPublicApiIntro
-      :site-description="settings.siteDescription"
-      :uptime-days="settings.uptimeDays"
-      :show-call-count="settings.homeRequestCountEnabled"
-      :call-count="totalCallCount"
-      :summary-loading="introSummaryLoading"
-      :summary-error="introSummaryError"
-    />
-
     <main>
+      <CommonPublicApiIntro
+        :site-description="settings.siteDescription"
+        :uptime-days="settings.uptimeDays"
+        :show-call-count="settings.homeRequestCountEnabled"
+        :call-count="totalCallCount"
+        :summary-loading="introSummaryLoading"
+        :summary-error="introSummaryError"
+      />
       <HomePopularApis
         :apis="popularApis"
         :category-map="categoryMap"
@@ -141,14 +140,3 @@ useSeoMeta({
     </Suspense>
   </div>
 </template>
-
-<style scoped>
-.public-page {
-  min-height: 100dvh;
-  background: var(--ui-bg);
-}
-
-.public-page > .home-footer {
-  margin-top: 0;
-}
-</style>

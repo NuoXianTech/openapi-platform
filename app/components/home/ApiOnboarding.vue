@@ -68,6 +68,9 @@ async function copyCodeSnippet(value: string): Promise<void> {
             </div>
           </li>
         </ol>
+        <UButton to="/docs" color="neutral" variant="link" trailing-icon="i-lucide-arrow-right" class="api-onboarding__guide">
+          {{ $t('public.home.hero.guide') }}
+        </UButton>
       </div>
 
       <div class="api-onboarding__examples">
@@ -89,7 +92,7 @@ async function copyCodeSnippet(value: string): Promise<void> {
               />
             </UTooltip>
           </header>
-          <pre><code>{{ curlSnippet }}</code></pre>
+          <pre tabindex="0" :aria-label="$t('public.home.curlExample')"><code>{{ curlSnippet }}</code></pre>
         </article>
 
         <article class="api-onboarding-code">
@@ -110,7 +113,7 @@ async function copyCodeSnippet(value: string): Promise<void> {
               />
             </UTooltip>
           </header>
-          <pre><code>{{ responseSnippet }}</code></pre>
+          <pre tabindex="0" :aria-label="$t('public.home.responseExample')"><code>{{ responseSnippet }}</code></pre>
         </article>
       </div>
     </div>
@@ -119,17 +122,18 @@ async function copyCodeSnippet(value: string): Promise<void> {
 
 <style scoped>
 .api-onboarding {
+  scroll-margin-top: 96px;
   border-block: 1px solid var(--ui-border);
-  background: color-mix(in oklab, var(--ui-bg-elevated) 72%, var(--ui-bg-muted));
+  background: var(--ui-bg-elevated);
 }
 
 .api-onboarding__layout {
   display: grid;
-  width: calc(100% - 2rem);
+  width: calc(100% - 48px);
   max-width: 1180px;
   margin-inline: auto;
   gap: 3.5rem;
-  padding-block: 4.5rem;
+  padding-block: 72px;
 }
 
 .api-onboarding__content {
@@ -138,20 +142,21 @@ async function copyCodeSnippet(value: string): Promise<void> {
 
 .api-onboarding__kicker {
   display: block;
-  margin-bottom: 0.4rem;
-  color: var(--ui-text-highlighted);
+  margin-bottom: 16px;
+  color: var(--ui-text-dimmed);
   font-family: var(--font-code);
-  font-size: 0.65rem;
-  font-weight: 700;
-  letter-spacing: 0.08em;
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: 0;
 }
 
 .api-onboarding h2 {
   margin: 0;
   color: var(--ui-text-highlighted);
-  font-size: clamp(1.75rem, 4vw, 2.25rem);
-  font-weight: 650;
-  line-height: 1.2;
+  font-size: 32px;
+  font-weight: 600;
+  line-height: 40px;
+  letter-spacing: -1.28px;
 }
 
 .api-onboarding__description {
@@ -165,8 +170,8 @@ async function copyCodeSnippet(value: string): Promise<void> {
 .api-onboarding__steps {
   position: relative;
   display: grid;
-  gap: 1.5rem;
-  margin: 2rem 0 0;
+  gap: 24px;
+  margin: 32px 0 0;
   padding: 0;
   list-style: none;
 }
@@ -194,20 +199,20 @@ async function copyCodeSnippet(value: string): Promise<void> {
   width: 2.15rem;
   height: 2.15rem;
   place-items: center;
-  border: 1px solid var(--ui-primary);
-  border-radius: 7px;
-  color: var(--ui-bg);
-  background: var(--ui-primary);
+  border: 1px solid var(--ui-border);
+  border-radius: 100px;
+  color: var(--ui-text-toned);
+  background: var(--ui-bg-elevated);
   font-family: var(--font-code);
   font-size: 0.72rem;
-  font-weight: 700;
+  font-weight: 500;
 }
 
 .api-onboarding-step h3 {
   margin: 0;
   color: var(--ui-text-highlighted);
   font-size: 0.925rem;
-  font-weight: 650;
+  font-weight: 500;
   line-height: 1.4;
 }
 
@@ -228,7 +233,7 @@ async function copyCodeSnippet(value: string): Promise<void> {
   min-width: 0;
   overflow: hidden;
   border: 1px solid var(--ui-border);
-  border-radius: 8px;
+  border-radius: 12px;
   background: var(--ui-bg-elevated);
 }
 
@@ -248,7 +253,7 @@ async function copyCodeSnippet(value: string): Promise<void> {
   gap: 0.5rem;
   color: var(--ui-text-toned);
   font-size: 0.75rem;
-  font-weight: 650;
+  font-weight: 500;
 }
 
 .api-onboarding-code__signal {
@@ -256,7 +261,6 @@ async function copyCodeSnippet(value: string): Promise<void> {
   height: 0.45rem;
   border-radius: 999px;
   background: var(--ui-primary);
-  box-shadow: 0 0 0 3px color-mix(in oklab, var(--ui-primary) 10%, transparent);
 }
 
 .api-onboarding-code pre {
@@ -265,9 +269,20 @@ async function copyCodeSnippet(value: string): Promise<void> {
   overflow: auto;
   padding: 1rem;
   color: var(--ui-text-toned);
-  background: color-mix(in oklab, var(--ui-bg-muted) 74%, var(--ui-bg-elevated));
-  font-size: 0.75rem;
+  background: var(--ui-bg);
+  font-size: 13px;
   line-height: 1.7;
+}
+
+.api-onboarding__guide {
+  min-height: 44px;
+  margin-top: 24px;
+  padding-left: 0;
+  color: var(--ui-text-highlighted);
+}
+.api-onboarding-code pre:focus-visible {
+  outline: 2px solid var(--ui-ring);
+  outline-offset: -2px;
 }
 
 @media (width >= 960px) {
@@ -280,8 +295,9 @@ async function copyCodeSnippet(value: string): Promise<void> {
 
 @media (width < 640px) {
   .api-onboarding__layout {
+    width: calc(100% - 32px);
     gap: 2.5rem;
-    padding-block: 3.5rem;
+    padding-block: 64px;
   }
 
   .api-onboarding-code pre {

@@ -30,7 +30,8 @@
 
     <UCard
       variant="subtle"
-      :ui="{ body: 'p-4 sm:p-5' }"
+      class="stats-skeleton-panel"
+      :ui="{ body: 'p-4 sm:p-6', header: 'p-4 sm:p-6' }"
       aria-hidden="true"
     >
       <template #header>
@@ -56,7 +57,8 @@
 
     <UCard
       variant="subtle"
-      :ui="{ body: 'p-4 sm:p-5' }"
+      class="stats-skeleton-panel"
+      :ui="{ body: 'p-4 sm:p-6', header: 'p-4 sm:p-6' }"
       aria-hidden="true"
     >
       <template #header>
@@ -97,32 +99,36 @@
 <style scoped>
 .stats-dashboard-skeleton {
   display: grid;
-  gap: 1rem;
+  gap: 24px;
 }
 
 .stats-dashboard-skeleton__metrics {
   display: grid;
-  gap: 0.75rem;
+  gap: 16px;
 }
 
-.metric-skeleton {
-  min-height: 8rem;
+.metric-skeleton,
+.stats-skeleton-panel {
+  border: 1px solid var(--ui-border);
+  border-radius: 12px;
+  background: var(--ui-bg-elevated);
+  box-shadow: none;
 }
 
 .metric-skeleton__content {
   display: flex;
-  min-height: 5.5rem;
+  min-height: 108px;
   align-items: flex-start;
   gap: 0.75rem;
-  padding: 0.75rem;
+  padding: 20px;
 }
 
 .metric-skeleton__footer {
   display: flex;
-  min-height: 2.5rem;
+  min-height: 44px;
   align-items: center;
   border-top: 1px solid var(--ui-border-muted);
-  padding-inline: 0.75rem;
+  padding-inline: 20px;
 }
 
 .trend-summary-skeleton {
@@ -177,11 +183,11 @@
   }
 
   .metric-skeleton__content {
-    padding: 1rem;
+    padding: 24px;
   }
 
   .metric-skeleton__footer {
-    padding-inline: 1rem;
+    padding-inline: 24px;
   }
 
   .trend-summary-skeleton {

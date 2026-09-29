@@ -67,6 +67,7 @@ defineShortcuts({
     ref="inputComp"
     :model-value="props.modelValue"
     :placeholder="resolvedPlaceholder"
+    :aria-label="resolvedPlaceholder"
     :size="props.size"
     :variant="props.variant"
     icon="i-mdi-magnify"

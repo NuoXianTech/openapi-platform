@@ -188,7 +188,7 @@ function preventDetailsAutoFocus(event: Event) {
     }"
     :ui="{
       overlay: 'bg-elevated/75',
-      content: 'sm:max-w-2xl overflow-hidden rounded-lg divide-y-0 bg-elevated',
+      content: 'sm:max-w-2xl overflow-hidden rounded-xl divide-y-0 bg-elevated',
       header: 'items-start gap-3 border-b border-default py-4 ps-4 pe-14 sm:px-6 sm:pe-16',
       wrapper: 'min-w-0 flex-1',
       title: 'block min-w-0',
@@ -480,7 +480,7 @@ function preventDetailsAutoFocus(event: Event) {
   color: var(--ui-text-highlighted);
   font-family: var(--font-display);
   font-size: 1.25rem;
-  font-weight: 680;
+  font-weight: 600;
   letter-spacing: 0;
   line-height: 1.25;
   overflow-wrap: anywhere;

@@ -32,7 +32,7 @@ const props = withDefaults(defineProps<LinkListProps>(), {
 .link-grid {
   display: grid;
   grid-template-columns: repeat(1, minmax(0, 1fr));
-  gap: 14px;
+  gap: 16px;
   align-items: stretch;
 }
 

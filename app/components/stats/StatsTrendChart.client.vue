@@ -43,7 +43,7 @@ const successAccessor = (row: TrendRow) => row.success
 const failureAccessor = (row: TrendRow) => row.failure
 
 // 准星圆点配色，按 y 访问器顺序对应成功 / 失败
-const crosshairColors = ['var(--ui-success)', 'var(--ui-error)'] as const
+const crosshairColors = ['var(--ui-text-highlighted)', 'var(--ui-error)'] as const
 const xTickFormat = createChartIndexedTickFormatter(() => rows.value, row => row.label)
 const yTickFormat = formatChartIntegerTick
 
@@ -57,7 +57,7 @@ function tooltipTemplate(datum: TrendRow | undefined) {
   return renderChartTooltip({
     title: datum.fullLabel,
     rows: [
-      { color: 'var(--ui-success)', label: t('public.stats.chart.success'), value: formatCount(datum.success) },
+      { color: 'var(--ui-text-highlighted)', label: t('public.stats.chart.success'), value: formatCount(datum.success) },
       { color: 'var(--ui-error)', label: t('public.stats.chart.failure'), value: formatCount(datum.failure) }
     ],
     footer: [
@@ -92,20 +92,20 @@ function tooltipTemplate(datum: TrendRow | undefined) {
         <VisArea
           :x="x"
           :y="successAccessor"
-          color="var(--ui-success)"
-          :opacity="0.12"
+          color="var(--ui-text-highlighted)"
+          :opacity="0.06"
         />
         <VisLine
           :x="x"
           :y="successAccessor"
-          color="var(--ui-success)"
-          :line-width="2.8"
+          color="var(--ui-text-highlighted)"
+          :line-width="2"
         />
         <VisLine
           :x="x"
           :y="failureAccessor"
           color="var(--ui-error)"
-          :line-width="2.4"
+          :line-width="2"
         />
         <VisAxis
           type="y"
@@ -133,7 +133,7 @@ function tooltipTemplate(datum: TrendRow | undefined) {
 
       <div class="mt-4 flex flex-wrap items-center gap-4 text-xs text-muted">
         <span class="inline-flex items-center gap-1.5">
-          <span class="size-2 rounded-full bg-success" />
+          <span class="size-2 rounded-full bg-primary" />
           {{ $t('public.stats.chart.successCount') }}
         </span>
         <span class="inline-flex items-center gap-1.5">

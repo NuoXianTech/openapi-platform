@@ -106,11 +106,12 @@ async function handleLocaleChange(nextLocale: SupportedLocale): Promise<void> {
             icon="i-mdi-translate"
             :loading="isChangingLocale"
             :aria-label="$t('public.navigation.language')"
+            class="site-header__icon-action"
           />
         </UDropdownMenu>
 
         <ClientOnly>
-          <UColorModeButton color="neutral" variant="ghost" size="sm" />
+          <UColorModeButton color="neutral" variant="ghost" size="sm" class="site-header__icon-action" />
           <template #fallback>
             <UButton
               color="neutral"
@@ -119,6 +120,7 @@ async function handleLocaleChange(nextLocale: SupportedLocale): Promise<void> {
               square
               disabled
               icon="i-mdi-theme-light-dark"
+              class="site-header__icon-action"
             />
           </template>
         </ClientOnly>
@@ -131,7 +133,7 @@ async function handleLocaleChange(nextLocale: SupportedLocale): Promise<void> {
               variant="ghost"
               size="sm"
               :icon="dashboardIcon"
-              class="hidden sm:inline-flex"
+              class="site-header__text-action hidden sm:inline-flex"
             >
               {{ dashboardLabel }}
             </UButton>
@@ -143,7 +145,7 @@ async function handleLocaleChange(nextLocale: SupportedLocale): Promise<void> {
                 square
                 icon="i-mdi-logout"
                 :aria-label="$t('public.home.logout')"
-                class="hidden sm:inline-flex"
+                class="site-header__icon-action hidden sm:inline-flex"
                 @click="handleLogout"
               />
             </UTooltip>
@@ -154,7 +156,7 @@ async function handleLocaleChange(nextLocale: SupportedLocale): Promise<void> {
               color="neutral"
               variant="ghost"
               size="sm"
-              class="hidden sm:inline-flex"
+              class="site-header__text-action hidden sm:inline-flex"
             >
               {{ $t('auth.login.title') }}
             </UButton>
@@ -163,7 +165,7 @@ async function handleLocaleChange(nextLocale: SupportedLocale): Promise<void> {
               to="/register"
               size="sm"
               icon="i-mdi-rocket-launch-outline"
-              class="hidden sm:inline-flex"
+              class="site-header__text-action hidden sm:inline-flex"
             >
               {{ $t('public.navigation.getStarted') }}
             </UButton>
@@ -174,7 +176,7 @@ async function handleLocaleChange(nextLocale: SupportedLocale): Promise<void> {
               color="neutral"
               variant="ghost"
               size="sm"
-              class="hidden sm:inline-flex"
+              class="site-header__text-action hidden sm:inline-flex"
             >
               {{ $t('auth.login.title') }}
             </UButton>
@@ -183,7 +185,7 @@ async function handleLocaleChange(nextLocale: SupportedLocale): Promise<void> {
               to="/register"
               size="sm"
               icon="i-mdi-rocket-launch-outline"
-              class="hidden sm:inline-flex"
+              class="site-header__text-action hidden sm:inline-flex"
             >
               {{ $t('public.navigation.getStarted') }}
             </UButton>
@@ -193,12 +195,12 @@ async function handleLocaleChange(nextLocale: SupportedLocale): Promise<void> {
         <UDropdownMenu :items="mobileItems" :content="{ align: 'end' }" :ui="{ content: 'w-56' }">
           <UButton
             color="neutral"
-            variant="outline"
+            variant="ghost"
             size="sm"
             square
             icon="i-mdi-menu"
             :aria-label="$t('public.navigation.openMenu')"
-            class="md:hidden"
+            class="site-header__icon-action site-header__menu md:hidden"
           />
         </UDropdownMenu>
       </div>

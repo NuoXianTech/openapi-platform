@@ -102,17 +102,18 @@ const retryActions = computed(() => [{
   <div class="public-page">
     <CommonSiteHeader />
     <main
-      class="stats-page"
+      class="stats-page public-content"
       :aria-busy="isInitialLoading"
     >
-      <section class="stats-hero">
-        <div class="relative py-5 lg:py-6">
+      <section class="stats-hero public-page-heading">
+        <div class="stats-hero__inner">
           <div class="stats-hero__layout">
             <div class="stats-hero__copy">
+              <span class="public-eyebrow">{{ $t('public.stats.kicker') }}</span>
               <h1 class="stats-hero__title">
                 {{ $t('public.stats.heroTitle') }}
               </h1>
-              <p class="mt-2 max-w-xl text-sm leading-relaxed text-muted sm:text-[15px]">
+              <p class="stats-hero__description">
                 {{ $t('public.stats.heroDescription') }}
               </p>
               <div class="stats-hero__meta">
@@ -136,10 +137,10 @@ const retryActions = computed(() => [{
                 </span>
                 <UButton
                   icon="i-lucide-refresh-cw"
-                  variant="subtle"
+                  variant="outline"
                   color="neutral"
                   size="sm"
-                  class="min-w-28 justify-center tabular-nums"
+                  class="stats-hero__refresh min-w-28 justify-center tabular-nums"
                   :loading="isPending"
                   :disabled="refreshDisabled"
                   :label="refreshButtonLabel"
@@ -172,7 +173,7 @@ const retryActions = computed(() => [{
 
                   <CommonHeroStatCard
                     icon="i-mdi-check-decagram-outline"
-                    icon-tone="blue"
+                    icon-tone="ink"
                   >
                     <template #value>
                       {{ overview ? formatRate(overview.successRate) : '--' }}
@@ -182,7 +183,7 @@ const retryActions = computed(() => [{
 
                   <CommonHeroStatCard
                     icon="i-mdi-trophy-outline"
-                    icon-tone="violet"
+                    icon-tone="ink"
                     :value-title="topApi?.name"
                     :label-title="topApi?.name"
                   >
@@ -222,24 +223,24 @@ const retryActions = computed(() => [{
               :label="item.label"
               :value="item.value"
               :icon="item.icon"
-              :tone="item.tone"
+              tone="ink"
               :meta="item.helper"
               compact
             />
           </div>
 
-          <div class="mt-4 space-y-4">
+          <div class="stats-panels">
             <UCard
               variant="subtle"
               class="stats-panel"
-              :ui="{ body: 'p-4 sm:p-5' }"
+              :ui="{ body: 'p-4 sm:p-6', header: 'p-4 sm:p-6' }"
             >
               <template #header>
                 <div>
-                  <h2 class="text-base font-semibold text-highlighted">
+                  <h2 class="stats-panel__title">
                     {{ $t('public.stats.trendTitle') }}
                   </h2>
-                  <p class="mt-0.5 text-sm text-muted">
+                  <p class="stats-panel__description">
                     {{ $t('public.stats.trendDescription') }}
                   </p>
                 </div>
@@ -285,14 +286,14 @@ const retryActions = computed(() => [{
             <UCard
               variant="subtle"
               class="stats-panel"
-              :ui="{ body: 'p-4 sm:p-5' }"
+              :ui="{ body: 'p-4 sm:p-6', header: 'p-4 sm:p-6' }"
             >
               <template #header>
                 <div>
-                  <h2 class="text-base font-semibold text-highlighted">
+                  <h2 class="stats-panel__title">
                     {{ $t('public.stats.rankingTitle') }}
                   </h2>
-                  <p class="mt-0.5 text-sm text-muted">
+                  <p class="stats-panel__description">
                     {{ $t('public.stats.rankingDescription', { count: rankingLast30d.length || 10 }) }}
                   </p>
                 </div>
@@ -309,174 +310,156 @@ const retryActions = computed(() => [{
 </template>
 
 <style scoped>
-.stats-page {
-  width: calc(100% - 2rem);
-  max-width: 73.75rem;
-  flex: 1;
-  margin-inline: auto;
-  padding-block: 3.5rem 2rem;
-}
-
-.stats-content {
-  margin-top: 1rem;
-}
-
-.stats-metrics-grid {
-  display: grid;
-  gap: 0.75rem;
-}
-
-.stats-hero {
-  position: relative;
-  overflow: hidden;
-  border-bottom: 1px solid var(--ui-border);
-  isolation: isolate;
-}
-
-.stats-hero__title {
-  margin: 0;
-  color: var(--ui-text-highlighted);
-  font-size: clamp(2rem, 5vw, 2.75rem);
-  font-weight: 650;
-  line-height: 1.15;
-}
+.stats-content { margin-top: 32px; }
 
 .stats-hero__layout {
   display: grid;
-  grid-template-areas:
-    "copy"
-    "aside";
-  gap: 16px;
+  align-items: center;
+  gap: 32px;
 }
 
-.stats-hero__copy {
-  grid-area: copy;
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-}
+.stats-hero__copy,
+.stats-hero__aside { min-width: 0; }
 
 .stats-hero__meta {
-  margin-top: 20px;
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 12px;
-  font-size: 12px;
+  gap: 16px;
+  margin-top: 24px;
   color: var(--ui-text-muted);
+  font-size: 12px;
 }
 
-.stats-hero__aside {
-  grid-area: aside;
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
-}
-
-.stats-hero__stats {
-  min-width: 0;
+.stats-hero__refresh {
+  min-height: 44px;
+  border-radius: 6px;
+  background: var(--ui-bg-elevated);
 }
 
 .stats-hero__stats :deep(.hero-stat-card) {
-  padding: 10px 10px 11px;
+  gap: 8px;
+  padding: 20px 16px;
+  border-color: var(--ui-border);
+  border-radius: 12px;
+  background: var(--ui-bg-elevated);
 }
 
 .stats-hero__stats :deep(.hero-stat-card__icon) {
   width: 24px;
   height: 24px;
-  margin-bottom: 3px;
+  margin-bottom: 4px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--ui-text-muted);
+  box-shadow: none;
 }
 
 .stats-hero__stats :deep(.hero-stat-card__value) {
-  font-size: 20px;
+  font-size: 28px;
+  font-weight: 600;
+  line-height: 1.2;
+  letter-spacing: -0.8px;
 }
+
+.stats-hero__stats :deep(.hero-stat-card__label) { font-size: 12px; }
+
+.stats-metrics-grid {
+  display: grid;
+  gap: 16px;
+}
+
+.stats-metrics-grid :deep(.dashboard-metric-card) {
+  border: 1px solid var(--ui-border);
+  border-radius: 12px;
+  background: var(--ui-bg-elevated);
+  box-shadow: none;
+}
+
+.stats-metrics-grid :deep(.dashboard-metric-card__content) {
+  min-height: 108px;
+  padding: 24px;
+}
+
+.stats-metrics-grid :deep(.dashboard-metric-card-value) {
+  margin-top: 8px;
+  font-size: 28px;
+  font-weight: 600;
+  letter-spacing: -0.8px;
+}
+
+.stats-metrics-grid :deep(.dashboard-metric-card-icon) {
+  width: 24px;
+  height: 24px;
+  border: 0;
+  background: transparent;
+  color: var(--ui-text-muted);
+  box-shadow: none;
+}
+
+.stats-metrics-grid :deep(.dashboard-metric-card__footer) {
+  padding: 12px 24px;
+  border-color: var(--ui-border);
+  background: var(--ui-bg-elevated);
+}
+
+.stats-panels { display: grid; gap: 24px; margin-top: 24px; }
 
 .stats-panel {
   overflow: hidden;
+  border-color: var(--ui-border);
+  border-radius: 12px;
+  background: var(--ui-bg-elevated);
+  box-shadow: none;
 }
 
-.stats-summary-strip {
-  display: grid;
-  border-block: 1px solid var(--ui-border-muted);
-}
-
-.stats-summary-strip > div {
-  min-width: 0;
-  padding-block: 12px;
-}
-
-.stats-summary-strip > div + div {
-  border-top: 1px solid var(--ui-border-muted);
-}
-
-.stats-summary-strip dt {
-  display: block;
-  font-size: 12px;
-  color: var(--ui-text-muted);
-}
-
-.stats-summary-strip dd {
-  display: block;
-  margin-top: 4px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+.stats-panel__title {
   color: var(--ui-text-highlighted);
-  font-size: 18px;
+  font-size: 20px;
   font-weight: 600;
-  line-height: 1.15;
+  line-height: 28px;
+  letter-spacing: -0.4px;
+}
+
+.stats-panel__description { margin-top: 8px; color: var(--ui-text-muted); font-size: 14px; }
+
+.stats-summary-strip { display: grid; }
+.stats-summary-strip > div { min-width: 0; padding: 16px 0; }
+.stats-summary-strip > div + div { border-top: 1px solid var(--ui-border); }
+.stats-summary-strip dt { color: var(--ui-text-muted); font-size: 12px; }
+.stats-summary-strip dd {
+  margin-top: 8px;
+  color: var(--ui-text-highlighted);
+  font-size: 24px;
+  font-weight: 600;
+  line-height: 1.2;
+  letter-spacing: -0.6px;
   font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
 }
 
-@media (min-width: 640px) {
-  .stats-metrics-grid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
+.stats-panel :deep(.rank-header) { padding-bottom: 16px; }
+.stats-panel :deep(.rank-row) { padding-block: 20px; }
 
-  .stats-summary-strip {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-  }
-
-  .stats-summary-strip > div {
-    padding-inline: 16px;
-  }
-
-  .stats-summary-strip > div:first-child {
-    padding-left: 0;
-  }
-
-  .stats-summary-strip > div:last-child {
-    padding-right: 0;
-  }
-
-  .stats-summary-strip > div + div {
-    border-top: 0;
-    border-left: 1px solid var(--ui-border-muted);
-  }
+@media (width >= 640px) {
+  .stats-metrics-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .stats-summary-strip { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .stats-summary-strip > div { padding-inline: 24px; }
+  .stats-summary-strip > div:first-child { padding-left: 0; }
+  .stats-summary-strip > div:last-child { padding-right: 0; }
+  .stats-summary-strip > div + div { border-top: 0; border-left: 1px solid var(--ui-border); }
 }
 
-@media (min-width: 1024px) {
-  .stats-metrics-grid {
-    grid-template-columns: repeat(4, minmax(0, 1fr));
-  }
-
-  .stats-hero__layout {
-    grid-template-columns: minmax(0, 1.15fr) minmax(320px, 0.85fr);
-    grid-template-areas: "copy aside";
-    gap: 36px;
-    align-items: stretch;
-  }
-
-  .stats-hero__meta {
-    margin-top: auto;
-    padding-top: 24px;
-  }
+@media (width >= 1024px) {
+  .stats-metrics-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+  .stats-hero__layout { grid-template-columns: minmax(0, 1.1fr) minmax(400px, 0.9fr); gap: 48px; }
 }
 
-@media (max-width: 639px) {
-  .stats-page {
-    padding-top: 2.75rem;
-  }
+@media (width < 640px) {
+  .stats-hero__stats :deep(.hero-stat-card) { padding: 16px 12px; }
+  .stats-hero__stats :deep(.hero-stat-card__value) { font-size: 22px; }
+  .stats-metrics-grid :deep(.dashboard-metric-card__content) { min-height: 100px; padding: 20px; }
+  .stats-metrics-grid :deep(.dashboard-metric-card__footer) { padding-inline: 20px; }
 }
 </style>
