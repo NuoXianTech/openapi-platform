@@ -14,7 +14,7 @@ import {
 } from '~~/server/db/schema'
 import { upstreamServiceTokenService } from '~~/server/services/upstream-service-token-service'
 import { resolveServiceAvailability } from '~~/server/services/service-availability-service'
-import { recordGatewayTargetAvailability } from '~~/server/services/dynamic-gateway-target-service'
+import { gatewayTargetHealth } from '~~/server/services/gateway-target-health'
 import { withDistributedLease } from '~~/server/utils/distributed-lease'
 
 const PROBE_INTERVAL_MS = 15_000
@@ -58,6 +58,9 @@ async function probeTargets(): Promise<void> {
   }
 
   await Promise.all([...groups.entries()].map(async ([upstreamId, targets]) => {
+    const observations = new Map(targets.map(target => [target.targetId,
+      gatewayTargetHealth.begin(upstreamId, { id: target.targetId, baseUrl: target.baseUrl })
+    ]))
     const token = await upstreamServiceTokenService.get(upstreamId)
     if (!token) return
     const description = targets[0]!.description
@@ -73,11 +76,7 @@ async function probeTargets(): Promise<void> {
     for (const target of targets) {
       const status = availability.targets.get(target.targetId)
       if (status === 'online' || status === 'offline') {
-        recordGatewayTargetAvailability(
-          upstreamId,
-          target.targetId,
-          status === 'online'
-        )
+        gatewayTargetHealth.report(observations.get(target.targetId)!, status === 'online')
       }
     }
   }))

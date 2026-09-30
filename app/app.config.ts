@@ -1,5 +1,8 @@
+import { appUi } from './constants/app-ui'
+
 export default defineAppConfig({
   ui: {
+    ...appUi,
     colors: {
       primary: 'zinc',
       secondary: 'zinc',
@@ -87,7 +90,7 @@ export default defineAppConfig({
     },
     card: {
       slots: {
-        root: 'rounded-lg overflow-hidden shadow-none',
+        root: 'design-card rounded-lg overflow-hidden shadow-none',
         header: 'p-4 sm:px-5',
         title: 'text-highlighted font-semibold',
         description: 'mt-1 text-muted text-sm',

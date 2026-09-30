@@ -1,28 +1,6 @@
 /* Apply the dashboard palette at the root so teleported menus and dialogs
    inherit it too. Leaving the dashboard restores the public/auth palette. */
-:root:has(.dashboard-shell) {
-  --ui-primary: #171717;
-  --ui-secondary: #171717;
-  --ui-info: #0070f3;
-  --ui-success: #0070f3;
-  --ui-warning: #ab570a;
-  --ui-error: #ee0000;
-  --ui-text-highlighted: #171717;
-  --ui-text: #4d4d4d;
-  --ui-text-toned: #4d4d4d;
-  /* Small labels need more contrast than the decorative #8f8f8f tier. */
-  --ui-text-muted: #737373;
-  --ui-text-dimmed: #8f8f8f;
-  --ui-text-inverted: #ffffff;
-  --ui-bg: #fafafa;
-  --ui-bg-elevated: #ffffff;
-  --ui-bg-muted: #f2f2f2;
-  --ui-bg-accented: #ebebeb;
-  --ui-bg-inverted: #171717;
-  --ui-border: #ebebeb;
-  --ui-border-muted: #f2f2f2;
-  --ui-border-accented: #d4d4d4;
-  --ui-ring: #0070f3;
+:root[data-app-theme="dashboard"] {
 
   --dashboard-radius: 0.75rem;
   --dashboard-radius-sm: 0.375rem;
@@ -42,28 +20,7 @@
   --dashboard-accent-rose: #c50000;
 }
 
-:root.dark:has(.dashboard-shell) {
-  --ui-primary: #ededed;
-  --ui-secondary: #ededed;
-  --ui-info: #52a8ff;
-  --ui-success: #52a8ff;
-  --ui-warning: #f5a623;
-  --ui-error: #ff6166;
-  --ui-text-highlighted: #ededed;
-  --ui-text: #c4c4c4;
-  --ui-text-toned: #c4c4c4;
-  --ui-text-muted: #a1a1a1;
-  --ui-text-dimmed: #8f8f8f;
-  --ui-text-inverted: #0a0a0a;
-  --ui-bg: #0a0a0a;
-  --ui-bg-elevated: #111111;
-  --ui-bg-muted: #171717;
-  --ui-bg-accented: #262626;
-  --ui-bg-inverted: #ededed;
-  --ui-border: #262626;
-  --ui-border-muted: #1c1c1c;
-  --ui-border-accented: #404040;
-  --ui-ring: #52a8ff;
+:root.dark[data-app-theme="dashboard"] {
 
   --dashboard-surface: #111111;
   --dashboard-surface-muted: #171717;
@@ -92,7 +49,7 @@
 
 /* MetricCard also appears on the public statistics page. Keep the dashboard
    treatment here so that page retains its existing styling. */
-.dashboard-shell .dashboard-metric-card.dashboard-card {
+.dashboard-shell .dashboard-metric-card.design-card {
   border-radius: var(--dashboard-radius);
   box-shadow: var(--dashboard-shadow);
 }
@@ -114,7 +71,7 @@
   line-height: 2rem;
 }
 
-.dashboard-shell .dashboard-metric-card.dashboard-card .dashboard-metric-card-icon {
+.dashboard-shell .dashboard-metric-card.design-card .dashboard-metric-card-icon {
   border-color: var(--dashboard-border);
   border-radius: var(--dashboard-radius-sm);
   background: var(--dashboard-surface-muted);
@@ -139,19 +96,19 @@
   color: var(--ui-text-highlighted);
 }
 
-.dashboard-card {
+:where(:root[data-app-theme="dashboard"]) .design-card {
   border-radius: var(--dashboard-radius);
   box-shadow: none;
 }
 
-.dashboard-button {
+:where(:root[data-app-theme="dashboard"]) .design-button {
   min-height: 2.25rem;
   border-radius: var(--dashboard-radius-sm);
   font-size: 0.875rem;
   line-height: 1.25rem;
 }
 
-.dashboard-form-control {
+:where(:root[data-app-theme="dashboard"]) .design-form-control {
   min-height: 2.25rem;
   border-radius: var(--dashboard-radius-sm);
   background-color: var(--dashboard-surface);
@@ -160,39 +117,28 @@
   line-height: 1.25rem;
 }
 
-.dashboard-form-control::placeholder {
+:where(:root[data-app-theme="dashboard"]) .design-form-control::placeholder {
   color: var(--ui-text-dimmed);
 }
 
-.dashboard-shell :focus-visible,
-.dashboard-sidebar-panel :focus-visible,
-.dashboard-button:focus-visible,
-.dashboard-form-control:focus-visible,
-.dashboard-floating-panel :focus-visible,
-.dashboard-slideover[role="dialog"] :focus-visible,
-.dashboard-dialog[role="dialog"] :focus-visible {
-  outline: 2px solid var(--ui-ring);
-  outline-offset: var(--design-focus-offset, 2px);
-}
-
-.dashboard-floating-panel,
-:root:has(.dashboard-shell) [data-reka-popper-content-wrapper] > [data-slot="content"],
-.dashboard-dialog[role="dialog"] {
+:where(:root[data-app-theme="dashboard"]) .design-floating-panel,
+:root[data-app-theme="dashboard"] [data-reka-popper-content-wrapper] > [data-slot="content"],
+:where(:root[data-app-theme="dashboard"]) .design-dialog[role="dialog"] {
   border-radius: var(--dashboard-radius);
   background: var(--dashboard-surface);
   box-shadow: var(--dashboard-floating-shadow);
 }
 
-.dashboard-floating-panel,
-:root:has(.dashboard-shell) [data-reka-popper-content-wrapper] > [data-slot="content"] {
+:where(:root[data-app-theme="dashboard"]) .design-floating-panel,
+:root[data-app-theme="dashboard"] [data-reka-popper-content-wrapper] > [data-slot="content"] {
   border: 1px solid var(--dashboard-border);
 }
 
-.dashboard-dialog[role="dialog"] {
+:where(:root[data-app-theme="dashboard"]) .design-dialog[role="dialog"] {
   border: 1px solid var(--dashboard-border);
 }
 
-.dashboard-slideover[role="dialog"] {
+:where(:root[data-app-theme="dashboard"]) .design-slideover[role="dialog"] {
   background: var(--dashboard-surface);
   box-shadow: var(--dashboard-floating-shadow);
 }
@@ -202,16 +148,16 @@
 }
 
 @media (pointer: coarse) {
-  .dashboard-button,
-  .dashboard-form-control {
+  :where(:root[data-app-theme="dashboard"]) .design-button,
+  :where(:root[data-app-theme="dashboard"]) .design-form-control {
     min-height: 2.75rem;
   }
 
-  .dashboard-button {
+  :where(:root[data-app-theme="dashboard"]) .design-button {
     min-width: 2.75rem;
   }
 
-  .dashboard-form-control {
+  :where(:root[data-app-theme="dashboard"]) .design-form-control {
     font-size: 1rem;
   }
 

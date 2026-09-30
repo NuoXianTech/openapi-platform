@@ -18,7 +18,7 @@
 }
 
 .design-floating-panel,
-:root:has(.public-page) [data-reka-popper-content-wrapper] > [data-slot="content"],
+:root[data-app-theme="public"] [data-reka-popper-content-wrapper] > [data-slot="content"],
 .design-dialog[role="dialog"] {
   border: 1px solid var(--ui-border);
   border-radius: 12px;
@@ -27,15 +27,24 @@
 }
 
 .public-page :focus-visible,
-.public-button:focus-visible,
+.dashboard-shell :focus-visible,
+.dashboard-sidebar-panel :focus-visible,
+.design-form-control:focus-visible,
+.design-slideover[role="dialog"] :focus-visible,
+.design-button:focus-visible,
 .design-floating-panel :focus-visible,
 .design-dialog[role="dialog"] :focus-visible {
   outline: 2px solid var(--ui-ring);
   outline-offset: var(--design-focus-offset, 2px);
 }
 
+.design-slideover[role="dialog"] {
+  background: var(--ui-bg-elevated);
+  box-shadow: var(--ui-floating-shadow);
+}
+
 @media (pointer: coarse) {
-  .public-button {
+  .design-button {
     min-width: 44px;
     min-height: 44px;
   }

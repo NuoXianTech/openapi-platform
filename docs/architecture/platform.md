@@ -200,7 +200,20 @@ Target 更新和删除通过 `committed-transaction.ts` 将健康状态清除登
 提交失败不清除本地或 Redis 健康状态。登记提交后动作的内部写入必须使用
 `withCommittedTransaction` 所拥有的事务，不能把普通外部事务当作已经提交。
 
+健康观测、驱逐、恢复和失效由 `gateway-target-health.ts` 集中管理。探测和转发在网络请求开始前
+登记观测，结束时提交结果；重置前的观测及晚于新结果到达的旧观测不再被接纳。状态按
+Upstream、Target 和地址隔离，地址替换不会继承旧地址的失败。
+`gateway-target-health-store.ts` 提供内存与 Redis 存储，保留带时间戳的恢复记录和重置标记，
+防止延迟回填或旧写入恢复已清除的驱逐状态。共享读取最多占用 100ms，故障仍使用本地状态。
+跨实例排序使用观测时间，部署实例应保持时钟同步。Redis 使用 v2 健康状态键，升级后重新累计
+短期观测，旧键按原 TTL 自然过期；这不涉及数据库或 Routing Revision 迁移。
+
 ### 7.3 管理台 Target 操作
+
+Upstream 详情由 `platform-upstream-detail.ts` 从当前对象的控制上下文构建，管理资料、配置和
+Target 状态共用一次读取范围及一次探测集合。详情不会为补齐管理资料而读取或探测全部 Upstream。
+前端 `use-admin-service-control.ts` 使用一个私有详情资源刷新，继续区分保存结果与后续读取失败，
+切换对象时同步清除控制视图、管理资料和敏感草稿。
 
 服务列表、服务详情与 Target 编辑弹窗通过
 `app/composables/admin/use-admin-target-operations.ts` 执行保存、启停和删除。

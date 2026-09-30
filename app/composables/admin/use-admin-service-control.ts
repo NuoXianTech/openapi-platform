@@ -1,6 +1,5 @@
 import { computed, getCurrentScope, onScopeDispose, ref, shallowRef, watch, type Ref } from 'vue'
-import type { PlatformUpstream } from '#shared/types/platform'
-import type { ServiceConfigurationSyncOutcome, ServiceConfigurationView } from '#shared/types/service-control'
+import type { PlatformUpstreamDetail, ServiceConfigurationSyncOutcome, ServiceConfigurationView } from '#shared/types/service-control'
 import { UPSTREAM_CONSTRAINTS } from '#shared/schemas/platform-constraints'
 import { usePrivateResource } from '~/composables/dashboard/use-private-resource'
 import { useAdminTargetOperations } from '~/composables/admin/use-admin-target-operations'
@@ -20,7 +19,6 @@ const failureKeys = {
   synchronize: 'admin.apis.routing.serviceControl.configurationSyncFailed'
 } as const
 type OperationKind = keyof typeof failureKeys
-type RefreshScope = 'service' | 'upstreams' | 'both'
 
 const synchronizationFeedback = {
   synced: { message: 'admin.apis.routing.serviceControl.configurationSynced', color: 'success' },
@@ -30,20 +28,16 @@ const synchronizationFeedback = {
 
 export function useAdminServiceControl(upstreamId: Readonly<Ref<string>>) {
   const { t } = useI18n()
-  const resource = usePrivateResource<ServiceConfigurationView | null>({
+  const resource = usePrivateResource<PlatformUpstreamDetail | null>({
     path: () => `/api/admin/v1/upstreams/${upstreamId.value}/service`,
     defaultData: () => null
   })
-  const upstreamResource = usePrivateResource<PlatformUpstream[]>({
-    path: '/api/admin/v1/upstreams',
-    defaultData: () => []
-  })
   const view = computed(() => resource.data.value?.connection.upstreamServiceId === upstreamId.value
     ? resource.data.value : null)
-  const managementUpstream = computed(() => upstreamResource.data.value.find(upstream => upstream.id === upstreamId.value) ?? null)
-  const loading = computed(() => resource.loading.value || upstreamResource.loading.value)
+  const managementUpstream = computed(() => view.value?.upstream ?? null)
+  const loading = computed(() => resource.loading.value)
   const refreshError = shallowRef<unknown>(null)
-  const loadError = computed(() => resource.error.value || upstreamResource.error.value || refreshError.value)
+  const loadError = computed(() => resource.error.value || refreshError.value)
   const serviceToken = ref('')
   const pageFeedback = ref<ServiceFeedback | null>(null)
   const configurationFeedback = ref<ServiceFeedback | null>(null)
@@ -54,7 +48,7 @@ export function useAdminServiceControl(upstreamId: Readonly<Ref<string>>) {
 
   const targetOperations = useAdminTargetOperations({
     context: () => upstreamId.value,
-    refresh: () => refreshData('both'),
+    refresh: () => refreshData(),
     isBlocked: () => disposed.value || !upstreamId.value || active.value !== null || loading.value
   })
   const operationBusy = computed(() => active.value !== null || targetOperations.state.value.busy)
@@ -86,8 +80,7 @@ export function useAdminServiceControl(upstreamId: Readonly<Ref<string>>) {
     clearContext()
     resource.data.value = null
     resource.error.value = null
-    upstreamResource.error.value = null
-    if (id) void refreshData('both')
+    if (id) void refreshData()
   }, { flush: 'sync' })
 
   if (getCurrentScope()) {
@@ -97,17 +90,13 @@ export function useAdminServiceControl(upstreamId: Readonly<Ref<string>>) {
     })
   }
 
-  async function refreshData(scope: RefreshScope) {
+  async function refreshData() {
     if (disposed.value || !upstreamId.value) return
     const startedGeneration = generation
     refreshError.value = null
     try {
-      const results = await Promise.all([
-        ...(scope !== 'upstreams' ? [resource.refresh()] : []),
-        ...(scope !== 'service' ? [upstreamResource.refresh()] : [])
-      ])
-      const failure = results.find(result => result?.status === 'error')
-      if (failure?.status === 'error') throw failure.error
+      const result = await resource.refresh()
+      if (result?.status === 'error') throw result.error
     } catch (error: unknown) {
       // A completed mutation stays completed even if the subsequent read fails.
       if (!disposed.value && startedGeneration === generation) refreshError.value = error
@@ -116,7 +105,7 @@ export function useAdminServiceControl(upstreamId: Readonly<Ref<string>>) {
 
   async function refresh() {
     if (controls.value.refreshDisabled) return
-    await refreshData('both')
+    await refreshData()
   }
 
   async function runOperation<T>(operation: {
@@ -124,7 +113,6 @@ export function useAdminServiceControl(upstreamId: Readonly<Ref<string>>) {
     feedback: Ref<ServiceFeedback | null>
     request: (id: string) => Promise<T>
     accept: (result: T) => void
-    refresh: RefreshScope
     refreshAfterFailure?: boolean
   }): Promise<boolean> {
     if (disabled.value) return false
@@ -136,12 +124,12 @@ export function useAdminServiceControl(upstreamId: Readonly<Ref<string>>) {
       const result = await operation.request(started.upstreamId)
       if (!isCurrent()) return false
       operation.accept(result)
-      await refreshData(operation.refresh)
+      await refreshData()
       return isCurrent()
     } catch (error: unknown) {
       if (!isCurrent()) return false
       operation.feedback.value = { message: parseFetchError(error, t(failureKeys[operation.kind])), color: 'error' }
-      if (operation.refreshAfterFailure) await refreshData('service')
+      if (operation.refreshAfterFailure) await refreshData()
       return false
     } finally {
       // An older request cannot release an operation started in a new context.
@@ -155,7 +143,9 @@ export function useAdminServiceControl(upstreamId: Readonly<Ref<string>>) {
       feedback: pageFeedback,
       request: id => $fetch<ServiceConfigurationView>(`/api/admin/v1/upstreams/${id}/discover`, { method: 'POST' }),
       accept: (result) => {
-        resource.data.value = result
+        if (resource.data.value) {
+          resource.data.value = { ...result, upstream: { ...resource.data.value.upstream, connection: result.connection } }
+        }
         pageFeedback.value = {
           message: result.connection.lastDiscoveryError
             ? t('admin.apis.routing.serviceControl.discoveryPartial')
@@ -163,7 +153,6 @@ export function useAdminServiceControl(upstreamId: Readonly<Ref<string>>) {
           color: result.connection.lastDiscoveryError ? 'warning' : 'success'
         }
       },
-      refresh: 'upstreams',
       refreshAfterFailure: true
     })
   }
@@ -188,7 +177,6 @@ export function useAdminServiceControl(upstreamId: Readonly<Ref<string>>) {
           color: 'success'
         }
       },
-      refresh: 'service'
     })
   }
 
@@ -210,7 +198,6 @@ export function useAdminServiceControl(upstreamId: Readonly<Ref<string>>) {
       feedback: configurationFeedback,
       request: id => $fetch<ServiceConfigurationSyncOutcome>(`/api/admin/v1/upstreams/${id}/configuration`, { method: 'PUT', body: payload }),
       accept: (result) => { configurationFeedback.value = configurationResult(result, true) },
-      refresh: 'service'
     })
   }
 
@@ -221,7 +208,6 @@ export function useAdminServiceControl(upstreamId: Readonly<Ref<string>>) {
       feedback: pageFeedback,
       request: id => $fetch<ServiceConfigurationSyncOutcome>(`/api/admin/v1/upstreams/${id}/configuration/sync`, { method: 'POST' }),
       accept: (result) => { pageFeedback.value = configurationResult(result) },
-      refresh: 'service'
     })
   }
 

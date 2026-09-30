@@ -2,6 +2,7 @@
 @import "@nuxt/ui";
 @import "./fonts.css";
 @import "./motion.css";
+@import "./theme.css";
 @import "./public.css";
 @import "./dashboard.css";
 @import "./design.css";
@@ -36,28 +37,9 @@
   --dashboard-accent-bronze: #806a50;
   --dashboard-accent-rose: #9e5863;
 
-  --ui-primary: var(--brand-primary);
-  --ui-secondary: var(--brand-primary);
-  --ui-info: #256f88;
-  --ui-success: #21806b;
-  --ui-warning: var(--brand-amber);
-  --ui-error: var(--brand-coral);
 
-  --ui-text-dimmed: #a1a1aa;
-  --ui-text-muted: #71717a;
-  --ui-text-toned: #3f3f46;
-  --ui-text: #27272a;
-  --ui-text-highlighted: var(--brand-ink);
 
-  --ui-bg: var(--brand-canvas);
-  --ui-bg-muted: #f7f7f8;
-  --ui-bg-elevated: var(--brand-paper);
-  --ui-bg-accented: #f1f1f2;
 
-  --ui-border: #e4e4e7;
-  --ui-border-muted: #efeff1;
-  --ui-border-accented: #d4d4d8;
-  --ui-ring: #3f3f46;
 
   --dashboard-content-max-width: 1360px;
   --dashboard-radius: 0.5rem;
@@ -92,28 +74,9 @@
   --dashboard-accent-bronze: #bca58a;
   --dashboard-accent-rose: #d0949c;
 
-  --ui-primary: var(--brand-primary);
-  --ui-secondary: var(--brand-primary);
-  --ui-info: #68a9bd;
-  --ui-success: #58aa95;
-  --ui-warning: var(--brand-amber);
-  --ui-error: var(--brand-coral);
 
-  --ui-text-dimmed: #71717a;
-  --ui-text-muted: #a1a1aa;
-  --ui-text-toned: #d4d4d8;
-  --ui-text: #e4e4e7;
-  --ui-text-highlighted: #fafafa;
 
-  --ui-bg: var(--brand-canvas);
-  --ui-bg-muted: #18181b;
-  --ui-bg-elevated: var(--brand-paper);
-  --ui-bg-accented: #27272a;
 
-  --ui-border: #27272a;
-  --ui-border-muted: #1f1f22;
-  --ui-border-accented: #3f3f46;
-  --ui-ring: #d4d4d8;
 
   --dashboard-surface: var(--ui-bg-elevated);
   --dashboard-surface-muted: color-mix(in oklab, white 4%, var(--ui-bg));

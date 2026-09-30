@@ -4,7 +4,7 @@ import { parseFetchError } from '~/utils/client-error'
 import { ADMIN_OVERVIEW_PATH, USER_OVERVIEW_PATH } from '~/constants/dashboard-config'
 import { compactFormErrors, requiredTextError } from '~/utils/form-validation'
 
-definePageMeta({ layout: false })
+definePageMeta({ layout: false, appTheme: 'auth' })
 
 const { t } = useI18n()
 useHead(() => ({ title: t('auth.login.title') }))

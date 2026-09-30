@@ -10,7 +10,7 @@ import {
   usernameError
 } from '~/utils/form-validation'
 
-definePageMeta({ layout: false })
+definePageMeta({ layout: false, appTheme: 'auth' })
 
 const { t } = useI18n()
 const validationMessages = useAuthValidationMessages()

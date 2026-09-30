@@ -6,94 +6,25 @@ withDefaults(defineProps<{
 }>(), {
   showBrand: true
 })
-
-const authUi = {
-  authForm: { form: 'space-y-4' },
-  button: { base: 'auth-button' },
-  input: {
-    root: 'auth-input-wrapper',
-    base: 'auth-input',
-    trailing: 'auth-input-trailing'
-  },
-  formField: { label: 'text-sm font-medium' },
-  checkbox: {
-    root: 'w-full items-center',
-    wrapper: 'min-w-0',
-    label: 'auth-checkbox-label cursor-pointer text-xs leading-4 font-normal text-muted'
-  }
-} as const
 </script>
 
 <template>
-  <UTheme :ui="authUi">
-    <main class="auth-shell">
-      <section class="auth-panel">
-        <SiteBrand
-          v-if="showBrand"
-          size="auth"
-          class="auth-home"
-        />
+  <main class="auth-shell">
+    <section class="auth-panel">
+      <SiteBrand
+        v-if="showBrand"
+        size="auth"
+        class="auth-home"
+      />
 
-        <div class="auth-form-wrap motion-enter">
-          <slot />
-        </div>
-      </section>
-    </main>
-  </UTheme>
+      <div class="auth-form-wrap motion-enter">
+        <slot />
+      </div>
+    </section>
+  </main>
 </template>
 
 <style>
-/* Keep the palette on the root so authentication toasts and portals inherit it. */
-:root:has(.auth-shell) {
-  --ui-primary: #171717;
-  --ui-secondary: #171717;
-  --ui-info: #0070f3;
-  --ui-success: #0070f3;
-  --ui-warning: #ab570a;
-  --ui-error: #ee0000;
-  --ui-text-highlighted: #171717;
-  --ui-text: #4d4d4d;
-  --ui-text-toned: #4d4d4d;
-  --ui-text-muted: #737373;
-  --ui-text-dimmed: #8f8f8f;
-  --ui-text-inverted: #ffffff;
-  --ui-bg: #fafafa;
-  --ui-bg-elevated: #ffffff;
-  --ui-bg-muted: #f2f2f2;
-  --ui-bg-accented: #ebebeb;
-  --ui-bg-inverted: #171717;
-  --ui-border: #ebebeb;
-  --ui-border-muted: #f2f2f2;
-  --ui-border-accented: #d4d4d4;
-  --ui-ring: #0070f3;
-  --auth-card-shadow: 0 1px 1px rgb(0 0 0 / 4%);
-}
-
-:root.dark:has(.auth-shell) {
-  --ui-primary: #ededed;
-  --ui-secondary: #ededed;
-  --ui-info: #52a8ff;
-  --ui-success: #52a8ff;
-  --ui-warning: #f5a623;
-  --ui-error: #ff6166;
-  --ui-text-highlighted: #ededed;
-  --ui-text: #c4c4c4;
-  --ui-text-toned: #c4c4c4;
-  --ui-text-muted: #a1a1a1;
-  --ui-text-dimmed: #8f8f8f;
-  --ui-text-inverted: #0a0a0a;
-  --ui-bg: #0a0a0a;
-  --ui-bg-elevated: #111111;
-  --ui-bg-muted: #171717;
-  --ui-bg-accented: #262626;
-  --ui-bg-inverted: #ededed;
-  --ui-border: #262626;
-  --ui-border-muted: #1c1c1c;
-  --ui-border-accented: #404040;
-  --ui-ring: #52a8ff;
-  --auth-card-shadow: 0 1px 1px rgb(0 0 0 / 12%);
-}
-
 .auth-shell {
   --auth-control-size: 2.25rem;
   display: flex;
@@ -329,13 +260,13 @@ const authUi = {
 
   .auth-text-button,
   .auth-footer-links .auth-button {
-    min-width: var(--auth-control-size);
-    min-height: var(--auth-control-size);
+  min-width: var(--auth-control-size);
+  min-height: var(--auth-control-size);
   }
 
   .auth-checkbox-label {
-    min-height: 2.75rem;
-    padding-block: 0.75rem;
+  min-height: 2.75rem;
+  padding-block: 0.75rem;
   }
 }
 

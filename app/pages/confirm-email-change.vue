@@ -2,7 +2,7 @@
 import type { ConfirmEmailChangeInput } from '#shared/types/auth'
 import { parseFetchError } from '~/utils/client-error'
 
-definePageMeta({ layout: false })
+definePageMeta({ layout: false, appTheme: 'auth' })
 
 const { t } = useI18n()
 useHead(() => ({ title: t('auth.confirmEmailChange.title') }))

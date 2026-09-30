@@ -5,180 +5,16 @@ import {
 import { limitGatewayUpstreamResponse } from '~~/server/services/dynamic-gateway-stream-service'
 import type { ResolvedDynamicRoute } from '~~/server/services/routing-runtime-service'
 import { normalizeRoutePath } from '~~/server/utils/route-pattern'
-import { getRedisClient, getRedisConfig } from '~~/server/utils/redis'
+import { gatewayTargetHealth } from '~~/server/services/gateway-target-health'
 import { safeFetch } from '~~/server/utils/safe-fetch'
 
 const RETRYABLE_METHODS = new Set(['GET', 'HEAD'])
 const RETRYABLE_UPSTREAM_STATUSES = new Set([502, 503, 504])
 
-// A target that keeps failing is ejected for progressively longer, so a
-// hard-down target stops receiving traffic instead of being retried on a
-// fixed short cooldown that always expires before the next request.
-const TARGET_EJECTION_BASE_MS = 15_000
-const TARGET_EJECTION_MAX_MS = 5 * 60_000
-const TARGET_EJECTION_THRESHOLD = 2
-const TARGET_HEALTH_ENTRY_MAX_AGE_MS = 30 * 60_000
-const TARGET_HEALTH_STORE_TTL_MS = TARGET_HEALTH_ENTRY_MAX_AGE_MS
-const MAX_TARGET_HEALTH_ENTRIES = 10_000
-
-// Each attempt gets a slice of the route budget so a hung target cannot
-// consume the whole timeout and starve failover. Only applied when more
-// than one target is eligible.
 const MIN_ATTEMPT_TIMEOUT_MS = 2_000
-
-interface TargetHealth {
-  failures: number
-  ejectedUntil: number
-  lastFailureAt: number
-}
-
+const MAX_TARGET_COUNTERS = 10_000
 const targetCounters = new Map<string, number>()
-const targetHealth = new Map<string, TargetHealth>()
-const healthHydration = new Map<string, Promise<void>>()
-const healthHydratedAt = new Map<string, number>()
-const healthWarnings = new Set<string>()
-const HEALTH_HYDRATION_INTERVAL_MS = 5_000
-const HEALTH_HYDRATION_TIMEOUT_MS = 100
-
 export type GatewayTarget = ResolvedDynamicRoute['upstream']['targets'][number]
-
-function targetStateKey(
-  match: ResolvedDynamicRoute,
-  target: GatewayTarget
-): string {
-  return targetIdsStateKey(match.upstream.id, target.id)
-}
-
-function targetIdsStateKey(upstreamId: string, targetId: string): string {
-  return `${upstreamId}:${targetId}`
-}
-
-function targetHealthRedisKey(stateKey: string): string {
-  const prefix = getRedisConfig().keyPrefix
-  return `${prefix}gateway:target-health:${stateKey}`
-}
-
-function warnHealthStore(operation: string, error: unknown): void {
-  if (healthWarnings.has(operation)) return
-  healthWarnings.add(operation)
-  console.warn('[gateway] shared target health state unavailable; using local state', {
-    operation,
-    error: error instanceof Error ? error.message : String(error)
-  })
-}
-
-function healthRedisClient() {
-  try {
-    return getRedisClient()
-  } catch (error) {
-    warnHealthStore('client', error)
-    return null
-  }
-}
-
-function pruneTargetHealth(now = Date.now()): void {
-  for (const [key, health] of targetHealth) {
-    if (now - health.lastFailureAt > TARGET_HEALTH_ENTRY_MAX_AGE_MS) {
-      targetHealth.delete(key)
-    }
-  }
-  while (targetHealth.size > MAX_TARGET_HEALTH_ENTRIES) {
-    const oldest = targetHealth.keys().next().value as string | undefined
-    if (!oldest) break
-    targetHealth.delete(oldest)
-  }
-}
-
-async function hydrateTargetHealth(match: ResolvedDynamicRoute): Promise<void> {
-  const redis = healthRedisClient()
-  if (!redis) return
-  const key = match.upstream.id
-  const existing = healthHydration.get(key)
-  if (existing) return existing
-  const hydratedAt = healthHydratedAt.get(key) ?? 0
-  if (hydratedAt + HEALTH_HYDRATION_INTERVAL_MS > Date.now()) return
-
-  const task = (async () => {
-    try {
-      const now = Date.now()
-      const entries = await Promise.all(match.upstream.targets.map(async (target) => {
-        const raw = await redis.get(targetHealthRedisKey(targetStateKey(match, target)))
-        if (!raw) return null
-        try {
-          const parsed = JSON.parse(raw) as Partial<TargetHealth>
-          const failures = parsed.failures
-          const lastFailureAt = parsed.lastFailureAt
-          const ejectedUntil = parsed.ejectedUntil
-          if (
-            typeof failures !== 'number'
-            || typeof ejectedUntil !== 'number'
-            || typeof lastFailureAt !== 'number'
-            || !Number.isSafeInteger(failures)
-            || !Number.isFinite(ejectedUntil)
-            || !Number.isFinite(lastFailureAt)
-            || failures < 1
-            || lastFailureAt <= now - TARGET_HEALTH_ENTRY_MAX_AGE_MS
-          ) return null
-          return {
-            key: targetStateKey(match, target),
-            health: {
-              failures,
-              ejectedUntil: Math.max(0, ejectedUntil),
-              lastFailureAt
-            }
-          }
-        } catch {
-          return null
-        }
-      }))
-      for (const entry of entries) {
-        if (!entry) continue
-        const local = targetHealth.get(entry.key)
-        if (!local || entry.health.lastFailureAt > local.lastFailureAt) {
-          targetHealth.set(entry.key, entry.health)
-        }
-      }
-      pruneTargetHealth(now)
-    } catch (error) {
-      warnHealthStore('read', error)
-    }
-  })()
-  healthHydration.set(key, task)
-  try {
-    await task
-    if (!healthHydratedAt.has(key)) {
-      while (healthHydratedAt.size >= MAX_TARGET_HEALTH_ENTRIES) {
-        const oldest = healthHydratedAt.keys().next().value as string | undefined
-        if (!oldest) break
-        healthHydratedAt.delete(oldest)
-      }
-    }
-    healthHydratedAt.set(key, Date.now())
-  } finally {
-    if (healthHydration.get(key) === task) healthHydration.delete(key)
-  }
-}
-
-function persistTargetHealth(
-  stateKey: string,
-  health: TargetHealth
-): void {
-  const redis = healthRedisClient()
-  if (!redis) return
-  void redis.set(
-    targetHealthRedisKey(stateKey),
-    JSON.stringify(health),
-    'PX',
-    TARGET_HEALTH_STORE_TTL_MS
-  ).catch(error => warnHealthStore('write', error))
-}
-
-function deletePersistedTargetHealth(stateKey: string): void {
-  const redis = healthRedisClient()
-  if (!redis) return
-  void redis.del(targetHealthRedisKey(stateKey))
-    .catch(error => warnHealthStore('delete', error))
-}
 
 function availableTargets(match: ResolvedDynamicRoute): GatewayTarget[] {
   const targets = match.upstream.targets
@@ -190,11 +26,7 @@ function availableTargets(match: ResolvedDynamicRoute): GatewayTarget[] {
     )
   }
 
-  const now = Date.now()
-  const available = targets.filter((target) => {
-    const health = targetHealth.get(targetStateKey(match, target))
-    return !health || health.ejectedUntil <= now
-  })
+  const available = gatewayTargetHealth.available(match.upstream.id, targets)
   // Every target is ejected: fall back to the full list so a total outage
   // still produces a real upstream error rather than a config error.
   return available.length > 0 ? available : targets
@@ -203,11 +35,10 @@ function availableTargets(match: ResolvedDynamicRoute): GatewayTarget[] {
 export function orderedGatewayTargets(
   match: ResolvedDynamicRoute
 ): GatewayTarget[] {
-  pruneTargetHealth()
   const targets = availableTargets(match)
   const counter = targetCounters.get(match.upstream.id) ?? 0
   if (!targetCounters.has(match.upstream.id)) {
-    while (targetCounters.size >= MAX_TARGET_HEALTH_ENTRIES) {
+    while (targetCounters.size >= MAX_TARGET_COUNTERS) {
       const oldest = targetCounters.keys().next().value as string | undefined
       if (!oldest) break
       targetCounters.delete(oldest)
@@ -238,109 +69,14 @@ export function orderedGatewayTargets(
   ]
 }
 
-/**
- * Hydrate ejection state from Redis once per Upstream before selecting a
- * target.  The synchronous selector remains available for deterministic unit
- * tests and the single-process fallback; production Gateway requests use this
- * shared variant so restarts and multiple instances converge on the same
- * short-lived health state.
- */
-export async function orderedGatewayTargetsAsync(
-  match: ResolvedDynamicRoute
-): Promise<GatewayTarget[]> {
-  // Health coordination is advisory and must never consume the route's
-  // request budget when Redis is unavailable. The hydration task continues in
-  // the background and will converge subsequent requests.
-  await new Promise<void>((resolve) => {
-    let settled = false
-    const timer = setTimeout(() => {
-      if (settled) return
-      settled = true
-      resolve()
-    }, HEALTH_HYDRATION_TIMEOUT_MS)
-    void hydrateTargetHealth(match).finally(() => {
-      if (settled) return
-      settled = true
-      clearTimeout(timer)
-      resolve()
-    })
-  })
+export async function orderedGatewayTargetsAsync(match: ResolvedDynamicRoute): Promise<GatewayTarget[]> {
+  await gatewayTargetHealth.hydrate(match.upstream.id, match.upstream.targets)
   return orderedGatewayTargets(match)
 }
 
-function markTargetUnavailable(
-  match: ResolvedDynamicRoute,
-  target: GatewayTarget
-): void {
-  const key = targetStateKey(match, target)
-  const failures = Math.min((targetHealth.get(key)?.failures ?? 0) + 1, 31)
-  const ejectedUntil = failures >= TARGET_EJECTION_THRESHOLD
-    ? Date.now() + Math.min(
-      TARGET_EJECTION_MAX_MS,
-      TARGET_EJECTION_BASE_MS * 2 ** (failures - TARGET_EJECTION_THRESHOLD)
-    )
-    : 0
-  const health = { failures, ejectedUntil, lastFailureAt: Date.now() }
-  targetHealth.set(key, health)
-  pruneTargetHealth()
-  persistTargetHealth(key, health)
-}
-
-function markTargetResponsive(
-  match: ResolvedDynamicRoute,
-  target: GatewayTarget
-): void {
-  const key = targetStateKey(match, target)
-  targetHealth.delete(key)
-  deletePersistedTargetHealth(key)
-}
-
-/** Record an active readiness/authentication probe in the same health state
- * used by passive Gateway failures. */
-export function recordGatewayTargetAvailability(
-  upstreamId: string,
-  targetId: string,
-  online: boolean
-): void {
-  const key = targetIdsStateKey(upstreamId, targetId)
-  if (online) {
-    targetHealth.delete(key)
-    deletePersistedTargetHealth(key)
-    return
-  }
-
-  const failures = Math.min((targetHealth.get(key)?.failures ?? 0) + 1, 31)
-  const health: TargetHealth = {
-    failures,
-    ejectedUntil: failures >= TARGET_EJECTION_THRESHOLD
-      ? Date.now() + Math.min(
-        TARGET_EJECTION_MAX_MS,
-        TARGET_EJECTION_BASE_MS * 2 ** (
-          failures - TARGET_EJECTION_THRESHOLD
-        )
-      )
-      : 0,
-    lastFailureAt: Date.now()
-  }
-  targetHealth.set(key, health)
-  pruneTargetHealth()
-  persistTargetHealth(key, health)
-}
-
-export function resetGatewayTargetHealthForTarget(
-  upstreamId: string,
-  targetId: string
-): void {
-  const key = targetIdsStateKey(upstreamId, targetId)
-  targetHealth.delete(key)
-  deletePersistedTargetHealth(key)
-}
-
 export function resetGatewayTargetHealth(): void {
-  targetHealth.clear()
+  gatewayTargetHealth.clear()
   targetCounters.clear()
-  healthHydration.clear()
-  healthHydratedAt.clear()
 }
 
 export function buildGatewayTargetUrl(
@@ -439,6 +175,7 @@ export function createGatewayProxyFetch(input: {
         input.upstreamPath,
         input.search
       )
+      const observation = gatewayTargetHealth.begin(input.match.upstream.id, target)
       input.onTarget(target)
       // A per-attempt controller lets a hung target be abandoned without
       // aborting the shared signal, which would kill every later attempt.
@@ -466,8 +203,7 @@ export function createGatewayProxyFetch(input: {
         // route timeout or client disconnect still tears the body down.
         if (attemptTimer) clearTimeout(attemptTimer)
         const retryableStatus = RETRYABLE_UPSTREAM_STATUSES.has(response.status)
-        if (retryableStatus) markTargetUnavailable(input.match, target)
-        else markTargetResponsive(input.match, target)
+        gatewayTargetHealth.report(observation, !retryableStatus)
 
         if (isServiceTokenRejection(response)) {
           await response.body?.cancel().catch(() => undefined)
@@ -495,7 +231,7 @@ export function createGatewayProxyFetch(input: {
         // The client went away or the route budget expired: the target is
         // not at fault and no later attempt can succeed.
         if (overallSignal?.aborted) throw error
-        markTargetUnavailable(input.match, target)
+        gatewayTargetHealth.report(observation, false)
         lastError = error
         lastErrorWasAttemptTimeout = attemptTimedOut
         if (!mayRetry || index === targets.length - 1) break

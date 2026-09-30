@@ -1,7 +1,7 @@
 import { effectScope, nextTick, ref } from 'vue'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { PlatformUpstream, PlatformUpstreamTarget } from '#shared/types/platform'
-import type { ServiceConfigurationSyncOutcome, ServiceConfigurationView } from '#shared/types/service-control'
+import type { PlatformUpstreamDetail, ServiceConfigurationSyncOutcome } from '#shared/types/service-control'
 import { useAdminServiceControl } from '~/composables/admin/use-admin-service-control'
 import { useAdminServiceConfigurationForm } from '~/composables/admin/use-admin-service-configuration-form'
 
@@ -19,8 +19,9 @@ function deferred<T>() {
   return { promise, resolve, reject }
 }
 
-function view(id = 'service-a'): ServiceConfigurationView {
+function view(id = 'service-a'): PlatformUpstreamDetail {
   return {
+    upstream: { id, name: id, targets: [{ id: 'target-a', baseUrl: 'http://service:8080', enabled: true, weight: 1 }] } as PlatformUpstream,
     connection: {
       upstreamServiceId: id, discovered: true, availability: 'online', tokenConfigured: true,
       serviceId: id, serviceName: id, serviceVersion: '1.0', serviceCommit: null, serviceProtocol: 'openapi-service/v1',
@@ -40,17 +41,10 @@ const target = { id: 'target-a', baseUrl: 'http://service:8080', enabled: true, 
 
 function setup() {
   const id = ref('service-a')
-  const service = { data: ref<ServiceConfigurationView | null>(view()), loading: ref(false), error: ref<unknown>(null), refresh: vi.fn().mockResolvedValue(undefined) }
-  const upstreams = {
-    data: ref<PlatformUpstream[]>([
-      { id: 'service-a', name: 'Service A', targets: [target] } as PlatformUpstream,
-      { id: 'service-b', name: 'Service B', targets: [] } as unknown as PlatformUpstream
-    ]),
-    loading: ref(false), error: ref<unknown>(null), refresh: vi.fn().mockResolvedValue(undefined)
-  }
-  resourceFactory.mockImplementation((options: { path: string | (() => string) }) => typeof options.path === 'function' ? service : upstreams)
+  const service = { data: ref<PlatformUpstreamDetail | null>(view()), loading: ref(false), error: ref<unknown>(null), refresh: vi.fn().mockResolvedValue(undefined) }
+  resourceFactory.mockReturnValue(service)
   const control = scope.run(() => useAdminServiceControl(id))!
-  return { control, id, service, upstreams }
+  return { control, id, service }
 }
 
 type Control = ReturnType<typeof useAdminServiceControl>
@@ -81,30 +75,41 @@ afterEach(() => {
 })
 
 describe('Service control', () => {
+  it('reads only one current-Upstream resource and clears both views on navigation', () => {
+    const { control, id, service } = setup()
+    expect(resourceFactory).toHaveBeenCalledOnce()
+    const options = resourceFactory.mock.calls[0]![0] as { path: () => string }
+    expect(options.path()).toBe('/api/admin/v1/upstreams/service-a/service')
+    expect(control.managementUpstream.value?.id).toBe('service-a')
+    id.value = 'service-b'
+    expect(options.path()).toBe('/api/admin/v1/upstreams/service-b/service')
+    expect(control.view.value).toBeNull()
+    expect(control.managementUpstream.value).toBeNull()
+    expect(service.refresh).toHaveBeenCalledOnce()
+  })
+
   it.each([null, 'one Target failed'])('accepts discovery and refreshes management data (error=%s)', async (lastDiscoveryError) => {
-    const { control, service, upstreams } = setup()
+    const { control, service } = setup()
     const result = view()
     result.connection.lastDiscoveryError = lastDiscoveryError
     result.connection.serviceVersion = '2.0'
     fetchMock.mockResolvedValueOnce(result)
     await expect(control.discover()).resolves.toBe(true)
     expect(fetchMock).toHaveBeenCalledExactlyOnceWith('/api/admin/v1/upstreams/service-a/discover', { method: 'POST' })
-    expect(control.view.value).toEqual(result)
+    expect(control.view.value).toEqual({ ...result, upstream: { ...result.upstream, connection: result.connection } })
     expect(control.pageFeedback.value).toEqual({
       message: lastDiscoveryError ? 'admin.apis.routing.serviceControl.discoveryPartial' : 'admin.apis.routing.serviceControl.discoverySucceeded',
       color: lastDiscoveryError ? 'warning' : 'success'
     })
-    expect(upstreams.refresh).toHaveBeenCalledOnce()
-    expect(service.refresh).not.toHaveBeenCalled()
+    expect(service.refresh).toHaveBeenCalledOnce()
   })
 
   it('refreshes failed discovery state without losing the operation error', async () => {
-    const { control, service, upstreams } = setup()
+    const { control, service } = setup()
     fetchMock.mockRejectedValueOnce(new Error('Discovery failed'))
     await expect(control.discover()).resolves.toBe(false)
     expect(control.pageFeedback.value).toEqual({ message: 'Discovery failed', color: 'error' })
     expect(service.refresh).toHaveBeenCalledOnce()
-    expect(upstreams.refresh).not.toHaveBeenCalled()
     expect(control.controls.value.discoverDisabled).toBe(false)
   })
 
@@ -117,7 +122,7 @@ describe('Service control', () => {
   })
 
   it.each([32, 4096])('trims and saves a valid Token of length %s, then clears only its draft', async (length) => {
-    const { control, service, upstreams } = setup()
+    const { control, service } = setup()
     const token = 't'.repeat(length)
     control.serviceToken.value = ` ${token} `
     await expect(control.updateServiceToken()).resolves.toBe(true)
@@ -127,7 +132,6 @@ describe('Service control', () => {
       color: 'success', description: 'admin.apis.routing.serviceControl.rediscoverAfterToken'
     })
     expect(service.refresh).toHaveBeenCalledOnce()
-    expect(upstreams.refresh).not.toHaveBeenCalled()
   })
 
   it('keeps a failed Token draft available for retry', async () => {
@@ -180,7 +184,7 @@ describe('Service control', () => {
   })
 
   it.each(actions)('uses the same admission state while %s runs', async (action) => {
-    const { control, service, upstreams } = setup()
+    const { control, service } = setup()
     const request = deferred<unknown>()
     fetchMock.mockReturnValueOnce(request.promise)
     const operation = invoke(control, action)
@@ -197,7 +201,6 @@ describe('Service control', () => {
     expect(fetchMock).toHaveBeenCalledOnce()
     expect(confirm).not.toHaveBeenCalled()
     expect(service.refresh).not.toHaveBeenCalled()
-    expect(upstreams.refresh).not.toHaveBeenCalled()
     request.resolve(action === 'discover' ? view() : outcome)
     await operation
     expect(control.controls.value.discoverDisabled).toBe(false)
@@ -217,8 +220,8 @@ describe('Service control', () => {
     expect(control.controls.value.discoverDisabled).toBe(false)
   })
 
-  it('blocks Service controls during Target saving and refreshes both data sources after success', async () => {
-    const { control, service, upstreams } = setup()
+  it('blocks Service controls during Target saving and refreshes the detail after success', async () => {
+    const { control, service } = setup()
     const request = deferred<unknown>()
     fetchMock.mockReturnValueOnce(request.promise)
     const operation = control.targetOperations.save('service-a', target, target)
@@ -227,13 +230,12 @@ describe('Service control', () => {
     request.resolve(target)
     await operation
     expect(service.refresh).toHaveBeenCalledOnce()
-    expect(upstreams.refresh).toHaveBeenCalledOnce()
     expect(control.controls.value.discoverDisabled).toBe(false)
   })
 
-  it.each(['service', 'upstreams'] as const)('blocks mutations while the %s resource is loading', async (resourceName) => {
+  it('blocks mutations while the detail resource is loading', async () => {
     const context = setup()
-    context[resourceName].loading.value = true
+    context.service.loading.value = true
     expect(context.control.loading.value).toBe(true)
     for (const action of actions) await expect(invoke(context.control, action)).resolves.toBe(false)
     expect(context.control.targetOperations.state.value.disabled).toBe(true)
@@ -279,7 +281,7 @@ describe('Service control', () => {
   it.each(actions.flatMap(action => [
     { action, failed: false }, { action, failed: true }
   ]))('ignores an old $action result (failed=$failed) without releasing the new operation', async ({ action, failed }) => {
-    const { control, id, service, upstreams } = setup()
+    const { control, id, service } = setup()
     const old = deferred<unknown>()
     fetchMock.mockReturnValueOnce(old.promise)
     const oldOperation = invoke(control, action)
@@ -302,7 +304,6 @@ describe('Service control', () => {
     expect(control.configurationFeedback.value).toBeNull()
     expect(control.tokenFeedback.value).toBeNull()
     expect(service.refresh).toHaveBeenCalledOnce()
-    expect(upstreams.refresh).toHaveBeenCalledOnce()
     current.resolve(view('service-b'))
     await expect(newOperation).resolves.toBe(true)
     expect(control.controls.value.discovering).toBe(false)
@@ -366,7 +367,7 @@ describe('Service control', () => {
   })
 
   it('drops late results and clears sensitive drafts after disposal', async () => {
-    const { control, upstreams } = setup()
+    const { control } = setup()
     const request = deferred<unknown>()
     fetchMock.mockReturnValueOnce(request.promise)
     control.serviceToken.value = 'draft'
@@ -377,6 +378,5 @@ describe('Service control', () => {
     expect(control.serviceToken.value).toBe('')
     expect(control.pageFeedback.value).toBeNull()
     expect(control.controls.value.discoverDisabled).toBe(true)
-    expect(upstreams.refresh).not.toHaveBeenCalled()
   })
 })

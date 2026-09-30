@@ -18,7 +18,7 @@ import { isServiceTargetReady } from '~~/server/utils/service-upstream-readiness
 import { applyPlatformMutation } from '~~/server/services/platform-endpoint-publication-service'
 import type { UpstreamView } from '~~/server/types/platform-publication'
 import { normalizeUpstreamTargetUrl } from '~~/server/utils/upstream-target-url'
-import { resetGatewayTargetHealthForTarget } from '~~/server/services/dynamic-gateway-target-service'
+import { gatewayTargetHealth } from '~~/server/services/gateway-target-health'
 
 interface CreateUpstreamInput {
   slug: string
@@ -364,7 +364,7 @@ export const platformUpstreamService = {
         }).where(eq(upstreamTargets.id, id)).returning())
         if (!target) throw new Error('target update returned no row')
         if (input.baseUrl !== undefined || input.enabled !== undefined) {
-          afterCommit(tx, () => resetGatewayTargetHealthForTarget(target.upstreamServiceId, target.id))
+          afterCommit(tx, () => gatewayTargetHealth.reset(target.upstreamServiceId, target.id))
         }
         const disablingPublishedTarget = binding.target.enabled
           && target.enabled === false
@@ -418,7 +418,7 @@ export const platformUpstreamService = {
         )
       }
       await tx.delete(upstreamTargets).where(eq(upstreamTargets.id, id))
-      afterCommit(tx, () => resetGatewayTargetHealthForTarget(binding.target.upstreamServiceId, binding.target.id))
+      afterCommit(tx, () => gatewayTargetHealth.reset(binding.target.upstreamServiceId, binding.target.id))
       return binding.target
     }
     const removed = options.transaction

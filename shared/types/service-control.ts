@@ -1,4 +1,5 @@
 import type { ServiceConfigurationValue } from '#shared/service-control'
+import type { PlatformUpstream } from './platform'
 
 export type {
   RedactedServiceConfigurationState,
@@ -77,6 +78,10 @@ export interface ServiceConfigurationView {
 export interface RoutingRevisionRef {
   id: string
   sequence: number
+}
+
+export interface PlatformUpstreamDetail extends ServiceConfigurationView {
+  upstream: PlatformUpstream
 }
 
 export interface ServiceConfigurationSyncResult {

@@ -23,6 +23,16 @@
 
 不要把服务端密钥、数据库连接或 Node-only 依赖放入 `app/` 或客户端可导入的 `shared/` 文件。
 
+### 应用主题
+
+`app/constants/app-ui.ts` 集中主题选择和 Nuxt UI 适配。`app/app.vue` 根据路由元信息选择主题，
+通过 `useHead` 在 HTML 根节点设置 `data-app-theme`；认证页显式声明 `appTheme: 'auth'`，
+后台沿用 dashboard layout，其他页面使用 public。`app/assets/css/theme.css` 保存共享明暗色值及场景差异。
+
+Nuxt UI 的必要样式标记放在 `app.config.ts` 的 `slots` 中，局部 `ui` 只提供布局等差异；
+调用方不需要手工补齐浮层主题类名。`UTheme` 保持位于 `UApp` 外部，使程序化浮层与页面使用同一主题。
+新增或调整主题时运行 `test/unit/app/app-theme.test.ts`，覆盖局部插槽覆盖与页面切换后的实际渲染。
+
 ### TypeScript 约定
 
 - Vue 组件统一使用 `<script setup lang="ts">`。

@@ -169,7 +169,7 @@ onBeforeUnmount(() => {
     :title="$t('common.notifications.title')"
     :description="$t('common.notifications.description')"
     :ui="{
-      content: 'dashboard-slideover sm:max-w-[34rem]',
+      content: 'sm:max-w-[34rem]',
       header: 'items-start gap-3 pe-14 sm:pe-16',
       wrapper: 'min-w-0 flex-1',
       body: 'p-0 sm:p-0'

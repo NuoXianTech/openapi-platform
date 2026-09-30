@@ -4,7 +4,7 @@ import { parseFetchError } from '~/utils/client-error'
 import type { FormError, FormSubmitEvent } from '@nuxt/ui'
 import { compactFormErrors, emailError } from '~/utils/form-validation'
 
-definePageMeta({ layout: false })
+definePageMeta({ layout: false, appTheme: 'auth' })
 
 const { t } = useI18n()
 const canAutofocus = useMediaQuery('(hover: hover) and (pointer: fine)')

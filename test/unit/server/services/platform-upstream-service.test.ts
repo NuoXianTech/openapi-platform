@@ -5,9 +5,11 @@ import { drizzle } from 'drizzle-orm/pglite'
 import { migrate } from 'drizzle-orm/pglite/migrator'
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import * as schema from '~~/server/db/schema'
-import * as gatewayTargets from '~~/server/services/dynamic-gateway-target-service'
+import { gatewayTargetHealth } from '~~/server/services/gateway-target-health'
 import { withCommittedTransaction } from '~~/server/utils/committed-transaction'
 import { encryptStoredSecret } from '~~/server/utils/stored-secret'
+import * as availability from '~~/server/services/service-availability-service'
+import { getPlatformUpstreamDetail } from '~~/server/services/platform-upstream-detail'
 
 const testContext = vi.hoisted(() => ({ database: null as unknown }))
 
@@ -58,6 +60,29 @@ beforeEach(async () => {
 
 afterAll(async () => client.close())
 afterEach(() => vi.restoreAllMocks())
+
+it('reads and probes only the requested Upstream, exposing no stored credentials', async () => {
+  const target = await createConfiguredTarget()
+  const unrelated = await platformUpstreamService.create({
+    slug: 'unrelated', name: 'Unrelated', loadBalancing: 'round_robin',
+    serviceToken: 'unrelated-secret-token-at-least-32-characters',
+    targets: [{ baseUrl: 'http://127.0.0.1:8089', weight: 1 }]
+  })
+  const probe = vi.spyOn(availability, 'resolveServiceAvailability').mockImplementation(async (_description, targets) => {
+    if (targets.some(item => item.id === unrelated.targets[0]!.id)) throw new Error('unrelated Target is offline')
+    return { overall: 'online', targets: new Map(targets.map(item => [item.id, 'online' as const])) }
+  })
+  const detail = await getPlatformUpstreamDetail(target.upstreamServiceId)
+  expect(probe).toHaveBeenCalledOnce()
+  expect(probe.mock.calls[0]![1].map(item => item.id)).toEqual([target.id])
+  expect(detail.upstream.id).toBe(target.upstreamServiceId)
+  expect(detail.upstream.targets.map(item => item.id)).toEqual([target.id])
+  expect(detail.upstream.connection).toEqual(detail.connection)
+  expect(detail.targets[0]?.availability).toBe('online')
+  expect(JSON.stringify(detail)).not.toContain('Ciphertext')
+  expect(JSON.stringify(detail)).not.toContain('openapi-test-service-token')
+  await expect(getPlatformUpstreamDetail('00000000-0000-4000-8000-000000000001')).rejects.toMatchObject({ statusCode: 404 })
+})
 
 async function createConfiguredTarget() {
   const upstream = await platformUpstreamService.create({
@@ -112,7 +137,7 @@ async function createActiveRoute(upstreamServiceId: string) {
 describe('Platform upstream target state', () => {
   it.each(['update', 'remove'] as const)('preserves Target health when %s is rolled back by publication failure', async (operation) => {
     const target = await createConfiguredTarget()
-    const reset = vi.spyOn(gatewayTargets, 'resetGatewayTargetHealthForTarget')
+    const reset = vi.spyOn(gatewayTargetHealth, 'reset')
     vi.spyOn(routingRevisionService, 'publish').mockRejectedValueOnce(new Error('publication rejected'))
     const mutation = operation === 'update'
       ? platformUpstreamService.updateTargetAndPublish(target.id, { enabled: false }, null)
@@ -125,7 +150,7 @@ describe('Platform upstream target state', () => {
 
   it.each(['update', 'remove'] as const)('clears Target health once, after the %s publication commits', async (operation) => {
     const target = await createConfiguredTarget()
-    const reset = vi.spyOn(gatewayTargets, 'resetGatewayTargetHealthForTarget')
+    const reset = vi.spyOn(gatewayTargetHealth, 'reset')
     const publish = routingRevisionService.publish
     vi.spyOn(routingRevisionService, 'publish').mockImplementation(async (...args) => {
       expect(reset).not.toHaveBeenCalled()
@@ -138,7 +163,7 @@ describe('Platform upstream target state', () => {
 
   it('also clears health for a standalone Target update after its transaction commits', async () => {
     const target = await createConfiguredTarget()
-    const reset = vi.spyOn(gatewayTargets, 'resetGatewayTargetHealthForTarget')
+    const reset = vi.spyOn(gatewayTargetHealth, 'reset')
     await platformUpstreamService.updateTarget(target.id, { baseUrl: 'http://127.0.0.1:9090' })
     expect(reset).toHaveBeenCalledExactlyOnceWith(target.upstreamServiceId, target.id)
   })

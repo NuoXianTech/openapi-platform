@@ -3,7 +3,7 @@ import type { VerifyEmailInput } from '#shared/types/auth'
 import { parseFetchError } from '~/utils/client-error'
 import { USER_OVERVIEW_PATH } from '~/constants/dashboard-config'
 
-definePageMeta({ layout: false })
+definePageMeta({ layout: false, appTheme: 'auth' })
 
 const { t } = useI18n()
 useHead(() => ({ title: t('auth.verifyEmail.title') }))
