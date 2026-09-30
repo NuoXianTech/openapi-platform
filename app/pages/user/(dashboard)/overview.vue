@@ -146,7 +146,7 @@ async function copyCurl() {
             </UButton>
           </template>
 
-          <div class="flex h-full flex-col gap-4 rounded-lg border border-default bg-elevated p-4">
+          <div class="flex h-full flex-col gap-4 rounded-xl border border-default bg-elevated p-4">
             <div class="flex items-center justify-between">
               <div class="flex items-center gap-2">
                 <UIcon
@@ -165,7 +165,7 @@ async function copyCurl() {
                 {{ $t('common.actions.copy') }}
               </UButton>
             </div>
-            <pre class="font-mono text-[11px] leading-relaxed text-toned bg-elevated/50 rounded-md p-3 overflow-x-auto"><code>{{ sampleCurl }}</code></pre>
+            <pre class="overflow-x-auto rounded-md border border-default bg-default p-4 font-mono text-sm leading-5 text-toned"><code>{{ sampleCurl }}</code></pre>
 
             <div class="mt-auto space-y-2.5 border-t border-default pt-3">
               <div class="flex items-center justify-between text-xs">

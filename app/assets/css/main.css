@@ -3,6 +3,7 @@
 @import "./fonts.css";
 @import "./motion.css";
 @import "./public.css";
+@import "./dashboard.css";
 
 @custom-variant dark (&:is(.dark *));
 
@@ -160,12 +161,11 @@ kbd,
 .dashboard-navbar {
   min-height: 3.75rem;
   border-bottom-color: var(--ui-border);
-  background: color-mix(in oklab, var(--ui-bg) 90%, transparent);
-  backdrop-filter: blur(16px) saturate(120%);
+  background: var(--dashboard-surface);
 }
 
 .dashboard-toolbar {
-  background: color-mix(in oklab, var(--ui-bg-elevated) 72%, var(--ui-bg) 28%);
+  background: var(--dashboard-surface);
 }
 
 .dashboard-section-navbar {
@@ -209,7 +209,7 @@ kbd,
 }
 
 .dashboard-action-bar {
-  padding: 0.625rem;
+  padding: 0.75rem;
   background: var(--dashboard-surface);
   border: 1px solid var(--dashboard-border);
   border-radius: var(--dashboard-radius);
@@ -251,7 +251,7 @@ kbd,
 }
 
 .dashboard-table-card :where([data-slot="header"]) {
-  padding: 0.75rem 0.875rem;
+  padding: 1rem 1.5rem;
   border-bottom-color: var(--dashboard-border);
 }
 
@@ -295,7 +295,7 @@ kbd,
 
 .dashboard-settings-page {
   display: grid;
-  gap: 1.25rem;
+  gap: 1.5rem;
 }
 
 .dashboard-oauth-provider-card {
@@ -311,8 +311,7 @@ kbd,
 }
 
 .admin-modal-overlay {
-  background: color-mix(in oklab, var(--ui-bg) 54%, transparent);
-  backdrop-filter: blur(10px);
+  background: rgb(0 0 0 / 24%);
 }
 
 .admin-modal-content {
@@ -320,40 +319,32 @@ kbd,
   overflow: hidden;
   border: 1px solid var(--dashboard-border);
   border-radius: var(--dashboard-radius);
-  background:
-    linear-gradient(
-      180deg,
-      color-mix(in oklab, var(--dashboard-surface) 96%, var(--ui-bg) 4%) 0%,
-      var(--dashboard-surface) 42%,
-      color-mix(in oklab, var(--dashboard-surface) 94%, var(--ui-bg) 6%) 100%
-    );
-  box-shadow:
-    0 24px 60px -34px color-mix(in oklab, var(--ui-text) 34%, transparent),
-    var(--dashboard-shadow);
+  background: var(--dashboard-surface);
+  box-shadow: var(--dashboard-floating-shadow);
 }
 
 .admin-modal-header {
   min-height: auto;
   align-items: flex-start;
   gap: 0.5rem;
-  padding: 0.875rem 1rem;
+  padding: 1rem;
   border-bottom: 1px solid var(--dashboard-border);
-  background: color-mix(in oklab, var(--dashboard-surface) 88%, var(--ui-bg) 12%);
+  background: var(--dashboard-surface);
 }
 
 .admin-modal-title {
   padding-inline-end: 1.75rem;
-  font-size: 0.9375rem;
-  line-height: 1.35;
-  font-weight: 650;
-  letter-spacing: 0;
+  font-size: 1.25rem;
+  line-height: 1.4;
+  font-weight: 600;
+  letter-spacing: -0.02em;
   color: var(--ui-text-highlighted);
 }
 
 .admin-modal-description {
   margin-top: 0.25rem;
   padding-inline-end: 1.75rem;
-  font-size: 0.8125rem;
+  font-size: 0.875rem;
   line-height: 1.45;
   color: var(--ui-text-muted);
 }
@@ -379,7 +370,7 @@ kbd,
   gap: 0.5rem;
   padding: 0.875rem 1rem;
   border-top: 1px solid var(--dashboard-border);
-  background: color-mix(in oklab, var(--dashboard-surface-muted) 74%, var(--dashboard-surface) 26%);
+  background: var(--dashboard-surface-muted);
 }
 
 .admin-modal-close {
@@ -392,16 +383,14 @@ kbd,
 }
 
 .dark .admin-modal-content {
-  box-shadow:
-    0 24px 64px -30px color-mix(in oklab, black 72%, transparent),
-    var(--dashboard-shadow);
+  box-shadow: var(--dashboard-floating-shadow);
 }
 
 @media (width >= 640px) {
   .admin-modal-header,
   .admin-modal-body,
   .admin-modal-footer {
-    padding-inline: 1.25rem;
+    padding-inline: 1.5rem;
   }
 }
 
@@ -456,31 +445,31 @@ kbd,
 .dashboard-hero-surface {
   isolation: isolate;
   border-color: var(--dashboard-border);
+  border-radius: var(--dashboard-radius);
+  background: var(--dashboard-surface);
+  box-shadow: var(--dashboard-shadow);
+}
+
+.dashboard-overview-hero::before {
+  position: absolute;
+  z-index: 0;
+  inset: 0;
   background:
-    linear-gradient(
-      135deg,
-      color-mix(in oklab, var(--dashboard-surface-muted) 72%, var(--dashboard-surface)) 0%,
-      var(--dashboard-surface) 46%,
-      var(--dashboard-surface) 100%
-    );
-  box-shadow:
-    var(--dashboard-shadow),
-    inset 0 1px 0 color-mix(in oklab, white 62%, transparent),
-    0 24px 48px -46px color-mix(in oklab, var(--ui-text) 42%, transparent);
+    radial-gradient(ellipse at 70% 0%, rgb(0 223 216 / 10%), transparent 50%),
+    radial-gradient(ellipse at 100% 40%, rgb(121 40 202 / 9%), transparent 45%),
+    radial-gradient(ellipse at 85% 100%, rgb(255 0 128 / 6%), transparent 45%);
+  pointer-events: none;
+  content: '';
 }
 
-/* Keep dashboard surfaces compact without redefining Tailwind radii globally. */
-.dashboard-shell .rounded-xl,
-.dashboard-shell .rounded-2xl,
-.dashboard-shell .rounded-3xl {
-  border-radius: 0.5rem;
+.dashboard-overview-hero h2 {
+  letter-spacing: -0.04em;
 }
 
-.dark .dashboard-hero-surface {
-  box-shadow:
-    var(--dashboard-shadow),
-    inset 0 1px 0 color-mix(in oklab, white 7%, transparent),
-    0 24px 48px -44px color-mix(in oklab, black 64%, transparent);
+@media (width < 640px) {
+  .dashboard-table-card :where([data-slot="header"]) {
+    padding-inline: 1rem;
+  }
 }
 
 .public-page {

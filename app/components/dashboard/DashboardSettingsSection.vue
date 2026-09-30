@@ -20,7 +20,7 @@ defineProps<DashboardSettingsSectionProps>()
     >
       <template #header>
         <div class="min-w-0">
-          <h2 class="text-sm font-semibold text-highlighted sm:text-base">
+          <h2 class="text-base font-semibold leading-6 text-highlighted">
             {{ title }}
           </h2>
           <p
@@ -63,9 +63,7 @@ defineProps<DashboardSettingsSectionProps>()
   border-color: var(--dashboard-border);
   border-radius: var(--dashboard-radius);
   background: var(--dashboard-surface);
-  box-shadow:
-    0 1px 2px color-mix(in oklab, var(--ui-text) 5%, transparent),
-    0 18px 36px -34px color-mix(in oklab, var(--ui-text) 24%, transparent);
+  box-shadow: var(--dashboard-shadow);
 }
 
 .dashboard-settings-section-card :deep(.dashboard-settings-section-header) {
@@ -74,14 +72,8 @@ defineProps<DashboardSettingsSectionProps>()
   align-items: center;
   justify-content: space-between;
   gap: 0.75rem;
-  padding: 0.75rem 0.875rem;
-  background:
-    linear-gradient(
-      180deg,
-      color-mix(in oklab, var(--dashboard-surface-muted) 64%, var(--dashboard-surface)) 0%,
-      color-mix(in oklab, var(--dashboard-surface-muted) 34%, var(--dashboard-surface)) 100%
-    );
-  box-shadow: inset 0 1px 0 color-mix(in oklab, white 58%, transparent);
+  padding: 1rem;
+  background: var(--dashboard-surface);
 }
 
 .dashboard-settings-section-card :deep(.dashboard-settings-section-actions) {
@@ -93,16 +85,11 @@ defineProps<DashboardSettingsSectionProps>()
 }
 
 .dashboard-settings-section-card :deep(.dashboard-settings-section-body) {
-  background:
-    linear-gradient(
-      180deg,
-      color-mix(in oklab, var(--dashboard-surface) 97%, var(--dashboard-surface-muted) 3%) 0%,
-      var(--dashboard-surface) 9rem
-    );
+  background: var(--dashboard-surface);
 }
 
 .dashboard-settings-section-card :deep(.dashboard-settings-section-body > :where(:not([role="separator"]))) {
-  padding: 0.875rem;
+  padding: 1rem;
 }
 
 .dashboard-settings-section-card :deep(.dashboard-settings-section-body > :where(:not([role="separator"])) + :where(:not([role="separator"]))) {
@@ -110,7 +97,7 @@ defineProps<DashboardSettingsSectionProps>()
 }
 
 .dashboard-settings-section-card :deep(.dashboard-settings-section-footer) {
-  background: color-mix(in oklab, var(--dashboard-surface-muted) 54%, var(--dashboard-surface));
+  background: var(--dashboard-surface-muted);
 }
 
 .dashboard-settings-section-footer-content {
@@ -120,30 +107,26 @@ defineProps<DashboardSettingsSectionProps>()
   align-items: center;
   justify-content: flex-end;
   gap: 0.5rem;
-  padding: 0.625rem 0.875rem;
-}
-
-:global(.dark) .dashboard-settings-section-card :deep(.dashboard-settings-section-header) {
-  box-shadow: inset 0 1px 0 color-mix(in oklab, white 7%, transparent);
+  padding: 1rem;
 }
 
 @media (width >= 640px) {
   .dashboard-settings-section-card :deep(.dashboard-settings-section-header) {
-    padding-inline: 1rem;
+    padding: 1.25rem 1.5rem;
   }
 
   .dashboard-settings-section-card :deep(.dashboard-settings-section-body > :where(:not([role="separator"]))) {
-    padding: 0.875rem 1rem;
+    padding: 1.5rem;
   }
 
   .dashboard-settings-section-footer-content {
-    padding-inline: 1rem;
+    padding-inline: 1.5rem;
   }
 }
 
 @media (width < 640px) {
   .dashboard-settings-section-footer-content {
-    padding: 0.75rem 0.875rem;
+    padding: 1rem;
   }
 
   .dashboard-settings-section-footer-content :deep(button) {

@@ -211,7 +211,7 @@ function recentStatusColor(row: AdminDashboardRecentCall): HttpStatusColor {
             </UButton>
           </template>
 
-          <div class="flex h-full flex-col gap-4 rounded-lg border border-default bg-elevated p-4">
+          <div class="flex h-full flex-col gap-4 rounded-xl border border-default bg-elevated p-4">
             <div class="flex items-center justify-between">
               <div class="flex items-center gap-2">
                 <UIcon

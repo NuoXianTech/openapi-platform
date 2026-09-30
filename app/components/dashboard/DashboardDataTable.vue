@@ -60,8 +60,8 @@ const DEFAULT_TABLE_UI = {
   base: 'dashboard-table-native table-fixed border-separate border-spacing-0',
   thead: '[&>tr]:[background-color:var(--dashboard-table-header)] [&>tr]:after:content-none',
   tbody: '[&>tr]:last:[&>td]:border-b-0',
-  th: 'h-10 px-3 py-2 text-xs font-semibold tracking-[0.01em] text-toned first:rounded-tl-md last:rounded-tr-md border-b border-muted',
-  td: 'px-3 py-3 text-[13px] leading-5 text-default border-b border-muted [background-color:var(--dashboard-table-row)]',
+  th: 'h-10 px-4 py-2 text-xs font-medium tracking-normal text-muted border-b border-default',
+  td: 'px-4 py-3 text-sm leading-5 text-default border-b border-default [background-color:var(--dashboard-table-row)]',
   empty: 'py-9 border-b border-muted rounded-b-md [background-color:var(--dashboard-table-row)]',
   separator: 'h-0'
 }
@@ -103,7 +103,7 @@ function onColumnVisibilityChange(value: Record<string, boolean> | undefined) {
 </script>
 
 <template>
-  <div class="dashboard-data-table flex flex-col gap-2.5">
+  <div class="dashboard-data-table flex flex-col">
     <div
       v-if="showSkeleton"
       class="dashboard-table-skeleton overflow-hidden rounded-md"
@@ -116,7 +116,7 @@ function onColumnVisibilityChange(value: Record<string, boolean> | undefined) {
           <div
             v-for="columnIndex in skeletonColumnCount"
             :key="`header-${columnIndex}`"
-            class="px-3 py-2"
+            class="px-4 py-2"
           >
             <div
               class="dashboard-skeleton h-3 rounded-sm"
@@ -133,7 +133,7 @@ function onColumnVisibilityChange(value: Record<string, boolean> | undefined) {
           <div
             v-for="columnIndex in skeletonColumnCount"
             :key="`${rowIndex}-${columnIndex}`"
-            class="px-3 py-3"
+            class="px-4 py-3"
           >
             <div
               class="dashboard-skeleton h-4 rounded-sm"
@@ -197,7 +197,7 @@ function onColumnVisibilityChange(value: Record<string, boolean> | undefined) {
 
     <div
       v-if="showPagination"
-      class="flex flex-col gap-2.5 border-t border-default px-3 py-2.5 sm:flex-row sm:items-center sm:justify-between"
+      class="dashboard-table-pagination flex flex-col gap-3 border-t border-default px-4 py-3 sm:flex-row sm:items-center sm:justify-between"
     >
       <div class="flex w-full items-center justify-between gap-2 sm:w-auto sm:justify-start">
         <span class="text-xs text-muted tabular-nums">

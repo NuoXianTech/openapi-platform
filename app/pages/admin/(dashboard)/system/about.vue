@@ -43,7 +43,7 @@ const stackItemKeys = ['nuxt', 'ui', 'nitro', 'database', 'tooling'] as const
                 {{ t('admin.system.about.project.eyebrow') }}
               </p>
               <div class="mt-1.5 flex flex-wrap items-center gap-2.5">
-                <h2 class="font-display text-2xl font-bold tracking-tight text-highlighted sm:text-3xl">
+                <h2 class="font-display text-2xl font-semibold tracking-tight text-highlighted sm:text-3xl">
                   OpenAPI
                 </h2>
                 <UBadge
@@ -161,18 +161,8 @@ const stackItemKeys = ['nuxt', 'ui', 'nitro', 'database', 'tooling'] as const
 }
 
 .about-project {
-  padding: 1.125rem;
-  background:
-    radial-gradient(
-      circle at 92% 0%,
-      color-mix(in oklab, var(--ui-primary) 12%, transparent) 0%,
-      transparent 36%
-    ),
-    linear-gradient(
-      180deg,
-      color-mix(in oklab, var(--dashboard-surface) 96%, var(--dashboard-surface-muted) 4%) 0%,
-      var(--dashboard-surface) 100%
-    );
+  padding: 1rem;
+  background: var(--dashboard-surface);
 }
 
 .about-project-intro {
@@ -199,13 +189,11 @@ const stackItemKeys = ['nuxt', 'ui', 'nitro', 'database', 'tooling'] as const
   flex: none;
   place-items: center;
   overflow: hidden;
-  border: 1px solid color-mix(in oklab, var(--ui-primary) 30%, var(--ui-border));
-  border-radius: 1rem;
-  background: color-mix(in oklab, var(--ui-primary) 9%, var(--ui-bg-elevated));
+  border: 1px solid var(--dashboard-border);
+  border-radius: var(--dashboard-radius);
+  background: var(--dashboard-surface-muted);
   color: var(--ui-primary);
-  box-shadow:
-    inset 0 1px 0 color-mix(in oklab, white 58%, transparent),
-    0 10px 24px -18px color-mix(in oklab, var(--ui-primary) 72%, transparent);
+  box-shadow: none;
 }
 
 .about-project-mark::after {
@@ -237,12 +225,6 @@ const stackItemKeys = ['nuxt', 'ui', 'nitro', 'database', 'tooling'] as const
   height: 100%;
 }
 
-:global(.dark) .about-project-mark {
-  box-shadow:
-    inset 0 1px 0 color-mix(in oklab, white 8%, transparent),
-    0 10px 24px -18px color-mix(in oklab, var(--ui-primary) 64%, transparent);
-}
-
 @media (width >= 480px) {
   .about-project-facts {
     grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -251,7 +233,7 @@ const stackItemKeys = ['nuxt', 'ui', 'nitro', 'database', 'tooling'] as const
 
 @media (width >= 640px) {
   .about-project {
-    padding: 1.375rem 1.5rem;
+    padding: 1.5rem;
   }
 
   .about-project-facts {

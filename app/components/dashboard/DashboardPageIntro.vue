@@ -9,7 +9,7 @@ defineProps<{
 <template>
   <section
     :class="surface
-      ? 'dashboard-hero-surface relative overflow-hidden rounded-lg border border-default p-5 sm:p-6'
+      ? 'dashboard-hero-surface relative overflow-hidden rounded-xl border border-default p-4 sm:p-6'
       : undefined"
   >
     <div
@@ -21,7 +21,7 @@ defineProps<{
       <div class="min-w-0">
         <h2
           class="font-semibold text-highlighted"
-          :class="surface ? 'text-xl sm:text-2xl' : 'text-lg sm:text-xl'"
+          :class="surface ? 'text-xl leading-7 sm:text-2xl sm:leading-8' : 'text-xl leading-7'"
         >
           {{ title }}
         </h2>

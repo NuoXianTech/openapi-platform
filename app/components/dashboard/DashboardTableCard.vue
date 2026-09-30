@@ -37,12 +37,12 @@ const totalText = computed(() => {
             class="size-4.5 shrink-0 text-muted"
           />
           <div class="min-w-0">
-            <h3 class="text-sm leading-5 font-semibold text-highlighted">
+            <h3 class="text-base leading-6 font-semibold text-highlighted">
               {{ title }}
             </h3>
             <p
               v-if="description"
-              class="mt-0.5 text-xs leading-5 text-muted"
+              class="mt-1 text-sm leading-5 text-muted"
             >
               {{ description }}
             </p>
@@ -78,12 +78,12 @@ const totalText = computed(() => {
           class="size-4.5 shrink-0 text-muted"
         />
         <div class="min-w-0">
-          <h3 class="text-sm leading-5 font-semibold text-highlighted">
+          <h3 class="text-base leading-6 font-semibold text-highlighted">
             {{ title }}
           </h3>
           <p
             v-if="description"
-            class="mt-0.5 text-xs leading-5 text-muted"
+            class="mt-1 text-sm leading-5 text-muted"
           >
             {{ description }}
           </p>

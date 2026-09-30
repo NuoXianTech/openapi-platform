@@ -9,7 +9,7 @@ interface DashboardContentCardProps {
 withDefaults(defineProps<DashboardContentCardProps>(), {
   description: undefined,
   icon: undefined,
-  bodyClass: undefined
+  bodyClass: 'p-4 sm:p-6'
 })
 
 defineOptions({ inheritAttrs: false })
@@ -41,12 +41,12 @@ defineOptions({ inheritAttrs: false })
           </span>
 
           <div class="min-w-0">
-            <h3 class="text-sm font-semibold leading-5 text-highlighted sm:text-base">
+            <h3 class="text-base font-semibold leading-6 text-highlighted">
               {{ title }}
             </h3>
             <p
               v-if="description"
-              class="mt-0.5 text-xs leading-5 text-muted"
+              class="mt-1 text-sm leading-5 text-muted"
             >
               {{ description }}
             </p>
@@ -79,9 +79,7 @@ defineOptions({ inheritAttrs: false })
   border-color: var(--dashboard-border);
   border-radius: var(--dashboard-radius);
   background: var(--dashboard-surface);
-  box-shadow:
-    0 1px 2px color-mix(in oklab, var(--ui-text) 5%, transparent),
-    0 16px 34px -34px color-mix(in oklab, var(--ui-text) 22%, transparent);
+  box-shadow: var(--dashboard-shadow);
 }
 
 .dashboard-content-card :deep(.dashboard-content-card-header) {
@@ -90,26 +88,20 @@ defineOptions({ inheritAttrs: false })
   align-items: center;
   justify-content: space-between;
   gap: 0.75rem;
-  padding: 0.75rem 0.875rem;
+  padding: 1rem;
   border-bottom: 1px solid var(--dashboard-border);
-  background:
-    linear-gradient(
-      180deg,
-      color-mix(in oklab, var(--dashboard-surface-muted) 54%, var(--dashboard-surface)) 0%,
-      color-mix(in oklab, var(--dashboard-surface-muted) 24%, var(--dashboard-surface)) 100%
-    );
-  box-shadow: inset 0 1px 0 color-mix(in oklab, white 54%, transparent);
+  background: var(--dashboard-surface);
 }
 
 .dashboard-content-card :deep(.dashboard-content-card-icon) {
   display: grid;
-  width: 1.875rem;
-  height: 1.875rem;
+  width: 2rem;
+  height: 2rem;
   flex: none;
   place-items: center;
   border: 1px solid var(--dashboard-border);
-  border-radius: 0.5rem;
-  background: color-mix(in oklab, var(--dashboard-surface-muted) 72%, var(--dashboard-surface));
+  border-radius: var(--dashboard-radius-sm);
+  background: var(--dashboard-surface-muted);
   color: var(--ui-text-toned);
 }
 
@@ -122,26 +114,17 @@ defineOptions({ inheritAttrs: false })
 }
 
 .dashboard-content-card :deep(.dashboard-content-card-body) {
-  background:
-    linear-gradient(
-      180deg,
-      color-mix(in oklab, var(--dashboard-surface) 96%, var(--dashboard-surface-muted) 4%) 0%,
-      var(--dashboard-surface) 10rem
-    );
+  background: var(--dashboard-surface);
 }
 
 .dashboard-content-card :deep(.dashboard-content-card-footer) {
   border-top: 1px solid var(--dashboard-border);
-  background: color-mix(in oklab, var(--dashboard-surface-muted) 34%, var(--dashboard-surface));
-}
-
-:global(.dark) .dashboard-content-card :deep(.dashboard-content-card-header) {
-  box-shadow: inset 0 1px 0 color-mix(in oklab, white 7%, transparent);
+  background: var(--dashboard-surface-muted);
 }
 
 @media (width >= 640px) {
   .dashboard-content-card :deep(.dashboard-content-card-header) {
-    padding-inline: 1rem;
+    padding-inline: 1.5rem;
   }
 }
 </style>

@@ -41,7 +41,7 @@ useHead({ title: () => props.title })
           :ui="{
             list: 'min-w-full w-max',
             item: 'shrink-0',
-            link: 'px-2.5 py-1.5 rounded-lg text-sm',
+            link: 'dashboard-section-tab px-3 py-2 rounded-md text-sm',
             linkLeadingIcon: 'size-4',
             linkLabel: 'font-medium'
           }"
