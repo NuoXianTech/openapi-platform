@@ -67,8 +67,8 @@ const text = computed(() => {
   font-weight: 500;
 }
 
-.auth-password-strength__value--success { color: var(--ui-color-success-500); }
-.auth-password-strength__value--warning { color: var(--ui-color-warning-500); }
-.auth-password-strength__value--error { color: var(--ui-color-error-500); }
+.auth-password-strength__value--success { color: var(--ui-success); }
+.auth-password-strength__value--warning { color: var(--ui-warning); }
+.auth-password-strength__value--error { color: var(--ui-error); }
 .auth-password-strength__value--neutral { color: var(--ui-text-muted); }
 </style>

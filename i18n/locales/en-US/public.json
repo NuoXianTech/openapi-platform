@@ -5,7 +5,8 @@
       "catalog": "API catalog",
       "getStarted": "Get started",
       "language": "Change language",
-      "openMenu": "Open navigation menu"
+      "openMenu": "Open navigation menu",
+      "closeMenu": "Close navigation menu"
     },
     "home": {
       "defaultDescription": "A free platform for network data APIs",

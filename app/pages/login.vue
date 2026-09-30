@@ -12,6 +12,7 @@ useHead(() => ({ title: t('auth.login.title') }))
 const { fetchMe, user, login } = useAuth()
 const { turnstile, registrationEnabled, passwordResetEnabled, settings } = useSiteSettings()
 const route = useRoute()
+const canAutofocus = useMediaQuery('(hover: hover) and (pointer: fine)')
 
 interface LoginFormState {
   identifier: string
@@ -62,7 +63,7 @@ const fields = computed(() => [
     defaultValue: '',
     size: 'lg' as const,
     required: true,
-    autofocus: true
+    autofocus: canAutofocus.value
   },
   {
     name: 'password',
@@ -183,7 +184,7 @@ function clearTurnstileError() {
     <UCard
       variant="outline"
       class="auth-card"
-      :ui="{ body: 'min-h-[280px] p-4 sm:p-7' }"
+      :ui="{ body: 'p-4 sm:p-6' }"
     >
       <div
         v-if="checkingAuth"
@@ -192,14 +193,14 @@ function clearTurnstileError() {
       >
         <div class="space-y-2">
           <USkeleton class="h-4 w-24 rounded" />
-          <USkeleton class="h-11 w-full rounded-lg" />
+          <USkeleton class="auth-control-skeleton w-full rounded-md" />
         </div>
         <div class="space-y-2">
           <USkeleton class="h-4 w-20 rounded" />
-          <USkeleton class="h-11 w-full rounded-lg" />
+          <USkeleton class="auth-control-skeleton w-full rounded-md" />
         </div>
         <USkeleton class="h-5 w-32 rounded" />
-        <USkeleton class="h-11 w-full rounded-lg" />
+        <USkeleton class="auth-control-skeleton w-full rounded-md" />
       </div>
 
       <UAuthForm
@@ -219,7 +220,7 @@ function clearTurnstileError() {
             variant="link"
             size="xs"
             to="/forgot-password"
-            class="text-muted px-0"
+            class="auth-text-button text-muted px-0"
           >
             {{ $t('auth.login.forgotPassword') }}
           </UButton>
@@ -231,11 +232,6 @@ function clearTurnstileError() {
               v-model="remember"
               :label="t('auth.login.rememberMe')"
               size="md"
-              :ui="{
-                root: 'w-full',
-                wrapper: 'min-w-0',
-                label: 'cursor-pointer text-[13px] leading-5 font-normal text-muted'
-              }"
             />
 
             <AuthConsent

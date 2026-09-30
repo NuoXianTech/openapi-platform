@@ -18,6 +18,7 @@ useHead(() => ({ title: t('auth.register.title') }))
 
 const { register } = useAuth()
 const { turnstile, registrationEnabled, settings } = useSiteSettings()
+const canAutofocus = useMediaQuery('(hover: hover) and (pointer: fine)')
 
 interface RegisterFormState {
   username: string
@@ -74,7 +75,7 @@ const fields = computed(() => [
     defaultValue: '',
     size: 'lg' as const,
     required: true,
-    autofocus: true
+    autofocus: canAutofocus.value
   },
   {
     name: 'email',
@@ -202,7 +203,7 @@ function clearTurnstileError() {
     <UCard
       variant="outline"
       class="auth-card"
-      :ui="{ body: 'p-4 sm:p-7' }"
+      :ui="{ body: 'p-4 sm:p-6' }"
     >
       <div
         v-if="!registrationEnabled"

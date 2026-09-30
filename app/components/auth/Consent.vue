@@ -13,11 +13,6 @@ const privacyUrl = computed(() => settings.value.privacyUrl || '')
     v-model="modelValue"
     size="md"
     :aria-label="t('auth.consent.ariaLabel')"
-    :ui="{
-      root: 'w-full',
-      wrapper: 'min-w-0',
-      label: 'cursor-pointer text-[13px] leading-5 font-normal text-muted'
-    }"
   >
     <template #label>
       <span>
@@ -27,7 +22,7 @@ const privacyUrl = computed(() => settings.value.privacyUrl || '')
           :to="termsUrl"
           target="_blank"
           rel="noopener noreferrer"
-          class="text-primary font-medium hover:underline"
+          class="auth-inline-link font-medium hover:underline"
           @click.stop
         >
           {{ $t('auth.consent.terms') }}
@@ -40,7 +35,7 @@ const privacyUrl = computed(() => settings.value.privacyUrl || '')
           :to="privacyUrl"
           target="_blank"
           rel="noopener noreferrer"
-          class="text-primary font-medium hover:underline"
+          class="auth-inline-link font-medium hover:underline"
           @click.stop
         >
           {{ $t('auth.consent.privacy') }}

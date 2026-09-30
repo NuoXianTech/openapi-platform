@@ -39,59 +39,16 @@ body:has(.public-page) {
   --ui-border-accented: #404040;
 }
 
-.public-page > header.site-header {
-  background: color-mix(in srgb, var(--ui-bg) 94%, transparent);
-  border-color: var(--ui-border);
-}
-
-.public-page .site-header .site-header__inner,
 .public-page .site-footer .site-footer__inner {
   width: calc(100% - 48px);
   max-width: 1180px;
 }
-
-.public-page .site-header .site-header__inner {
-  height: 64px;
-  gap: 32px;
-}
-.public-page .site-header .site-nav__link {
-  border-radius: 999px;
-  font-size: 14px;
-}
-.public-page .site-header .site-nav__link.is-active {
-  font-weight: 500;
-}
-.public-page .site-header .site-header__icon-action {
-  width: 44px;
-  height: 44px;
-  flex-shrink: 0;
-  justify-content: center;
-  padding: 0;
-  border-radius: 50%;
-  box-shadow: none;
-}
-.public-page .site-header .site-header__icon-action:hover,
-.public-page .site-header .site-header__icon-action:active,
-.public-page .site-header .site-header__icon-action[data-state="open"] {
-  background: var(--ui-bg-accented);
-}
-.public-page .site-header .site-header__text-action {
-  min-height: 44px;
-  padding-inline: 16px;
-  border-radius: 100px;
-  white-space: nowrap;
-}
-.public-page .site-header .site-header__icon-action:focus-visible,
-.public-page .site-header .site-header__text-action:focus-visible {
-  outline: 2px solid var(--ui-ring);
-  outline-offset: 2px;
-}
-.public-page .site-brand .site-brand__copy strong {
+.public-page .site-footer .site-brand .site-brand__copy strong {
   font-size: 18px;
   font-weight: 600;
   letter-spacing: -0.6px;
 }
-.public-page .site-brand .site-brand__mark {
+.public-page .site-footer .site-brand .site-brand__mark {
   box-shadow: none;
   background: var(--ui-bg-elevated);
 }
@@ -115,28 +72,11 @@ body:has(.public-page) {
   margin-top: 0;
 }
 
-@media (width < 1024px) {
-  .public-page .site-header .site-header__inner {
-    gap: 16px;
-  }
-  .public-page .site-header .site-nav {
-    display: none;
-  }
-  .public-page .site-header .site-header__menu {
-    display: inline-flex;
-  }
-}
-
 @media (width < 640px) {
-  .public-page .site-header .site-header__inner,
   .public-page .site-footer .site-footer__inner {
     width: calc(100% - 32px);
   }
-  .public-page .site-header .site-header__inner {
-    height: 64px;
-    gap: 8px;
-  }
-  .public-page .site-brand .site-brand__copy strong {
+  .public-page .site-footer .site-brand .site-brand__copy strong {
     max-width: 7rem;
     font-size: 16px;
   }
