@@ -1,0 +1,44 @@
+.design-floating-panel,
+:root:has(.public-page) [data-reka-popper-content-wrapper] > [data-slot="content"],
+.design-dialog[role="dialog"] {
+  border: 1px solid var(--ui-border);
+  border-radius: 12px;
+  background: var(--ui-bg-elevated);
+  box-shadow: var(--ui-floating-shadow);
+}
+
+.public-page :focus-visible,
+.public-button:focus-visible,
+.design-floating-panel :focus-visible,
+.design-dialog[role="dialog"] :focus-visible {
+  outline: 2px solid var(--ui-ring);
+  outline-offset: 2px;
+}
+
+@media (pointer: coarse) {
+  .public-button {
+    min-width: 44px;
+    min-height: 44px;
+  }
+
+  .design-input > input {
+    min-height: 2.75rem;
+  }
+
+  /* A trailing icon button needs its full hit area plus inset and text spacing.
+     Native trailing icons and empty search fields keep their normal padding. */
+  .design-input:has(> [data-slot="trailing"] > button) > input {
+    padding-inline-end: 3.25rem;
+  }
+
+  .design-input > [data-slot="trailing"]:has(> button) {
+    padding-inline-end: 0.25rem;
+  }
+
+  .design-input > [data-slot="trailing"] > button {
+    width: 2.75rem;
+    min-width: 2.75rem;
+    height: 2.75rem;
+    padding: 0;
+  }
+}

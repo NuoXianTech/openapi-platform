@@ -155,7 +155,7 @@ async function submit() {
           </div>
           <div
             v-else-if="bindings.length === 0"
-            class="text-xs text-muted italic py-2"
+            class="text-xs text-muted py-2"
           >
             {{ $t('admin.users.edit.noOauthBindings') }}
           </div>

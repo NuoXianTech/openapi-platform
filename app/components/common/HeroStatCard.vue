@@ -114,7 +114,7 @@ const { icon = '', iconTone = 'ink', loading = false, valueTitle, labelTitle } =
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 11px;
+  font-size: 12px;
   color: var(--ui-text-muted);
   letter-spacing: 0;
 }

@@ -188,7 +188,7 @@ const {
             </div>
             <span
               v-if="row.original.batchId"
-              class="text-[11px] text-muted font-mono"
+              class="text-xs text-muted font-mono"
             >
               {{ row.original.batchId }}
             </span>

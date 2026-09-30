@@ -184,7 +184,7 @@ function preventDetailsAutoFocus(event: Event) {
       size: 'sm',
       color: 'neutral',
       variant: 'ghost',
-      class: 'rounded-md focus-visible:ring-0 focus-visible:outline-1 focus-visible:outline-offset-2 focus-visible:outline-primary/35'
+      class: 'rounded-md'
     }"
     :ui="{
       overlay: 'bg-elevated/75',
@@ -264,9 +264,9 @@ function preventDetailsAutoFocus(event: Event) {
   flex: 0 0 auto;
   align-items: center;
   border: 1px solid var(--ui-border);
-  border-radius: 5px;
+  border-radius: 6px;
   padding-inline: 0.42rem;
-  font-size: 0.625rem;
+  font-size: 0.75rem;
   line-height: 1;
   white-space: nowrap;
 }
@@ -292,7 +292,7 @@ function preventDetailsAutoFocus(event: Event) {
   border-color: color-mix(in oklab, var(--api-status-color) 28%, var(--ui-border));
   background: color-mix(in oklab, var(--api-status-color) 7%, var(--ui-bg-elevated));
   color: color-mix(in oklab, var(--api-status-color) 82%, var(--ui-text-highlighted));
-  font-weight: 550;
+  font-weight: 500;
   justify-content: center;
 }
 
@@ -320,7 +320,7 @@ function preventDetailsAutoFocus(event: Event) {
   color: var(--ui-text-highlighted);
   font-family: var(--font-display);
   font-size: 1rem;
-  font-weight: 650;
+  font-weight: 600;
   letter-spacing: 0;
   line-height: 1.4;
   text-overflow: ellipsis;
@@ -366,7 +366,7 @@ function preventDetailsAutoFocus(event: Event) {
 }
 
 .api-card__title-trigger:focus-visible {
-  outline: 1px solid var(--ui-border-accented);
+  outline: 2px solid var(--ui-ring);
   outline-offset: 4px;
 }
 
@@ -398,7 +398,8 @@ function preventDetailsAutoFocus(event: Event) {
   overflow: hidden;
   color: var(--ui-text-toned);
   font-family: var(--font-code);
-  font-size: 0.75rem;
+  font-size: 0.875rem;
+  line-height: 1.25rem;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -406,7 +407,7 @@ function preventDetailsAutoFocus(event: Event) {
 .api-card__endpoint-count {
   flex: 0 0 auto;
   color: var(--ui-text-dimmed);
-  font-size: 0.6875rem;
+  font-size: 0.75rem;
   line-height: 1rem;
   white-space: nowrap;
 }

@@ -169,7 +169,7 @@ onBeforeUnmount(() => {
     :title="$t('common.notifications.title')"
     :description="$t('common.notifications.description')"
     :ui="{
-      content: 'sm:max-w-[34rem]',
+      content: 'dashboard-slideover sm:max-w-[34rem]',
       header: 'items-start gap-3 pe-14 sm:pe-16',
       wrapper: 'min-w-0 flex-1',
       body: 'p-0 sm:p-0'
@@ -396,6 +396,9 @@ onBeforeUnmount(() => {
 <style scoped>
 .notification-bell__trigger {
   position: relative;
+  min-width: 44px;
+  min-height: 44px;
+  justify-content: center;
 }
 
 .notification-bell__count {
@@ -403,8 +406,8 @@ onBeforeUnmount(() => {
   top: 0.2rem;
   right: 0.2rem;
   display: inline-flex;
-  min-width: 1rem;
-  height: 1rem;
+  min-width: 1.25rem;
+  height: 1.25rem;
   align-items: center;
   justify-content: center;
   border: 2px solid var(--ui-bg);
@@ -412,8 +415,8 @@ onBeforeUnmount(() => {
   padding-inline: 0.2rem;
   color: var(--ui-text-inverted);
   background: var(--ui-error);
-  font-size: 0.625rem;
-  font-weight: 700;
+  font-size: 0.75rem;
+  font-weight: 500;
   line-height: 1;
 }
 
@@ -440,7 +443,7 @@ onBeforeUnmount(() => {
 
 .notification-center__filters {
   border: 1px solid var(--ui-border);
-  border-radius: 0.5rem;
+  border-radius: 0.375rem;
   padding: 0.1875rem;
   background: var(--ui-bg-muted);
 }
@@ -475,7 +478,7 @@ onBeforeUnmount(() => {
   height: 2.5rem;
   place-items: center;
   border: 1px solid var(--ui-border);
-  border-radius: 0.625rem;
+  border-radius: 0.75rem;
   color: var(--ui-text-toned);
   background: var(--ui-bg-elevated);
 }
@@ -483,9 +486,9 @@ onBeforeUnmount(() => {
 .notification-item {
   overflow: hidden;
   border: 1px solid var(--ui-border);
-  border-radius: 0.625rem;
+  border-radius: 0.75rem;
   background: var(--ui-bg-elevated);
-  box-shadow: 0 1px 2px color-mix(in oklab, var(--ui-text) 4%, transparent);
+  box-shadow: var(--dashboard-shadow);
   transition: background-color 160ms ease;
 }
 
@@ -512,8 +515,8 @@ onBeforeUnmount(() => {
 }
 
 .notification-item__trigger:focus-visible {
-  outline: none;
-  box-shadow: inset 0 0 0 1px var(--ui-border-accented);
+  outline: 2px solid var(--ui-ring);
+  outline-offset: -2px;
 }
 
 .notification-item__level {
@@ -521,7 +524,7 @@ onBeforeUnmount(() => {
   width: 2.25rem;
   height: 2.25rem;
   place-items: center;
-  border-radius: 0.5rem;
+  border-radius: 0.375rem;
 }
 
 .notification-item__level--info {
@@ -563,7 +566,7 @@ onBeforeUnmount(() => {
   overflow: hidden;
   color: var(--ui-text-highlighted);
   font-size: 0.875rem;
-  font-weight: 650;
+  font-weight: 600;
   line-height: 1.35;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -598,7 +601,7 @@ onBeforeUnmount(() => {
   align-items: center;
   gap: 0.3rem;
   color: var(--ui-text-muted);
-  font-size: 0.6875rem;
+  font-size: 0.75rem;
   line-height: 1.4;
 }
 

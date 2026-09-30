@@ -441,7 +441,7 @@ onMounted(() => {
 
 .client-ip-flow-label {
   color: var(--ui-text-muted);
-  font-size: 0.6875rem;
+  font-size: 0.75rem;
   font-weight: 600;
   letter-spacing: 0.04em;
   text-transform: uppercase;

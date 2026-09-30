@@ -4,6 +4,7 @@
 @import "./motion.css";
 @import "./public.css";
 @import "./dashboard.css";
+@import "./design.css";
 
 @custom-variant dark (&:is(.dark *));
 
@@ -16,6 +17,7 @@
   --font-display: var(--font-sans);
   --font-body: var(--font-sans);
   --font-code: var(--font-mono);
+  --ui-floating-shadow: 0 2px 2px rgb(0 0 0 / 4%), 0 8px 16px -4px rgb(0 0 0 / 8%);
 
   --brand-ink: #09090b;
   --brand-primary: #18181b;
@@ -72,6 +74,7 @@
 }
 
 .dark {
+  --ui-floating-shadow: 0 2px 2px rgb(0 0 0 / 12%), 0 8px 16px -4px rgb(0 0 0 / 28%);
   --brand-ink: #fafafa;
   --brand-primary: #f4f4f5;
   --brand-amber: #d9a24a;
@@ -424,16 +427,16 @@ kbd,
 /*
  * tooltip 变量放全局并用 :root:root 抬高优先级，压过 unovis 运行时 injectGlobal 注入到 :root 的
  * 默认值（默认边框 #e5e9f7、box-shadow:none，在纯白 admin 卡片上几乎看不出框）。unovis 把 tooltip
- * append 到容器内，但放全局可保证即便挂到 body 也生效。边框用 accented（比 --ui-border 深）+ 强阴影，
- * 框更清晰。--vis-tooltip-padding:0：内边距由 renderChartTooltip 卡片自身提供（见 utils/chart-tooltip.ts）。
+ * append 到容器内，但放全局可保证即便挂到 body 也生效。复用细边框及轻量浮层阴影。
+ * --vis-tooltip-padding:0：内边距由 renderChartTooltip 卡片自身提供（见 utils/chart-tooltip.ts）。
  */
 :root:root {
   --vis-tooltip-background-color: var(--ui-bg-elevated);
-  --vis-tooltip-border-color: var(--ui-border-accented);
+  --vis-tooltip-border-color: var(--ui-border);
   --vis-tooltip-text-color: var(--ui-text-highlighted);
-  --vis-tooltip-border-radius: 10px;
+  --vis-tooltip-border-radius: 12px;
   --vis-tooltip-padding: 0;
-  --vis-tooltip-box-shadow: 0 10px 30px -8px color-mix(in srgb, var(--ui-text) 30%, transparent);
+  --vis-tooltip-box-shadow: var(--ui-floating-shadow);
 }
 
 .unovis-single-container {

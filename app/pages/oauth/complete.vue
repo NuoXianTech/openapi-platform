@@ -143,7 +143,7 @@ async function submitRegister() {
     <UCard
       variant="outline"
       class="auth-card"
-      :ui="{ body: 'p-6 sm:p-7' }"
+      :ui="{ body: 'p-4 sm:p-6' }"
     >
       <!-- 加载中 -->
       <div

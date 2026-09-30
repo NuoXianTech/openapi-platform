@@ -153,7 +153,7 @@ function openDetail(row: UserCallLogRow) {
               >{{ row.original.apiKeyName || `#${row.original.apiKeyId}` }}</span>
               <span
                 v-else
-                class="text-xs text-muted italic"
+                class="text-xs text-muted"
               >{{ $t('user.logs.noApiKey') }}</span>
             </template>
 

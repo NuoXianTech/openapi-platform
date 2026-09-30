@@ -5,6 +5,7 @@ definePageMeta({ layout: false })
 
 const DIRECTORY_PAGE_SIZE = 12
 const { t } = useI18n()
+const compactPagination = useMediaQuery('(max-width: 639px)')
 const requestUrl = useRequestURL()
 const { settings } = useSiteSettings()
 const gatewayOrigin = computed(() => settings.value.siteUrl || requestUrl.origin)
@@ -190,10 +191,10 @@ useSeoMeta({
                 :page="page"
                 :items-per-page="pageSize"
                 :total="total"
-                :sibling-count="1"
-                show-edges
+                :sibling-count="compactPagination ? 0 : 1"
+                :show-edges="!compactPagination"
                 size="sm"
-                :ui="{ first: 'hidden', last: 'hidden', list: 'gap-0.5 sm:gap-1' }"
+                :ui="{ first: 'hidden', last: 'hidden', list: 'flex-wrap gap-1' }"
                 @update:page="handlePageChange"
               />
             </nav>

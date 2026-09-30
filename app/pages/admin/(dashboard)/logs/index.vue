@@ -232,7 +232,7 @@ async function resetAdvancedFilters() {
           </div>
           <span
             v-else
-            class="text-xs text-muted italic"
+            class="text-xs text-muted"
           >{{ $t('common.identities.anonymous') }}</span>
         </template>
 
@@ -243,7 +243,7 @@ async function resetAdvancedFilters() {
           >{{ row.original.apiKeyName || `#${row.original.apiKeyId}` }}</span>
           <span
             v-else
-            class="text-xs text-muted italic"
+            class="text-xs text-muted"
           >-</span>
         </template>
 
@@ -257,7 +257,7 @@ async function resetAdvancedFilters() {
           </div>
           <span
             v-else
-            class="text-xs text-muted italic"
+            class="text-xs text-muted"
           >-</span>
         </template>
 

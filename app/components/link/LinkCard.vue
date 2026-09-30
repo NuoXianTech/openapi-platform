@@ -146,7 +146,7 @@ const isActive = computed(() => props.status === 1)
   padding: 0;
   border-radius: 0;
   background: transparent;
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 400;
   box-shadow: none;
 }

@@ -204,14 +204,14 @@ async function copyCodeSnippet(value: string): Promise<void> {
   color: var(--ui-text-toned);
   background: var(--ui-bg-elevated);
   font-family: var(--font-code);
-  font-size: 0.72rem;
+  font-size: 0.75rem;
   font-weight: 500;
 }
 
 .api-onboarding-step h3 {
   margin: 0;
   color: var(--ui-text-highlighted);
-  font-size: 0.925rem;
+  font-size: 0.875rem;
   font-weight: 500;
   line-height: 1.4;
 }
@@ -270,8 +270,7 @@ async function copyCodeSnippet(value: string): Promise<void> {
   padding: 1rem;
   color: var(--ui-text-toned);
   background: var(--ui-bg);
-  font-size: 13px;
-  line-height: 1.7;
+  font: 400 14px/20px var(--font-code);
 }
 
 .api-onboarding__guide {
@@ -298,10 +297,6 @@ async function copyCodeSnippet(value: string): Promise<void> {
     width: calc(100% - 32px);
     gap: 2.5rem;
     padding-block: 64px;
-  }
-
-  .api-onboarding-code pre {
-    font-size: 0.6875rem;
   }
 }
 </style>

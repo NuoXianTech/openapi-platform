@@ -231,7 +231,7 @@ async function copyText(value: string): Promise<void> {
                 >{{ parameter.value }}</span>
                 <span
                   v-else
-                  class="font-sans italic text-muted"
+                  class="font-sans text-muted"
                 >{{ $t('admin.logs.call.detail.emptyValue') }}</span>
               </dd>
             </div>

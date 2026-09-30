@@ -220,7 +220,7 @@ function recentStatusColor(row: AdminDashboardRecentCall): HttpStatusColor {
                 />
                 <span class="text-sm font-medium">{{ $t('admin.overview.snapshot.title') }}</span>
               </div>
-              <span class="text-[11px] text-muted tabular-nums">{{ generatedAt }}</span>
+              <span class="text-xs text-muted tabular-nums">{{ generatedAt }}</span>
             </div>
 
             <div class="grid grid-cols-2 gap-3">

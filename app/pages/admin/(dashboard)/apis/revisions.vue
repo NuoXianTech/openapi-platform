@@ -128,7 +128,7 @@ const columns = computed<TableColumn<PlatformRoutingRevisionSummary>[]>(() => [
             <p class="font-mono text-sm font-semibold text-highlighted">
               #{{ row.original.sequence }}
             </p>
-            <p class="mt-1 font-mono text-[11px] text-muted">
+            <p class="mt-1 font-mono text-xs text-muted">
               {{ row.original.id }}
             </p>
           </div>

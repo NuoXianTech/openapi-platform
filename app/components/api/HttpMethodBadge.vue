@@ -44,27 +44,27 @@ const methodTone = computed(() => {
   flex: 0 0 auto;
   align-items: center;
   border: 1px solid color-mix(in oklab, var(--http-method-accent) 30%, var(--ui-border));
-  border-radius: 5px;
+  border-radius: 6px;
   background: color-mix(in oklab, var(--http-method-accent) 7%, var(--ui-bg-elevated));
   color: color-mix(in oklab, var(--http-method-accent) 88%, var(--ui-text-highlighted));
-  box-shadow: inset 0 1px 0 color-mix(in oklab, white 52%, transparent);
+  box-shadow: none;
   font-family: var(--font-code);
-  font-weight: 750;
-  letter-spacing: 0.025em;
-  line-height: 1;
+  font-weight: 500;
+  letter-spacing: 0;
+  line-height: 1rem;
   white-space: nowrap;
 }
 
 .http-method-badge.is-xs {
-  min-height: 1.35rem;
-  padding-inline: 0.42rem;
-  font-size: 0.625rem;
+  min-height: 1.25rem;
+  padding-inline: 0.375rem;
+  font-size: 0.75rem;
 }
 
 .http-method-badge.is-sm {
   min-height: 1.5rem;
   padding-inline: 0.5rem;
-  font-size: 0.6875rem;
+  font-size: 0.75rem;
 }
 
 .http-method-badge.is-blue { --http-method-accent: var(--api-spectrum-blue); }
@@ -76,6 +76,6 @@ const methodTone = computed(() => {
   border-color: color-mix(in oklab, var(--http-method-accent) 38%, var(--ui-border));
   background: color-mix(in oklab, var(--http-method-accent) 13%, var(--ui-bg-elevated));
   color: color-mix(in oklab, var(--http-method-accent) 92%, white);
-  box-shadow: inset 0 1px 0 color-mix(in oklab, white 8%, transparent);
+  box-shadow: none;
 }
 </style>

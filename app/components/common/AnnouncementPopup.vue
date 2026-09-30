@@ -141,7 +141,7 @@ function dismissCurrentAnnouncements() {
         :ui="{
           root: 'overflow-hidden rounded-xl border border-default bg-elevated',
           item: 'border-b border-default last:border-b-0',
-          trigger: 'gap-2 rounded-none px-4 py-3.5 hover:bg-muted/70 focus-visible:bg-accented focus-visible:outline-none',
+          trigger: 'gap-2 rounded-none px-4 py-3.5 hover:bg-muted/70 focus-visible:bg-accented focus-visible:outline-2 focus-visible:outline-(--ui-ring) focus-visible:-outline-offset-2',
           trailingIcon: 'size-4 text-dimmed',
           body: 'px-4 pb-4 pt-0'
         }"
@@ -254,7 +254,7 @@ function dismissCurrentAnnouncements() {
   height: 40px;
   flex: 0 0 auto;
   border: 1px solid var(--ui-border);
-  border-radius: 10px;
+  border-radius: 12px;
   background: var(--ui-bg-elevated);
   color: var(--ui-text-highlighted);
   box-shadow: 0 1px 2px color-mix(in oklab, var(--ui-text) 7%, transparent);
@@ -290,7 +290,7 @@ function dismissCurrentAnnouncements() {
   overflow: hidden;
   color: var(--ui-text-highlighted);
   font-size: 0.875rem;
-  font-weight: 650;
+  font-weight: 600;
   line-height: 1.25rem;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -313,14 +313,14 @@ function dismissCurrentAnnouncements() {
   gap: 0.375rem;
   overflow: hidden;
   color: var(--ui-text-dimmed);
-  font-size: 0.6875rem;
+  font-size: 0.75rem;
   line-height: 1rem;
 }
 
 .announcement-level-label {
   flex: 0 0 auto;
   color: var(--announcement-level-color, var(--ui-text-muted));
-  font-weight: 650;
+  font-weight: 500;
 }
 
 .announcement-summary__date {
@@ -356,19 +356,19 @@ function dismissCurrentAnnouncements() {
   margin-top: 0.875rem;
   align-items: center;
   gap: 0.25rem;
-  border-radius: 4px;
-  color: var(--ui-primary);
+  border-radius: 6px;
+  color: var(--ui-info);
   font-size: 0.75rem;
-  font-weight: 650;
+  font-weight: 500;
   transition: color 150ms ease;
 }
 
 .announcement-detail__link:hover {
-  color: color-mix(in oklab, var(--ui-primary) 76%, var(--ui-text-highlighted));
+  color: color-mix(in oklab, var(--ui-info) 76%, var(--ui-text-highlighted));
 }
 
 .announcement-detail__link:focus-visible {
-  outline: 2px solid color-mix(in oklab, var(--ui-primary) 32%, transparent);
+  outline: 2px solid var(--ui-ring);
   outline-offset: 3px;
 }
 
@@ -388,7 +388,7 @@ function dismissCurrentAnnouncements() {
   .announcement-heading-mark {
     width: 36px;
     height: 36px;
-    border-radius: 9px;
+    border-radius: 12px;
   }
 
   .announcement-footer__actions {

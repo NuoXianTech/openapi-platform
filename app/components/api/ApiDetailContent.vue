@@ -89,7 +89,7 @@ async function copyEndpoint(endpoint: ApiCatalogEndpoint) {
         >
           <div class="api-detail__endpoint-request">
             <ApiHttpMethodBadge :method="endpoint.httpMethod" />
-            <code :title="endpointUrl(endpoint)">
+            <code tabindex="0" :title="endpointUrl(endpoint)">
               {{ endpointUrl(endpoint) }}
             </code>
             <UTooltip :text="$t('public.api.copyEndpoint')">
@@ -199,7 +199,7 @@ async function copyEndpoint(endpoint: ApiCatalogEndpoint) {
   margin: 0;
   color: var(--ui-text-highlighted);
   font-size: 0.8125rem;
-  font-weight: 650;
+  font-weight: 600;
   line-height: 1.25rem;
 }
 
@@ -213,7 +213,7 @@ async function copyEndpoint(endpoint: ApiCatalogEndpoint) {
 .api-detail__endpoint-list {
   overflow: hidden;
   border: 1px solid var(--ui-border);
-  border-radius: 8px;
+  border-radius: 12px;
 }
 
 .api-detail__endpoint {
@@ -234,14 +234,14 @@ async function copyEndpoint(endpoint: ApiCatalogEndpoint) {
 
 .api-detail__endpoint-request code {
   min-width: 0;
-  overflow: hidden;
+  overflow-x: auto;
   color: var(--ui-text-toned);
   font-family: var(--font-code);
-  font-size: 0.75rem;
-  font-weight: 520;
-  line-height: 1.5rem;
-  text-overflow: ellipsis;
+  font-size: 0.875rem;
+  font-weight: 400;
+  line-height: 1.25rem;
   white-space: nowrap;
+  scrollbar-width: thin;
 }
 
 .api-detail__copy-button {
@@ -258,7 +258,7 @@ async function copyEndpoint(endpoint: ApiCatalogEndpoint) {
   margin-top: 0.5rem;
   padding-left: 3.7rem;
   color: var(--ui-text-muted);
-  font-size: 0.6875rem;
+  font-size: 0.75rem;
   line-height: 1rem;
 }
 
@@ -310,7 +310,7 @@ async function copyEndpoint(endpoint: ApiCatalogEndpoint) {
 
 .api-detail__facts dt {
   color: var(--ui-text-muted);
-  font-size: 0.6875rem;
+  font-size: 0.75rem;
   line-height: 1rem;
 }
 
@@ -320,7 +320,7 @@ async function copyEndpoint(endpoint: ApiCatalogEndpoint) {
   overflow: hidden;
   color: var(--ui-text-highlighted);
   font-size: 0.8125rem;
-  font-weight: 620;
+  font-weight: 500;
   font-variant-numeric: tabular-nums;
   line-height: 1.25rem;
   text-overflow: ellipsis;

@@ -27,6 +27,7 @@ interface AdminNotificationHistoryFilters extends Record<string, unknown> {
 
 const toast = useToast()
 const { t, locale } = useI18n()
+const compactPagination = useMediaQuery('(max-width: 639px)')
 
 const history = usePrivatePagedList<AdminNotificationHistoryFilters, AdminNotificationMessageRow>({
   path: '/api/admin/notifications/list',
@@ -340,9 +341,9 @@ const detailDescription = computed(() => {
             :page="detailPage"
             :items-per-page="detailPageSize"
             :total="detailTotal"
-            :sibling-count="1"
-            show-edges
-            :ui="{ first: 'hidden', last: 'hidden', list: 'gap-0.5 sm:gap-1' }"
+            :sibling-count="compactPagination ? 0 : 1"
+            :show-edges="!compactPagination"
+            :ui="{ first: 'hidden', last: 'hidden', list: 'flex-wrap gap-1' }"
             size="sm"
             class="justify-center"
             @update:page="loadDetailPage"

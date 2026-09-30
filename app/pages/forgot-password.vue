@@ -7,6 +7,7 @@ import { compactFormErrors, emailError } from '~/utils/form-validation'
 definePageMeta({ layout: false })
 
 const { t } = useI18n()
+const canAutofocus = useMediaQuery('(hover: hover) and (pointer: fine)')
 const validationMessages = useAuthValidationMessages()
 useHead(() => ({ title: t('auth.forgotPassword.title') }))
 
@@ -42,7 +43,7 @@ const fields = computed(() => [
     defaultValue: '',
     size: 'lg' as const,
     required: true,
-    autofocus: true
+    autofocus: canAutofocus.value
   }
 ])
 
@@ -111,7 +112,7 @@ function clearTurnstileError() {
     <UCard
       variant="outline"
       class="auth-card"
-      :ui="{ body: 'p-6 sm:p-7' }"
+      :ui="{ body: 'p-4 sm:p-6' }"
     >
       <div
         v-if="!passwordResetEnabled"

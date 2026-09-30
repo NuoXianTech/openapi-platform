@@ -169,6 +169,6 @@ const isEmpty = computed(() => !primaryLabel.value && !secondaryLabel.value)
   margin-top: 0.125rem;
   color: var(--ui-text-muted);
   font-family: var(--font-code);
-  font-size: 0.6875rem;
+  font-size: 0.75rem;
 }
 </style>

@@ -57,7 +57,7 @@ typography:
   label-sm:
     fontFamily: Geist, Arial, sans-serif
     fontSize: 14px
-    fontWeight: 500 burada komikledin mi yani son DESIGN.md'leri? 
+    fontWeight: 500
     lineHeight: 20px
     letterSpacing: -0.28px
   mono-eyebrow:

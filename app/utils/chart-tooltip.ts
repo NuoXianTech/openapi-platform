@@ -42,34 +42,34 @@ function renderRow(row: ChartTooltipRow): string {
     ? `<span style="width:8px;height:8px;border-radius:999px;flex:0 0 auto;background:${row.color}"></span>`
     : ''
   return `
-    <div style="display:flex;align-items:center;gap:8px;font-size:12px;line-height:1">
+    <div style="display:flex;align-items:center;gap:8px;font-size:12px;line-height:16px">
       ${dot}
       <span style="color:var(--ui-text-muted)">${escapeChartHtml(row.label)}</span>
-      <span style="margin-left:auto;font-weight:600;color:var(--ui-text-highlighted)">${escapeChartHtml(row.value)}</span>
+      <span style="margin-left:auto;font-weight:500;color:var(--ui-text-highlighted)">${escapeChartHtml(row.value)}</span>
     </div>`
 }
 
 function renderFooter(footer: ChartTooltipFooterItem[]): string {
   const items = footer
-    .map(item => `<span>${escapeChartHtml(item.label)} <strong style="color:var(--ui-text-highlighted);font-weight:600">${escapeChartHtml(item.value)}</strong></span>`)
+    .map(item => `<span>${escapeChartHtml(item.label)} <strong style="color:var(--ui-text-highlighted);font-weight:500">${escapeChartHtml(item.value)}</strong></span>`)
     .join('')
   return `
-    <div style="margin-top:8px;padding-top:8px;border-top:1px solid var(--ui-border);display:flex;justify-content:space-between;gap:12px;font-size:11px;color:var(--ui-text-muted)">
+    <div style="margin-top:8px;padding-top:8px;border-top:1px solid var(--ui-border);display:flex;flex-wrap:wrap;justify-content:space-between;gap:12px;font-size:12px;line-height:16px;color:var(--ui-text-muted)">
       ${items}
     </div>`
 }
 
 export function renderChartTooltip(options: ChartTooltipOptions): string {
   const subtitle = options.subtitle
-    ? `<div style="margin-top:2px;font-size:11px;color:var(--ui-text-muted);font-family:ui-monospace,Menlo,monospace;word-break:break-all">${escapeChartHtml(options.subtitle)}</div>`
+    ? `<div style="margin-top:4px;font:400 14px/20px var(--font-code);color:var(--ui-text-muted);overflow-wrap:anywhere">${escapeChartHtml(options.subtitle)}</div>`
     : ''
   const rows = options.rows.map(renderRow).join('')
   const footer = options.footer?.length ? renderFooter(options.footer) : ''
   return `
-    <div style="min-width:168px;padding:10px 12px;font-variant-numeric:tabular-nums">
-      <div style="font-size:12px;font-weight:600;color:var(--ui-text-highlighted)">${escapeChartHtml(options.title)}</div>
+    <div style="min-width:168px;max-width:min(320px,calc(100vw - 32px));padding:12px;font-variant-numeric:tabular-nums;overflow-wrap:anywhere">
+      <div style="font-size:12px;line-height:16px;font-weight:600;color:var(--ui-text-highlighted)">${escapeChartHtml(options.title)}</div>
       ${subtitle}
-      <div style="margin-top:8px;display:flex;flex-direction:column;gap:6px">${rows}</div>
+      <div style="margin-top:8px;display:flex;flex-direction:column;gap:8px">${rows}</div>
       ${footer}
     </div>`
 }

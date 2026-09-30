@@ -1,6 +1,8 @@
 <script setup lang="ts" generic="T">
 import type { TableColumn } from '@nuxt/ui'
 
+const compactPagination = useMediaQuery('(max-width: 639px)')
+
 interface DashboardDataTableProps<T> {
   data: T[]
   columns: TableColumn<T>[]
@@ -217,11 +219,11 @@ function onColumnVisibilityChange(value: Record<string, boolean> | undefined) {
         :page="page"
         :items-per-page="pageSize"
         :total="total"
-        :sibling-count="1"
-        show-edges
+        :sibling-count="compactPagination ? 0 : 1"
+        :show-edges="!compactPagination"
         size="sm"
         class="max-w-full self-end sm:self-auto"
-        :ui="{ first: 'hidden', last: 'hidden', list: 'gap-0.5 sm:gap-1' }"
+        :ui="{ first: 'hidden', last: 'hidden', list: 'flex-wrap gap-1' }"
         @update:page="emit('update:page', $event)"
       />
     </div>

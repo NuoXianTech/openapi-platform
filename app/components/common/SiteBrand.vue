@@ -50,7 +50,7 @@ const { settings } = useSiteSettings()
   place-items: center;
   overflow: hidden;
   border: 1px solid color-mix(in oklab, var(--ui-border) 88%, transparent);
-  border-radius: 7px;
+  border-radius: 6px;
   background: color-mix(in oklab, var(--ui-bg-elevated) 94%, transparent);
   box-shadow: 0 1px 2px color-mix(in oklab, var(--ui-text) 7%, transparent);
 }
@@ -72,7 +72,7 @@ const { settings } = useSiteSettings()
   overflow: hidden;
   font-family: var(--font-display);
   font-size: 0.875rem;
-  font-weight: 700;
+  font-weight: 600;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -84,7 +84,7 @@ const { settings } = useSiteSettings()
 .site-brand--auth .site-brand__mark {
   width: 2.75rem;
   height: 2.75rem;
-  border-radius: 10px;
+  border-radius: 12px;
 }
 
 .site-brand--auth .site-brand__mark img {
@@ -94,7 +94,7 @@ const { settings } = useSiteSettings()
 
 .site-brand--auth .site-brand__copy strong {
   max-width: 16rem;
-  font-size: 1.0625rem;
+  font-size: 1rem;
   line-height: 1.2;
 }
 </style>

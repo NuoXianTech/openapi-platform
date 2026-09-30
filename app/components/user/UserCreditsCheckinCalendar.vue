@@ -62,7 +62,7 @@ function toMonthKey(date: DateValue): string {
         <p class="text-xs font-medium text-muted">
           {{ $t('user.credits.calendar.earnedThisMonth') }}
         </p>
-        <p class="mt-1.5 text-lg font-bold text-success tabular-nums">
+        <p class="mt-1.5 text-lg font-semibold text-success tabular-nums">
           <template v-if="hasVisibleHistory">
             {{ $t('user.credits.calendar.points', { amount: totalAmount.toLocaleString(locale) }) }}
           </template>
@@ -76,7 +76,7 @@ function toMonthKey(date: DateValue): string {
         <p class="text-xs font-medium text-muted">
           {{ $t('user.credits.calendar.checkinsThisMonth') }}
         </p>
-        <p class="mt-1.5 text-lg font-bold text-highlighted tabular-nums">
+        <p class="mt-1.5 text-lg font-semibold text-highlighted tabular-nums">
           <template v-if="hasVisibleHistory">
             {{ $t('user.credits.calendar.days', { count: checkedDayCount.toLocaleString(locale) }) }}
           </template>
@@ -109,7 +109,7 @@ function toMonthKey(date: DateValue): string {
         {{ $t('user.credits.calendar.checkedIn') }}
       </span>
       <span class="inline-flex items-center gap-1.5">
-        <span class="text-sm font-bold text-success">{{ todayDate.day }}</span>
+        <span class="text-sm font-semibold text-success">{{ todayDate.day }}</span>
         {{ $t('user.credits.calendar.today') }}
       </span>
     </div>

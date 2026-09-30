@@ -357,12 +357,12 @@ onBeforeUnmount(() => clearTimeout(sampleTimer))
 
 .request-demo__filename {
   color: var(--ui-text-dimmed);
-  font: 11px/16px var(--font-code);
+  font: 12px/16px var(--font-code);
 }
 
 .request-demo__example-label {
   color: var(--ui-text-dimmed);
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .request-demo__request {
@@ -388,7 +388,7 @@ onBeforeUnmount(() => clearTimeout(sampleTimer))
 
 .request-demo__method {
   color: var(--ui-text-highlighted);
-  font: 500 11px/18px var(--font-code);
+  font: 500 12px/16px var(--font-code);
 }
 
 .request-demo__address code {
@@ -396,7 +396,8 @@ onBeforeUnmount(() => clearTimeout(sampleTimer))
   flex: 1;
   overflow-x: auto;
   color: var(--ui-text-highlighted);
-  font-size: 11px;
+  font-size: 14px;
+  line-height: 20px;
   white-space: nowrap;
   scrollbar-width: thin;
 }
@@ -412,7 +413,7 @@ onBeforeUnmount(() => clearTimeout(sampleTimer))
   display: block;
   margin-top: 12px;
   color: var(--ui-text-dimmed);
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .request-demo__run {
@@ -431,7 +432,7 @@ onBeforeUnmount(() => clearTimeout(sampleTimer))
 
 .request-demo__run > span {
   color: var(--ui-text-dimmed);
-  font-size: 11px;
+  font-size: 12px;
   line-height: 1.6;
 }
 
@@ -450,7 +451,7 @@ onBeforeUnmount(() => clearTimeout(sampleTimer))
 
 .request-demo__status {
   color: var(--ui-text-toned);
-  font: 11px/16px var(--font-code);
+  font: 12px/16px var(--font-code);
 }
 
 .request-demo pre {
@@ -458,7 +459,7 @@ onBeforeUnmount(() => clearTimeout(sampleTimer))
   margin: 12px 0 0;
   overflow: auto;
   color: var(--ui-text-toned);
-  font: 12px/22px var(--font-code);
+  font: 400 14px/20px var(--font-code);
   scrollbar-width: thin;
 }
 

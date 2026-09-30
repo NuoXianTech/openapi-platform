@@ -62,7 +62,7 @@ async function onConfirm() {
     <UCard
       variant="outline"
       class="auth-card"
-      :ui="{ body: 'p-6 sm:p-7' }"
+      :ui="{ body: 'p-4 sm:p-6' }"
     >
       <div
         v-if="!linkValid"

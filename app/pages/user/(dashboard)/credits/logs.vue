@@ -145,7 +145,7 @@ async function resetCreditFilters() {
             <span class="font-mono text-muted">{{ row.original.apiPath || '' }}</span>
             <span
               v-if="row.original.apiCallId"
-              class="text-muted text-[10px]"
+              class="text-muted text-xs"
             >{{ $t('user.credits.logs.callNumber', { id: row.original.apiCallId }) }}</span>
           </div>
           <div
