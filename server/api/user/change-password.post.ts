@@ -1,34 +1,17 @@
 // 已登录用户修改密码：校验旧密码 → 设新密码 → 令所有旧 token 失效并重签当前设备
-import { createError } from 'h3'
 import { userChangePasswordSchema } from '~~/server/schemas/user'
-import { userService } from '~~/server/services/user-service'
+import { userCredentialsService } from '~~/server/services/user-credentials-service'
 import { defineAuthenticatedEventHandler, createUserSession } from '~~/server/utils/auth'
-import { hashPassword, verifyPassword } from '~~/server/utils/password'
 import { addRequestOperationLog } from '~~/server/utils/request-operation-log'
 import { readZodBody } from '~~/server/utils/zod'
 
 export default defineAuthenticatedEventHandler(async (event, authUser) => {
   const { currentPassword, newPassword } = await readZodBody(event, userChangePasswordSchema)
 
-  // 拉数据库行（不能用 authUser，里面没有 passwordHash）
-  const userRow = await userService.getById(authUser.id)
-  if (!userRow) {
-    throw createError({ statusCode: 404, message: '用户不存在' })
-  }
+  const updated = await userCredentialsService.changePassword(authUser.id, currentPassword, newPassword)
 
-  const ok = await verifyPassword(userRow.passwordHash, currentPassword)
-  if (!ok) {
-    throw createError({ statusCode: 400, message: '当前密码不正确' })
-  }
-
-  const newHash = await hashPassword(newPassword)
-  await userService.updatePasswordAndInvalidateSessions(authUser.id, newHash)
-
-  // tokenVersion 自增 → 该账号所有已签发 JWT（含当前设备）立即失效；
-  // 随即为当前设备重签新 token（createUserSession 内部读到 bump 后的新 ver），
-  // 实现「下线其他设备、保留当前设备」。
-  await createUserSession(event, { id: authUser.id, role: authUser.role })
-
+  // The credential change is already committed, even if a newer change
+  // prevents this request from issuing its replacement session.
   await addRequestOperationLog(event, {
     userId: authUser.id,
     actor: authUser.username,
@@ -36,6 +19,8 @@ export default defineAuthenticatedEventHandler(async (event, authUser) => {
     resourceType: 'user',
     resourceId: authUser.id
   })
+
+  await createUserSession(event, { id: authUser.id, role: authUser.role }, { expectedTokenVersion: updated.tokenVersion })
 
   return null
 })

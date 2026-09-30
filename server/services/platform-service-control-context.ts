@@ -224,7 +224,7 @@ export async function acceptServiceTargetResults(
     current: PlatformServiceControlContext,
     changedAt: Date
   ) => Promise<PlatformServiceControlContext['connection']>
-): Promise<'synced' | 'partial' | 'failed'> {
+): Promise<{ status: 'synced' | 'partial' | 'failed', targets: PlatformServiceControlContext['targets'] }> {
   return commitServiceControlContext(expected, operation, async (tx, current, changedAt) => {
     const enabledIds = new Set(current.targets.filter(target => target.enabled).map(target => target.id))
     const observedIds = new Set<string>()
@@ -238,6 +238,7 @@ export async function acceptServiceTargetResults(
       ? await updateConnection(tx, current, changedAt)
       : current.connection
     let successful = 0
+    const acceptedTargets = new Map(current.targets.map(target => [target.id, target]))
     for (const result of results) {
       const state = result.ok ? result.state : null
       const matches = state !== null
@@ -248,7 +249,7 @@ export async function acceptServiceTargetResults(
         && state.revision === connection.configurationRevision
         && state.configurationSha256 === connection.configurationHash
       if (matches) successful += 1
-      await tx.update(upstreamTargets).set({
+      const updated = firstRow(await tx.update(upstreamTargets).set({
         ...(state ? {
           configurationRevision: state.revision,
           configurationHash: state.configurationSha256,
@@ -264,7 +265,9 @@ export async function acceptServiceTargetResults(
       }).where(and(
         eq(upstreamTargets.id, result.targetId),
         eq(upstreamTargets.upstreamServiceId, current.service.id)
-      ))
+      )).returning())
+      if (!updated) throw new Error('Target disappeared during result acceptance')
+      acceptedTargets.set(updated.id, updated)
     }
     const status = successful > 0 && successful === enabledIds.size
       ? 'synced'
@@ -275,7 +278,7 @@ export async function acceptServiceTargetResults(
         updatedAt: changedAt
       }).where(eq(upstreamServiceConnections.upstreamServiceId, current.service.id))
     }
-    return status
+    return { status, targets: [...acceptedTargets.values()] }
   })
 }
 

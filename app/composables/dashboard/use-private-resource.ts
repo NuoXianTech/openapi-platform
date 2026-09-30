@@ -34,6 +34,7 @@ interface UsePrivateResourceReturn<TData> {
   error: Ref<unknown>
   disposed: ComputedRef<boolean>
   refresh: () => Promise<PrivateReadResult<TData>>
+  invalidate: () => void
 }
 
 export function usePrivateResource<TData>(
@@ -56,6 +57,14 @@ export function usePrivateResource<TData>(
   const closed = ref(false)
   let requestSeq = 0
   let activeController: AbortController | null = null
+
+  function invalidate(): void {
+    requestSeq += 1
+    activeController?.abort()
+    activeController = null
+    status.value = 'idle'
+    error.value = null
+  }
 
   async function refresh(): Promise<PrivateReadResult<TData>> {
     if (closed.value) return { status: 'disposed' }
@@ -98,10 +107,7 @@ export function usePrivateResource<TData>(
   if (getCurrentScope()) {
     onScopeDispose(() => {
       closed.value = true
-      status.value = 'idle'
-      requestSeq += 1
-      activeController?.abort()
-      activeController = null
+      invalidate()
     })
   }
 
@@ -111,6 +117,7 @@ export function usePrivateResource<TData>(
     status,
     loading,
     error,
-    refresh
+    refresh,
+    invalidate
   }
 }

@@ -353,6 +353,8 @@
           "syncAllTargets": "重新同步已保存配置",
           "saveConfiguration": "保存全部配置",
           "configurationSynced": "配置已同步到全部实例",
+          "configurationRoutingPending": "配置已保存，流量更新尚未完成",
+          "configurationRoutingRetry": "请重新同步已保存的配置，以重试流量更新。",
           "configurationDrifted": "期望配置已保存，但部分 Target 尚未同步",
           "configurationPartial": "配置已保存，部分实例尚未同步",
           "configurationFailed": "配置已保存，但没有实例同步成功",

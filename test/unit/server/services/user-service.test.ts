@@ -1,7 +1,6 @@
-import { PGlite } from '@electric-sql/pglite'
-import { drizzle } from 'drizzle-orm/pglite'
+import type { PGlite } from '@electric-sql/pglite'
+import { createTestDatabase } from '../../../helpers/database'
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
-import * as schema from '~~/server/db/schema'
 
 const testContext = vi.hoisted(() => ({
   database: null as unknown
@@ -19,37 +18,14 @@ const { adminUserService } = await import('~~/server/services/admin-user-service
 let client: PGlite
 
 beforeAll(async () => {
-  client = new PGlite()
-  await client.exec(`
-    CREATE TABLE users (
-      id serial PRIMARY KEY,
-      role varchar(20) NOT NULL DEFAULT 'user',
-      username varchar(50) NOT NULL,
-      display_name varchar(100),
-      email varchar(255) NOT NULL,
-      password_hash varchar(255) NOT NULL,
-      locale varchar(16),
-      credits integer NOT NULL DEFAULT 0,
-      is_active boolean NOT NULL DEFAULT false,
-      is_banned boolean NOT NULL DEFAULT false,
-      banned_reason varchar(500),
-      banned_until timestamptz,
-      last_login_at timestamptz,
-      last_login_ip varchar(45),
-      last_login_user_agent varchar(500),
-      last_checkin_at timestamptz,
-      email_verified_at timestamptz,
-      token_version integer NOT NULL DEFAULT 0,
-      created_at timestamptz NOT NULL DEFAULT now(),
-      updated_at timestamptz NOT NULL DEFAULT now()
-    );
-  `)
-  testContext.database = drizzle(client, { schema })
+  const testDatabase = await createTestDatabase()
+  client = testDatabase.client
+  testContext.database = testDatabase.database
 })
 
 beforeEach(async () => {
   await client.exec(`
-    TRUNCATE users RESTART IDENTITY;
+    TRUNCATE users RESTART IDENTITY CASCADE;
     INSERT INTO users
       (role, username, email, password_hash, is_active, is_banned, banned_until)
     VALUES
@@ -71,12 +47,6 @@ describe('user service security state', () => {
     const demoted = await adminUserService.updateUser(1, { role: 'user' })
 
     expect(demoted?.role).toBe('user')
-  })
-
-  it('updates the password hash and token version in one statement', async () => {
-    const updated = await userService.updatePasswordAndInvalidateSessions(2, 'new-user-hash')
-
-    expect(updated).toMatchObject({ passwordHash: 'new-user-hash', tokenVersion: 1 })
   })
 
   it('only clears a ban that is still expired', async () => {

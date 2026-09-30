@@ -1,8 +1,11 @@
 import type { SystemSettings } from '#shared/types/site-settings'
 import { userService } from '~~/server/services/user-service'
 import { createApplicationError } from '~~/server/errors/application-error'
-import { sendVerificationEmail } from '~~/server/utils/email'
-import { issueVerificationTokenUrl } from '~~/server/utils/verification-token'
+import { sendDuplicateRegistrationEmail, sendVerificationEmail } from '~~/server/utils/email'
+import { issueVerificationTokenUrl, normalizeSiteUrl } from '~~/server/utils/verification-token'
+import { hashPassword } from '~~/server/utils/password'
+import { isEmailAllowedForRegistration, isRegistrationInviteValid, normalizeEmailFilterMode,
+  normalizeRegistrationMode, parseEmailDomainList } from '~~/server/utils/registration'
 
 interface PendingRegistrationUser {
   id: number
@@ -69,5 +72,41 @@ async function completeRegistration(input: CompleteRegistrationInput): Promise<{
 
 export const registrationService = {
   rollbackCreatedUser,
-  completeRegistration
+  completeRegistration,
+
+  assertRegistrationPolicy(settings: SystemSettings, email: string, inviteCode?: string) {
+    const mode = normalizeRegistrationMode(settings.registrationMode)
+    if (mode === 'closed') throw createApplicationError({ statusCode: 403, message: '注册功能已关闭' })
+    const filter = normalizeEmailFilterMode(settings.registerEmailFilterMode)
+    if (!isEmailAllowedForRegistration(email, filter, parseEmailDomainList(settings.registerEmailFilterList))) {
+      throw createApplicationError({ statusCode: 403, message: filter === 'blacklist'
+        ? '该邮箱域名已被禁止注册' : '该邮箱域名不在允许注册的列表内' })
+    }
+    if (mode === 'invite' && !isRegistrationInviteValid(settings.registrationInviteCode, inviteCode)) {
+      throw createApplicationError({ statusCode: 403, message: '邀请码无效' })
+    }
+  },
+
+  /** Anonymous registration never reveals an account-dependent outcome, even
+   * when activation, delivery or compensation fails. OAuth completion retains
+   * its explicit errors for callers holding a verified pending identity. */
+  async registerPassword(input: { username: string, email: string, password: string }, settings: SystemSettings) {
+    const verificationRequired = settings.emailActivationEnabled !== false
+    let user: Awaited<ReturnType<typeof userService.addUser>> | null = null
+    try {
+      if (await userService.findByEmail(input.email)) {
+        await sendDuplicateRegistrationEmail(input.email, `${normalizeSiteUrl(settings.siteUrl)}/login`)
+      } else if (!await userService.findByUsername(input.username)) {
+        const created = await userService.addUser({
+          username: input.username, email: input.email,
+          passwordHash: await hashPassword(input.password), isActive: false
+        })
+        await completeRegistration({ user: created, settings, reasonPrefix: 'password registration' })
+        user = created
+      }
+    } catch (error) {
+      console.error('[registration] password registration did not complete', { error })
+    }
+    return { user, verificationRequired }
+  }
 }

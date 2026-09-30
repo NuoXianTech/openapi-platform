@@ -1,24 +1,13 @@
 import { createError } from 'h3'
 import { registerSchema } from '~~/server/schemas/auth'
-import { userService } from '~~/server/services/user-service'
-import { hashPassword } from '~~/server/utils/password'
-import {
-  isEmailAllowedForRegistration,
-  isRegistrationInviteValid,
-  normalizeEmailFilterMode,
-  normalizeRegistrationMode,
-  parseEmailDomainList
-} from '~~/server/utils/registration'
+import { normalizeRegistrationMode } from '~~/server/utils/registration'
 import { readZodBody } from '~~/server/utils/zod'
-import { normalizeSiteUrl } from '~~/server/utils/verification-token'
-import { sendDuplicateRegistrationEmail } from '~~/server/utils/email'
 import { systemSettingsService } from '~~/server/services/system-settings-service'
 import { registrationService } from '~~/server/services/registration-service'
 import { assertTurnstileForPage } from '~~/server/utils/turnstile'
 import { canConsumeIdentityRateLimit } from '~~/server/utils/rate-limit/identity'
 import { readClientIp, toClientIpRateLimitValue } from '~~/server/utils/request-meta'
 import { addRequestOperationLog } from '~~/server/utils/request-operation-log'
-import { getSqlState } from '~~/server/utils/database-error'
 
 // 注册接口对外永远返回中性响应，避免通过 HTTP 状态/文案区分"邮箱已注册 / 用户名已占用 / 注册成功"，
 // 防止匿名访问者用接口差异遍历账号库。真实分支信号只走邮件通道。
@@ -53,19 +42,7 @@ export default defineEventHandler(async (event) => {
   })
   if (!canRegisterFromIp) return neutralResponse
 
-  // 邮箱域名过滤：off=不过滤；whitelist=仅允许列表内域名；blacklist=拒绝列表内域名
-  const filterMode = normalizeEmailFilterMode(settings.registerEmailFilterMode)
-  const domains = parseEmailDomainList(settings.registerEmailFilterList)
-  if (!isEmailAllowedForRegistration(email, filterMode, domains)) {
-    const msg = filterMode === 'blacklist' ? '该邮箱域名已被禁止注册' : '该邮箱域名不在允许注册的列表内'
-    throw createError({ statusCode: 403, message: msg })
-  }
-
-  if (mode === 'invite') {
-    if (!isRegistrationInviteValid(settings.registrationInviteCode, inviteCode)) {
-      throw createError({ statusCode: 403, message: '邀请码无效' })
-    }
-  }
+  registrationService.assertRegistrationPolicy(settings, email, inviteCode)
 
   // 只有请求通过域名和邀请码策略后才消费邮箱限流；用户输错邀请码后可立即改正。
   const canRegisterEmail = await canConsumeIdentityRateLimit({
@@ -74,45 +51,8 @@ export default defineEventHandler(async (event) => {
   })
   if (!canRegisterEmail) return neutralResponse
 
-  // 邮箱已注册：投递"账号已存在"通知到该邮箱，外部返回中性响应。
-  // 发信失败仅记录日志，不抛错，保持与"邮箱未注册"分支响应一致以防 timing/状态码枚举。
-  const existEmail = await userService.findByEmail(email)
-  if (existEmail) {
-    try {
-      await sendDuplicateRegistrationEmail(email, `${normalizeSiteUrl(settings.siteUrl)}/login`)
-    } catch (error) {
-      console.error('[register] failed to send duplicate-registration notice', { error })
-    }
-    return neutralResponse
-  }
-
-  // 用户名已被占用：静默返回中性响应。不向用户填写的邮箱发"用户名冲突"通知，
-  // 避免攻击者控制邮箱后通过邮件内容反推目标用户名是否存在。
-  const existUser = await userService.findByUsername(username)
-  if (existUser) {
-    return neutralResponse
-  }
-
-  const passwordHash = await hashPassword(password)
-
-  let created: Awaited<ReturnType<typeof userService.addUser>>
-  try {
-    created = await userService.addUser({
-      username,
-      email,
-      passwordHash,
-      isActive: false
-    })
-  } catch (error) {
-    if (getSqlState(error) === '23505') return neutralResponse
-    throw error
-  }
-
-  await registrationService.completeRegistration({
-    user: created,
-    settings,
-    reasonPrefix: 'password registration'
-  })
+  const { user: created } = await registrationService.registerPassword({ username, email, password }, settings)
+  if (!created) return neutralResponse
 
   // 只在账号确实创建成功后写审计，与上面各分支的中性返回并不冲突：
   // 审计表不对匿名访问者可见，不构成账号存在性信号。

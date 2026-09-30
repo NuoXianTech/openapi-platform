@@ -35,7 +35,8 @@ function view(id = 'service-a'): PlatformUpstreamDetail {
 
 const payload = { expectedRevision: 4, values: { enabled: false }, secrets: { key: 'replacement' } }
 const outcome: ServiceConfigurationSyncOutcome = {
-  status: 'synced', revision: 5, configurationHash: 'next-hash', targets: [], routingRevision: { id: 'runtime', sequence: 99 }
+  status: 'synced', revision: 5, configurationHash: 'next-hash', targets: [], values: { enabled: false },
+  routingRevision: { id: 'runtime', sequence: 99 }, routingStatus: 'applied'
 }
 const target = { id: 'target-a', baseUrl: 'http://service:8080', enabled: true, weight: 1 } as PlatformUpstreamTarget
 
@@ -75,6 +76,21 @@ afterEach(() => {
 })
 
 describe('Service control', () => {
+  it('retains the saved revision and values when publication is pending and refresh fails', async () => {
+    const { control, service } = setup()
+    fetchMock.mockResolvedValueOnce({ ...outcome, routingStatus: 'pending', routingRevision: null })
+    service.refresh.mockResolvedValueOnce({ status: 'error', error: new Error('read unavailable') })
+    expect(await control.saveConfiguration(payload)).toBe(true)
+    expect(control.configurationFeedback.value).toMatchObject({
+      color: 'warning', message: 'admin.apis.routing.serviceControl.configurationRoutingPending'
+    })
+    expect(control.view.value?.connection.configurationRevision).toBe(5)
+    expect(control.view.value?.values).toEqual({ enabled: false })
+    expect(control.loadError.value).toBeTruthy()
+    await control.synchronizeConfiguration()
+    expect(fetchMock).toHaveBeenLastCalledWith('/api/admin/v1/upstreams/service-a/configuration/sync', { method: 'POST' })
+  })
+
   it('reads only one current-Upstream resource and clears both views on navigation', () => {
     const { control, id, service } = setup()
     expect(resourceFactory).toHaveBeenCalledOnce()
@@ -274,7 +290,7 @@ describe('Service control', () => {
     expect(action === 'save' ? control.configurationFeedback.value : control.pageFeedback.value).toEqual({
       message: action === 'save' ? 'admin.apis.routing.serviceControl.configurationSaveFailed' : 'admin.apis.routing.serviceControl.configurationSyncFailed', color: 'error'
     })
-    expect(service.refresh).not.toHaveBeenCalled()
+    expect(service.refresh).toHaveBeenCalledOnce()
     expect(control.controls.value.discoverDisabled).toBe(false)
   })
 

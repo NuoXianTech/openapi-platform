@@ -6,7 +6,7 @@ import { limitGatewayUpstreamResponse } from '~~/server/services/dynamic-gateway
 import type { ResolvedDynamicRoute } from '~~/server/services/routing-runtime-service'
 import { normalizeRoutePath } from '~~/server/utils/route-pattern'
 import { gatewayTargetHealth } from '~~/server/services/gateway-target-health'
-import { safeFetch } from '~~/server/utils/safe-fetch'
+import { fetchUpstreamTarget } from '~~/server/utils/upstream-target-fetch'
 
 const RETRYABLE_METHODS = new Set(['GET', 'HEAD'])
 const RETRYABLE_UPSTREAM_STATUSES = new Set([502, 503, 504])
@@ -115,21 +115,6 @@ export function buildGatewayTargetUrl(
   return target
 }
 
-async function fetchTarget(
-  targetUrl: URL,
-  init: RequestInit | undefined
-): Promise<Response> {
-  return safeFetch(targetUrl, {
-    ...init,
-    allowedHosts: [targetUrl.hostname],
-    allowSubdomains: false,
-    followRedirects: false,
-    allowHttp: true,
-    allowPrivateNetworks: true,
-    allowNonDefaultPort: true
-  })
-}
-
 function isServiceTokenRejection(response: Response): boolean {
   return response.status === 401
     && response.headers.get('x-openapi-error-code') === 'UNAUTHORIZED'
@@ -194,7 +179,7 @@ export function createGatewayProxyFetch(input: {
         overallSignal?.removeEventListener('abort', abortAttempt)
       }
       try {
-        const response = await fetchTarget(targetUrl, {
+        const response = await fetchUpstreamTarget(targetUrl, {
           ...init,
           signal: attemptController.signal
         })

@@ -1,12 +1,8 @@
 {
   "$schema": "https://unpkg.com/knip@6/schema.json",
+  "entry": ["test/helpers/app-theme-render.mjs"],
   "ignore": [
-    "server/error.ts",
-    "app/components/admin/AdminCallLogDetailModal.vue",
-    "app/components/api-key/ApiKeyResetModal.vue",
-    "app/components/api-key/ApiKeySecretModal.vue",
-    "app/components/common/AppConfirmDialog.vue",
-    "app/components/user/UserCallLogDetailModal.vue"
+    "server/error.ts"
   ],
   "ignoreDependencies": [
     "@iconify-json/lucide",

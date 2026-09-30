@@ -28,6 +28,7 @@
 - `credit_transactions.creditReservationId` 在非空时保持唯一，避免同一预留产生重复扣费。
 - `api_credit_reservations.status` 仅允许 `active`、`pending` 与 `dead_letter`；只有 `pending` 和人工确认的 `dead_letter` 可进入结算。
 - 管理员撤回积分只能消费未预留余额；重置余额低于预留总额时必须拒绝，避免后续结算把余额扣成负数。
+- 删除用户时在用户行锁内检查全部积分预留；仍有 `active`、`pending` 或 `dead_letter` 时返回 `409 USER_HAS_CREDIT_RESERVATIONS`。必须先通过现有结算或释放流程处理，不能让外键级联删除未结算事实。已入账流水继续保留。
 
 ## 限流模型
 

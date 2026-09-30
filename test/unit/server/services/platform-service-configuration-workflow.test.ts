@@ -73,6 +73,38 @@ function response(revision = 1): Awaited<ReturnType<typeof serviceControlClient.
 }
 
 describe('configuration result acceptance', () => {
+  it('returns normalized saved values without exposing secret plaintext', async () => {
+    const upstream = await configuredUpstream()
+    await database.update(schema.upstreamServiceConnections).set({
+      configurationSchema: { schemaVersion: 1, groups: [{ key: 'credentials', label: 'Credentials', fields: [
+        { key: 'secret', type: 'secret', label: 'Secret' },
+        { key: 'enabled', type: 'boolean', label: 'Enabled', default: true }
+      ] }] }
+    }).where(eq(schema.upstreamServiceConnections.upstreamServiceId, upstream.id))
+    vi.spyOn(serviceControlClient, 'updateConfiguration').mockImplementation(async (_url, _endpoint, _token, input) => ({
+      ...response(input.revision), data: { ...response(input.revision).data,
+        configurationSha256: calculateServiceConfigurationHash(schemaHash, input.values) }
+    }))
+    const result = await updatePlatformServiceConfiguration(upstream.id, {
+      expectedRevision: 1, values: { enabled: false }, secrets: { secret: 'must-not-leak' }
+    })
+    expect(result).toMatchObject({ status: 'synced', values: { enabled: false, secret: { configured: true } } })
+    expect(JSON.stringify(result)).not.toContain('must-not-leak')
+  })
+
+  it('preserves saved configuration on publication failure and retries without advancing its revision', async () => {
+    const upstream = await configuredUpstream()
+    const update = vi.spyOn(serviceControlClient, 'updateConfiguration').mockResolvedValue(response(2))
+    vi.mocked(refreshPlatformRevision).mockRejectedValueOnce(new Error('publication unavailable'))
+    const result = await updatePlatformServiceConfiguration(upstream.id, { expectedRevision: 1, values: {}, secrets: {} })
+    expect(result).toMatchObject({ status: 'synced', revision: 2, routingRevision: null, routingStatus: 'pending', values: {} })
+    expect(result.targets[0]).toMatchObject({ configurationRevision: 2, configurationStatus: 'synced' })
+    expect((await loadServiceControlContext(upstream.id)).connection.configurationRevision).toBe(2)
+    const retried = await synchronizePlatformServiceConfiguration(upstream.id)
+    expect(retried).toMatchObject({ revision: 2, routingStatus: 'applied', routingRevision: { id: 'published' } })
+    expect(update.mock.calls.map(call => call[3].revision)).toEqual([2, 2])
+  })
+
   it.each(['discovery', 'configuration'] as const)('accepts mixed %s observations with one timestamp and preserves failed Target facts', async (operation) => {
     const upstream = await configuredUpstream()
     const { target: drifted } = await platformUpstreamService.createTarget(upstream.id, { baseUrl: 'http://127.0.0.1:9090', weight: 1, enabled: true })
@@ -87,7 +119,7 @@ describe('configuration result acceptance', () => {
       { ok: true, targetId: drifted.id, state: { ...response().data, configurationSha256: 'c'.repeat(64) } },
       { ok: false, targetId: failed.id, error: 'offline' }
     ])
-    expect(status).toBe('partial')
+    expect(status.status).toBe('partial')
     const current = await loadServiceControlContext(upstream.id)
     const byId = new Map(current.targets.map(target => [target.id, target]))
     expect(byId.get(upstream.targets[0]!.id)).toMatchObject({ configurationStatus: 'synced', lastError: null })

@@ -161,10 +161,12 @@ export function useAdminEndpointCatalogOperations(options: {
   }
 
   async function runDiscovery(upstreamId: string, quiet: boolean) {
+    if (disposed.value) return false
     if (!quiet) catalogFeedback.value = null
     discoveringServices.value.add(upstreamId)
     try {
       const result = await $fetch<ServiceConfigurationView>(`/api/admin/v1/upstreams/${upstreamId}/discover`, { method: 'POST' })
+      if (disposed.value) return false
       if (!quiet) {
         catalogFeedback.value = {
           message: result.connection.lastDiscoveryError
@@ -176,6 +178,7 @@ export function useAdminEndpointCatalogOperations(options: {
       }
       return result.connection.lastDiscoveryError ? 'partial' as const : true
     } catch (error: unknown) {
+      if (disposed.value) return false
       if (!quiet) {
         catalogFeedback.value = {
           message: parseFetchError(error, t('admin.apis.routing.serviceControl.discoveryFailed')),
@@ -202,13 +205,14 @@ export function useAdminEndpointCatalogOperations(options: {
       const results: Array<boolean | 'partial'> = []
       const queue = [...serviceUpstreams.value]
       const worker = async () => {
-        while (queue.length > 0) {
+        while (!disposed.value && queue.length > 0) {
           const upstream = queue.shift()
           if (!upstream) return
           results.push(await runDiscovery(upstream.id, true))
         }
       }
       await Promise.all(Array.from({ length: Math.min(4, queue.length) }, worker))
+      if (disposed.value) return
       const partial = results.filter(result => result === 'partial').length
       const failed = results.filter(result => result === false).length
       catalogFeedback.value = {
@@ -238,6 +242,7 @@ export function useAdminEndpointCatalogOperations(options: {
     applying.value = true
     try {
       const result = await $fetch<{ revision: { id: string } }>('/api/admin/v1/service-endpoints/apply', { method: 'POST' })
+      if (disposed.value) return
       // An idempotent apply can return the existing revision without publishing.
       const runtimeUpdated = result.revision.id !== previousRevisionId
       if (runtimeUpdated) {
@@ -251,6 +256,7 @@ export function useAdminEndpointCatalogOperations(options: {
       }
       await refreshAfterPublication()
     } catch (error: unknown) {
+      if (disposed.value) return
       const blockedBy = blockingUpstreamName(error)
       catalogFeedback.value = {
         message: parseFetchError(error, t('admin.apis.routing.catalog.feedback.applyFailed')),
@@ -272,6 +278,8 @@ export function useAdminEndpointCatalogOperations(options: {
     failureKey: PublicationFailureKey,
     refreshAfter: boolean
   ): Promise<PublicationOutcome> {
+    // Admission is checked before dispatch, including the batch's own children.
+    if (disposed.value) return 'failed'
     const identity = endpointIdentity(item)
     catalogFeedback.value = null
     runningEndpoints.value.add(identity)
@@ -371,11 +379,15 @@ export function useAdminEndpointCatalogOperations(options: {
         confirmColor: 'warning'
       })) return
 
+      if (disposed.value) return
+
       let succeeded = 0
       let pending = 0
       // Publication changes share a runtime lock, so execute batch children in order.
       for (const { service, item } of candidates) {
+        if (disposed.value) return
         const outcome = await setEndpointEnabled(service, item, enabled, false)
+        if (disposed.value) return
         if (outcome !== 'failed') {
           succeeded += 1
           if (outcome === 'pending') pending += 1

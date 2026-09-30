@@ -16,6 +16,7 @@ export default defineAdminEventHandler(async (event, admin) => {
     detail: {
       revision: result.revision,
       status: result.status,
+      routingStatus: result.routingStatus,
       targetCount: result.targets.length
     }
   })

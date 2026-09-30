@@ -1,7 +1,7 @@
 import { and, asc, count, desc, eq, gt, ilike, like, or, sql } from 'drizzle-orm'
 import { LOGIN_ACTION_PREFIX } from '#shared/config/audit-actions'
 import { db, type DatabaseTransaction } from '~~/server/db/client'
-import { operationLogs, users } from '~~/server/db/schema'
+import { apiCreditReservations, operationLogs, users } from '~~/server/db/schema'
 import { createApplicationError } from '~~/server/errors/application-error'
 import { toNumber } from '~~/server/utils/number'
 import { normalizePagination } from '~~/server/utils/pagination'
@@ -157,6 +157,17 @@ export const adminUserService = {
       const { availableAdmins, current } = await lockAdminAccessChange(tx, id)
       if (!current) return null
       assertAdminRemainsAvailable(current, availableAdmins.length)
+      // reserve() takes this same user lock before creating a reservation.
+      // Do not let the account FK cascade erase unsettled billing intentions.
+      const reservation = firstRow(await tx.select({ id: apiCreditReservations.id })
+        .from(apiCreditReservations).where(eq(apiCreditReservations.userId, id)).limit(1))
+      if (reservation) {
+        throw createApplicationError({
+          statusCode: 409,
+          message: '用户仍有未结算积分，请先在积分流水中完成结算或释放',
+          data: { code: 'USER_HAS_CREDIT_RESERVATIONS' }
+        })
+      }
       await tx.delete(operationLogs).where(and(
         eq(operationLogs.userId, id),
         like(operationLogs.action, `${LOGIN_ACTION_PREFIX}%`)

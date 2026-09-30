@@ -181,6 +181,11 @@ export function useAdminServiceControl(upstreamId: Readonly<Ref<string>>) {
   }
 
   function configurationResult(result: ServiceConfigurationSyncOutcome, includeRevision = false): ServiceFeedback {
+    if (result.routingStatus === 'pending') return {
+      message: t('admin.apis.routing.serviceControl.configurationRoutingPending'),
+      description: t('admin.apis.routing.serviceControl.configurationRoutingRetry'),
+      color: 'warning'
+    }
     const feedback = synchronizationFeedback[result.status]
     return {
       message: t(feedback.message),
@@ -191,13 +196,26 @@ export function useAdminServiceControl(upstreamId: Readonly<Ref<string>>) {
     }
   }
 
+  function acceptConfiguration(result: ServiceConfigurationSyncOutcome) {
+    const current = resource.data.value
+    if (!current) return
+    const connection = { ...current.connection,
+      configurationRevision: result.revision, configurationHash: result.configurationHash }
+    resource.data.value = { ...current, connection, values: result.values, targets: result.targets,
+      upstream: { ...current.upstream, connection } }
+  }
+
   async function saveConfiguration(payload: ServiceConfigurationFormPayload) {
     if (controls.value.configurationDisabled) return false
     return runOperation({
       kind: 'save',
       feedback: configurationFeedback,
       request: id => $fetch<ServiceConfigurationSyncOutcome>(`/api/admin/v1/upstreams/${id}/configuration`, { method: 'PUT', body: payload }),
-      accept: (result) => { configurationFeedback.value = configurationResult(result, true) },
+      accept: (result) => {
+        acceptConfiguration(result)
+        configurationFeedback.value = configurationResult(result, true)
+      },
+      refreshAfterFailure: true,
     })
   }
 
@@ -207,7 +225,11 @@ export function useAdminServiceControl(upstreamId: Readonly<Ref<string>>) {
       kind: 'synchronize',
       feedback: pageFeedback,
       request: id => $fetch<ServiceConfigurationSyncOutcome>(`/api/admin/v1/upstreams/${id}/configuration/sync`, { method: 'POST' }),
-      accept: (result) => { pageFeedback.value = configurationResult(result) },
+      accept: (result) => {
+        acceptConfiguration(result)
+        pageFeedback.value = configurationResult(result)
+      },
+      refreshAfterFailure: true,
     })
   }
 

@@ -82,6 +82,48 @@ afterEach(() => {
 })
 
 describe('endpoint selection and feedback', () => {
+  it('stops undispatched batch writes when the page scope closes', async () => {
+    const { page } = setup(['one', 'two', 'three'].map(key => endpoint(key, 'available')))
+    page.selectAllEndpoints(true)
+    const first = deferred<PlatformEndpointPublicationResult>()
+    fetchMock.mockReturnValueOnce(first.promise)
+    const operation = page.bulkSetEnabled(true)
+    expect(fetchMock).toHaveBeenCalledOnce()
+    scope.stop()
+    first.resolve({ route: { id: 'one' }, revision: null } as PlatformEndpointPublicationResult)
+    await operation
+    expect(fetchMock).toHaveBeenCalledOnce()
+    expect(refreshCatalog).not.toHaveBeenCalled()
+  })
+
+  it('does not dispatch a batch confirmed after the scope closes', async () => {
+    const { page } = setup([endpoint('one', 'live')])
+    page.selectAllEndpoints(true)
+    const answer = deferred<boolean>()
+    confirm.mockReturnValueOnce(answer.promise)
+    const operation = page.bulkSetEnabled(false)
+    scope.stop()
+    answer.resolve(true)
+    await operation
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+
+  it('stops discovery workers from taking another item after disposal', async () => {
+    const { page, catalog } = setup([])
+    for (let i = 2; i <= 6; i++) catalog.value.services.push({
+      upstream: { id: `service-${i}`, status: 'active' }, endpoints: [], targetDrift: []
+    } as unknown as PlatformEndpointCatalogService)
+    const response = deferred<{ connection: { lastDiscoveryError: null } }>()
+    fetchMock.mockReturnValue(response.promise)
+    const operation = page.discoverAllServices()
+    expect(fetchMock).toHaveBeenCalledTimes(4)
+    scope.stop()
+    response.resolve({ connection: { lastDiscoveryError: null } })
+    await operation
+    expect(fetchMock).toHaveBeenCalledTimes(4)
+    expect(refreshCatalog).not.toHaveBeenCalled()
+  })
+
   it('holds advanced settings admission through refresh and blocks apply, batch and duplicate saves', async () => {
     const item = endpoint('one', 'live')
     const { page, catalog } = setup([item])

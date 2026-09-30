@@ -1,9 +1,10 @@
 import { createHash } from 'node:crypto'
-import { and, eq, sql } from 'drizzle-orm'
+import { and, eq, inArray, sql } from 'drizzle-orm'
 import { db, type DatabaseTransaction } from '~~/server/db/client'
 import {
   apiProducts,
   apiVersions,
+  openapiDocuments,
   routingRevisions,
   upstreamServiceConnections,
   upstreamServices
@@ -33,6 +34,7 @@ import type { RoutingRevisionRoute } from '~~/server/types/routing-revision'
 import { canonicalJson } from '~~/server/utils/canonical-json'
 import { parseRoutePathPattern } from '~~/server/utils/route-pattern'
 import { toRoutingRevisionRoute } from '~~/server/utils/routing-revision-route'
+import { readStoredServiceEndpoints } from '~~/server/services/platform-service-openapi-service'
 
 interface CatalogItem {
   key: string
@@ -453,22 +455,13 @@ export const platformEndpointService = {
         upstream
       ])
     )
-    const serviceViews = new Map<string, Awaited<ReturnType<
-      typeof getServiceControlView
-    >>>()
-    await Promise.all(upstreams.map(async (upstream) => {
-      try {
-        serviceViews.set(
-          upstream.id,
-          await getServiceControlView(
-            upstream.id,
-            { checkAvailability: false }
-          )
-        )
-      } catch {
-        // An incomplete connection remains visible as an undiscovered Service.
-      }
-    }))
+    // Upstreams already contain their connection and Targets. The catalog only
+    // needs document summaries, fetched once instead of rebuilding every view.
+    const documentIds = [...new Set(upstreams.flatMap(upstream => upstream.openapiDocumentId ? [upstream.openapiDocumentId] : []))]
+    const documents = documentIds.length ? await db.select({
+      id: openapiDocuments.id, summary: openapiDocuments.parsedSummary
+    }).from(openapiDocuments).where(inArray(openapiDocuments.id, documentIds)) : []
+    const endpointsByDocument = new Map(documents.map(document => [document.id, readStoredServiceEndpoints(document.summary)]))
 
     const services = upstreams.map((upstream) => {
       const serviceRoutes = routes.filter(binding => (
@@ -476,7 +469,7 @@ export const platformEndpointService = {
       ))
       const usedRouteIds = new Set<string>()
       const endpoints: CatalogItem[] = (
-        serviceViews.get(upstream.id)?.endpoints ?? []
+        (upstream.openapiDocumentId ? endpointsByDocument.get(upstream.openapiDocumentId) : undefined) ?? []
       )
         .filter(endpoint => !endpoint.system)
         .flatMap((endpoint) => {

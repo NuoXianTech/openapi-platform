@@ -110,24 +110,6 @@ export const userService = {
     return activated
   },
 
-  async updatePasswordAndInvalidateSessions(id: number, passwordHash: string) {
-    const rows = await db.update(users).set({
-      passwordHash,
-      tokenVersion: sql`${users.tokenVersion} + 1`,
-      updatedAt: new Date()
-    }).where(eq(users.id, id)).returning()
-    return firstRow(rows)
-  },
-
-  async updateEmail(id: number, email: string) {
-    const rows = await db.update(users).set({
-      email,
-      emailVerifiedAt: new Date(),
-      updatedAt: new Date()
-    }).where(eq(users.id, id)).returning()
-    return firstRow(rows)
-  },
-
   async clearExpiredBan(id: number) {
     const rows = await db.update(users).set({
       isBanned: false,

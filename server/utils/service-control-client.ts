@@ -12,7 +12,8 @@ import {
   type SupportedServiceControlProtocol,
   SUPPORTED_SERVICE_CONTROL_PROTOCOLS
 } from '#shared/service-control'
-import { readLimitedText, safeFetch } from '~~/server/utils/safe-fetch'
+import { readLimitedText } from '~~/server/utils/safe-fetch'
+import { fetchUpstreamTarget } from '~~/server/utils/upstream-target-fetch'
 import { containsDotPathSegment } from '~~/server/utils/route-pattern'
 
 const CONTROL_TIMEOUT_MS = 10_000
@@ -200,20 +201,9 @@ async function requestJson<TSchema extends z.ZodType>(
 
   let response: Response
   try {
-    response = await safeFetch(url, {
+    response = await fetchUpstreamTarget(url, {
       ...init,
-      allowedHosts: [url.hostname],
-      allowSubdomains: false,
-      // Targets may intentionally live on the private Docker
-      // network and commonly use HTTP for that hop.  DNS is still resolved
-      // and pinned by safeFetch; control-plane redirects are returned
-      // manually and never followed with configuration credentials.
-      allowHttp: true,
-      allowPrivateNetworks: true,
-      allowNonDefaultPort: true,
-      followRedirects: false,
       headers,
-      redirect: 'manual',
       signal: AbortSignal.timeout(CONTROL_TIMEOUT_MS)
     })
   } catch (error) {

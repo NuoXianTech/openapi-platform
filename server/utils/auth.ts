@@ -48,13 +48,13 @@ export function clearAuthCookie(event: H3Event) {
   })
 }
 
-export async function createUserSession(event: H3Event, user: AuthUserPayload, options: { remember?: boolean } = {}) {
+export async function createUserSession(event: H3Event, user: AuthUserPayload, options: { remember?: boolean, expectedTokenVersion?: number } = {}) {
   const { defaultMaxAge, rememberMaxAge } = await getSessionMaxAgesSeconds()
   const remember = Boolean(options.remember)
   const ttlSeconds = remember ? rememberMaxAge : defaultMaxAge
   // 从 DB 取当前 role/tokenVersion 嵌入 token，避免调用方传入过期角色导致会话降级或越权。
   const row = await userService.getById(user.id)
-  if (!row) {
+  if (!row || (options.expectedTokenVersion !== undefined && row.tokenVersion !== options.expectedTokenVersion)) {
     throw createError({ statusCode: 401, message: 'unauthorized' })
   }
   const loginAt = Math.floor(Date.now() / 1000)

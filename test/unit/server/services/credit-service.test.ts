@@ -1,7 +1,6 @@
-import { PGlite } from '@electric-sql/pglite'
-import { drizzle } from 'drizzle-orm/pglite'
+import type { PGlite } from '@electric-sql/pglite'
+import { createTestDatabase } from '../../../helpers/database'
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
-import * as schema from '~~/server/db/schema'
 
 const testContext = vi.hoisted(() => ({ database: null as unknown }))
 
@@ -26,77 +25,19 @@ function reserve(amount: number) {
 }
 
 beforeAll(async () => {
-  client = new PGlite()
-  await client.exec(`
-    CREATE TABLE users (
-      id serial PRIMARY KEY,
-      credits integer NOT NULL DEFAULT 0,
-      is_active boolean NOT NULL DEFAULT true,
-      is_banned boolean NOT NULL DEFAULT false,
-      banned_until timestamptz,
-      updated_at timestamptz NOT NULL DEFAULT now()
-    );
-    CREATE TABLE api_keys (
-      id serial PRIMARY KEY,
-      user_id integer NOT NULL,
-      is_active boolean NOT NULL DEFAULT true,
-      total_quota integer,
-      used_credits integer NOT NULL DEFAULT 0,
-      updated_at timestamptz NOT NULL DEFAULT now()
-    );
-    CREATE TABLE api_calls (
-      id bigserial PRIMARY KEY,
-      credits_cost integer NOT NULL DEFAULT 0
-    );
-    CREATE TABLE api_credit_reservations (
-      id bigserial PRIMARY KEY,
-      user_id integer NOT NULL,
-      api_key_id integer NOT NULL,
-      route_id uuid NOT NULL,
-      api_call_id bigint,
-      request_id uuid NOT NULL,
-      amount integer NOT NULL,
-      status varchar(20) NOT NULL DEFAULT 'active',
-      attempts integer NOT NULL DEFAULT 0,
-      last_error varchar(500),
-      last_attempt_at timestamptz,
-      next_attempt_at timestamptz NOT NULL DEFAULT now(),
-      created_at timestamptz NOT NULL DEFAULT now(),
-      updated_at timestamptz NOT NULL DEFAULT now()
-    );
-    CREATE TABLE credit_transactions (
-      id bigserial PRIMARY KEY,
-      user_id integer,
-      amount integer NOT NULL,
-      balance_after integer NOT NULL,
-      reason varchar(50) NOT NULL,
-      route_id uuid,
-      api_call_id bigint,
-      credit_reservation_id bigint,
-      code_id integer,
-      operator_id integer,
-      operator_name varchar(140),
-      ip varchar(45),
-      remark varchar(500),
-      meta jsonb,
-      created_at timestamptz NOT NULL DEFAULT now()
-    );
-    CREATE UNIQUE INDEX credit_transactions_api_call_reason_uq
-      ON credit_transactions (api_call_id, reason)
-      WHERE api_call_id IS NOT NULL;
-    CREATE UNIQUE INDEX credit_transactions_reservation_uq
-      ON credit_transactions (credit_reservation_id)
-      WHERE credit_reservation_id IS NOT NULL;
-  `)
-  testContext.database = drizzle(client, { schema })
+  const testDatabase = await createTestDatabase()
+  client = testDatabase.client
+  testContext.database = testDatabase.database
 })
 
 beforeEach(async () => {
   await client.exec(`
-    TRUNCATE credit_transactions, api_credit_reservations, api_calls, api_keys, users RESTART IDENTITY;
-    INSERT INTO users (credits, is_active, is_banned) VALUES (10, true, false);
-    INSERT INTO api_keys (user_id, total_quota) VALUES (1, 10);
-    INSERT INTO api_calls (id) VALUES (42), (43);
+    TRUNCATE credit_transactions, api_credit_reservations, api_calls, api_keys, users RESTART IDENTITY CASCADE;
+    INSERT INTO users (username, email, password_hash, credits, is_active, is_banned) VALUES ('credit-user', 'credit@example.com', 'hash', 10, true, false);
+    INSERT INTO api_keys (user_id, name, key_digest, key_ciphertext, key_preview, total_quota) VALUES (1, 'test', 'digest', 'ciphertext', 'preview', 10);
+    INSERT INTO api_calls (id, route_id, path, method, status_code) VALUES
+      (42, '00000000-0000-4000-8000-000000000001', '/test', 'GET', 200),
+      (43, '00000000-0000-4000-8000-000000000001', '/test', 'GET', 200);
   `)
 })
 

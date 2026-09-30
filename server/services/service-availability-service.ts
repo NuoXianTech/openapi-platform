@@ -5,7 +5,7 @@ import type {
   ServiceTargetAvailability
 } from '#shared/types/service-control'
 import { buildServiceControlUrl } from '~~/server/utils/service-control-client'
-import { safeFetch } from '~~/server/utils/safe-fetch'
+import { fetchUpstreamTarget } from '~~/server/utils/upstream-target-fetch'
 
 const AVAILABILITY_PROBE_TIMEOUT_MS = 1_500
 const AVAILABILITY_PROBE_CONCURRENCY = 16
@@ -32,17 +32,10 @@ async function requestTargetAvailability(
   try {
     const readinessUrl = buildServiceControlUrl(baseUrl, readinessPath)
     const requestOptions = {
-      allowedHosts: [readinessUrl.hostname],
-      allowSubdomains: false,
-      allowHttp: true,
-      allowPrivateNetworks: true,
-      allowNonDefaultPort: true,
-      followRedirects: false,
       headers: { accept: 'application/json' },
-      redirect: 'manual' as const,
       signal: AbortSignal.timeout(AVAILABILITY_PROBE_TIMEOUT_MS)
     }
-    const readiness = await safeFetch(
+    const readiness = await fetchUpstreamTarget(
       readinessUrl,
       requestOptions
     )
@@ -51,18 +44,11 @@ async function requestTargetAvailability(
     if (!ready) return false
 
     const controlUrl = buildServiceControlUrl(baseUrl, controlPath)
-    const control = await safeFetch(controlUrl, {
-      allowedHosts: [controlUrl.hostname],
-      allowSubdomains: false,
-      allowHttp: true,
-      allowPrivateNetworks: true,
-      allowNonDefaultPort: true,
-      followRedirects: false,
+    const control = await fetchUpstreamTarget(controlUrl, {
       headers: {
         accept: 'application/json',
         authorization: `Service ${serviceToken}`
       },
-      redirect: 'manual',
       signal: AbortSignal.timeout(AVAILABILITY_PROBE_TIMEOUT_MS)
     })
     const authenticated = control.ok

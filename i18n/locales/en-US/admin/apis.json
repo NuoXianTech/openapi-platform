@@ -353,6 +353,8 @@
           "syncAllTargets": "Resync saved configuration",
           "saveConfiguration": "Save all settings",
           "configurationSynced": "Configuration synchronized to every instance",
+          "configurationRoutingPending": "Configuration saved; traffic update is pending",
+          "configurationRoutingRetry": "Resync the saved configuration to retry the traffic update.",
           "configurationDrifted": "Desired configuration saved, but some Targets are not synchronized",
           "configurationPartial": "Configuration saved, but some instances are not synchronized",
           "configurationFailed": "Configuration saved, but no instance synchronized successfully",

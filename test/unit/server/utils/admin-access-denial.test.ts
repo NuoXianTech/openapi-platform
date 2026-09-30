@@ -35,7 +35,7 @@ vi.mock('~~/server/services/admin-onboarding-service', () => ({
   assertAdminOnboardingCompleted: vi.fn()
 }))
 
-const { requireAdmin } = await import('~~/server/utils/auth')
+const { requireAdmin, createUserSession } = await import('~~/server/utils/auth')
 
 const NOW_SECONDS = Math.floor(Date.now() / 1000)
 
@@ -76,6 +76,13 @@ function fakeEvent() {
 }
 
 describe('admin access denial auditing', () => {
+  it('does not issue a replacement session after a newer credential change', async () => {
+    arrangeAuthenticatedNonAdmin()
+    mocks.getById.mockResolvedValueOnce({ id: 7, role: 'user', tokenVersion: 2 })
+    await expect(createUserSession(fakeEvent(), { id: 7 }, { expectedTokenVersion: 1 }))
+      .rejects.toMatchObject({ statusCode: 401 })
+  })
+
   it('still returns 403 when the rate-limit backend is unavailable', async () => {
     arrangeAuthenticatedNonAdmin()
     const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {})

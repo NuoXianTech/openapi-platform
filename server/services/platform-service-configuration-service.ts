@@ -1,7 +1,6 @@
 import { and, eq } from 'drizzle-orm'
 import type {
   RedactedServiceConfigurationState,
-  RoutingRevisionRef,
   ServiceConfigurationDefinition,
   ServiceConfigurationSyncOutcome,
   ServiceConfigurationSyncResult,
@@ -144,26 +143,24 @@ function redactedStateFromValues(input: {
   definition: ServiceConfigurationDefinition
   updatedAt: string
 }): RedactedServiceConfigurationState {
-  const fields = new Map(
-    serviceConfigurationFields(input.definition)
-      .map(field => [field.key, field])
-  )
   return {
     schemaVersion: 1,
     serviceId: input.serviceId,
     schemaSha256: input.schemaSha256,
     revision: input.revision,
     configurationSha256: input.configurationSha256,
-    values: Object.fromEntries(Object.entries(input.values).map(
-      ([key, value]) => [
-        key,
-        fields.get(key)?.type === 'secret'
-          ? { configured: typeof value === 'string' && value.length > 0 }
-          : value
-      ]
-    )),
+    values: redactConfigurationValues(input.definition, input.values),
     updatedAt: input.updatedAt
   }
+}
+
+function redactConfigurationValues(definition: ServiceConfigurationDefinition, values: Record<string, ServiceConfigurationValue>): ServiceConfigurationSyncResult['values'] {
+  return Object.fromEntries(serviceConfigurationFields(definition).map(field => {
+    const value = values[field.key]!
+    return [field.key, field.type === 'secret'
+      ? { configured: typeof value === 'string' && value.length > 0 }
+      : value]
+  }))
 }
 
 async function pushConfiguration(
@@ -244,13 +241,13 @@ async function pushConfiguration(
     throw new ServiceConfigurationRevisionAheadError(conflictingRevision)
   }
 
-  const status = await acceptServiceTargetResults(context, 'configuration', results)
-  const refreshed = await loadServiceControlContext(context.service.id)
+  const accepted = await acceptServiceTargetResults(context, 'configuration', results)
   return {
-    status,
+    status: accepted.status,
     revision,
     configurationHash,
-    targets: refreshed.targets.map(target => (
+    values: redactConfigurationValues(definition, values),
+    targets: accepted.targets.map(target => (
       serviceTargetControlState(target, 'unknown')
     ))
   }
@@ -258,18 +255,28 @@ async function pushConfiguration(
 
 async function publishRoutableConfigurationTargets(
   result: ServiceConfigurationSyncResult
-): Promise<{ routingRevision: RoutingRevisionRef | null }> {
+): Promise<Pick<ServiceConfigurationSyncOutcome, 'routingRevision' | 'routingStatus'>> {
   // A partial sync still changes the safe Target set: synchronized Targets can
   // serve the new configuration while failed or drifted Targets must be
   // removed from the next immutable runtime snapshot.
   if (result.status === 'failed') {
-    return { routingRevision: null }
+    return { routingRevision: null, routingStatus: 'skipped' }
   }
   // Named apart from result.revision: that one is the Service configuration
   // revision, this one is the routing snapshot sequence. Spreading both
   // under one key silently dropped the configuration revision.
-  const { revision } = await refreshPlatformRevision(null)
-  return { routingRevision: revision }
+  try {
+    const { revision } = await refreshPlatformRevision(null)
+    return { routingRevision: revision, routingStatus: 'applied' }
+  } catch (error) {
+    // Desired configuration and ACKs have committed. Resynchronizing reuses
+    // the saved revision and retries publication without replaying a save.
+    console.error('[service-configuration] routing publication pending after synchronization', {
+      configurationRevision: result.revision,
+      error: error instanceof Error ? error.message : 'publication failed'
+    })
+    return { routingRevision: null, routingStatus: 'pending' }
+  }
 }
 
 function reconstructConfiguration(input: {

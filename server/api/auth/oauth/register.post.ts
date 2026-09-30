@@ -14,13 +14,7 @@ import { loginLogService } from '~~/server/services/login-log-service'
 import { addRequestOperationLog } from '~~/server/utils/request-operation-log'
 import { createUserSession } from '~~/server/utils/auth'
 import { hashPassword } from '~~/server/utils/password'
-import {
-  isEmailAllowedForRegistration,
-  isRegistrationInviteValid,
-  normalizeEmailFilterMode,
-  normalizeRegistrationMode,
-  parseEmailDomainList
-} from '~~/server/utils/registration'
+import { normalizeRegistrationMode } from '~~/server/utils/registration'
 import { getRateLimiter } from '~~/server/utils/rate-limit'
 import { readClientIp, toClientIpRateLimitValue } from '~~/server/utils/request-meta'
 import { getSqlState } from '~~/server/utils/database-error'
@@ -69,20 +63,7 @@ export default defineEventHandler(async (event) => {
     throw createError({ statusCode: 429, message: '尝试次数过多，请稍后再试' })
   }
 
-  // 邮箱域名过滤
-  const filterMode = normalizeEmailFilterMode(settings.registerEmailFilterMode)
-  const domains = parseEmailDomainList(settings.registerEmailFilterList)
-  if (!isEmailAllowedForRegistration(email, filterMode, domains)) {
-    const msg = filterMode === 'blacklist' ? '该邮箱域名已被禁止注册' : '该邮箱域名不在允许注册的列表内'
-    throw createError({ statusCode: 403, message: msg })
-  }
-
-  if (
-    registrationMode === 'invite'
-    && !isRegistrationInviteValid(settings.registrationInviteCode, body.inviteCode)
-  ) {
-    throw createError({ statusCode: 403, message: '邀请码无效' })
-  }
+  registrationService.assertRegistrationPolicy(settings, email, body.inviteCode)
 
   // 邮箱已注册：持有效 pending 的用户应改走「绑定已有账号」
   if (await userService.findByEmail(email)) {

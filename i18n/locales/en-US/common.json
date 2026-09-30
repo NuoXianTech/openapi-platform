@@ -221,6 +221,7 @@
       "unread": "Unread",
       "unreadCount": "{count} unread",
       "markAllRead": "Mark all as read",
+      "markReadFailed": "Could not mark notifications as read. Please try again.",
       "onlyUnread": "Unread only",
       "noUnread": "No unread notifications",
       "empty": "No notifications",

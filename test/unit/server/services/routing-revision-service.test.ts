@@ -1369,6 +1369,24 @@ describe('routing revision service', () => {
     }
   })
 
+  it('loads document summaries in one query instead of rebuilding each upstream control view', async () => {
+    await createDiscoveredService({ slug: 'batch-catalog-one' })
+    const query = vi.spyOn(client, 'query')
+    try {
+      const first = await platformEndpointService.list()
+      const firstCount = query.mock.calls.length
+      expect(first.services).toHaveLength(1)
+      await createDiscoveredService({ slug: 'batch-catalog-two' })
+      await createDiscoveredService({ slug: 'batch-catalog-three' })
+      query.mockClear()
+      const result = await platformEndpointService.list()
+      expect(result.services).toHaveLength(3)
+      expect(result.services.every(service => service.endpoints.length > 0)).toBe(true)
+      expect(query.mock.calls.length).toBe(firstCount)
+      expect(query.mock.calls.filter(([text]) => /from "openapi_documents"/.test(text))).toHaveLength(1)
+    } finally { query.mockRestore() }
+  })
+
   it('rolls back an endpoint mutation when publication conflicts', async () => {
     const active = await createRoutingGraph({
       productSlug: 'active-conflict',

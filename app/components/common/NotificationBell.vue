@@ -2,40 +2,11 @@
 import type { MessageLevel } from '#shared/types/content'
 import { isSafePublicUrl } from '#shared/utils/safe-url'
 import { MESSAGE_LEVEL_META as levelMeta } from '~/constants/message-level'
-/**
- * 后台站内信通知中心（admin / user 两端共用）
- *
- * - 头像旁铃铛 + 未读角标（轮询 60s）
- * - 点击从右侧滑出 Slideover，承载完整通知列表，替代独立页面
- * - 支持「只看未读 / 全部已读 / 展开详情 / 跳转链接」
- *
- * per-user 私有数据：全部走组件本地 ref + $fetch，不进 SSR payload。
- */
+import { useNotifications } from '~/composables/use-notifications'
 
-interface Notification {
-  id: number
-  title: string
-  content: string
-  level: MessageLevel
-  linkUrl: string | null
-  isRead: boolean
-  readAt: string | null
-  senderActor: string | null
-  createdAt: string
-}
-
-const open = ref(false)
-const items = ref<Notification[]>([])
-const unread = ref(0)
-const loading = ref(false)
-const loadFailed = ref(false)
-const onlyUnread = ref(false)
-const expandedId = ref<number | null>(null)
+const { open, items, unread, loading, loadFailed, onlyUnread, expandedId,
+  busy, mutationError, fetchList, toggleNotification, markAllRead, setOnlyUnread } = useNotifications()
 const { t, locale } = useI18n()
-let listRequestVersion = 0
-let listController: AbortController | null = null
-let unreadRequestVersion = 0
-let unreadController: AbortController | null = null
 
 const notificationLevelClasses: Record<MessageLevel, string> = {
   info: 'notification-item__level--info',
@@ -51,116 +22,6 @@ function getNotificationLevelLabel(level: MessageLevel): string {
 function getNotificationExcerpt(content: string): string {
   return content.replace(/\s+/g, ' ').trim()
 }
-
-async function fetchUnreadCount(): Promise<void> {
-  const version = ++unreadRequestVersion
-  unreadController?.abort()
-  const controller = new AbortController()
-  unreadController = controller
-  try {
-    const res = await $fetch('/api/notifications/unread-count', {
-      signal: controller.signal
-    })
-    if (version === unreadRequestVersion) unread.value = res.count
-  } catch { /* ignore */ } finally {
-    if (unreadController === controller) unreadController = null
-  }
-}
-
-async function fetchList(): Promise<void> {
-  const version = ++listRequestVersion
-  listController?.abort()
-  const controller = new AbortController()
-  listController = controller
-  loading.value = true
-  loadFailed.value = false
-  try {
-    const res = await $fetch<Notification[]>('/api/notifications/list', {
-      query: { limit: 200, unread: onlyUnread.value ? '1' : '0' },
-      signal: controller.signal
-    })
-    if (version === listRequestVersion) items.value = res || []
-  } catch {
-    if (version === listRequestVersion && !controller.signal.aborted) {
-      loadFailed.value = true
-    }
-  } finally {
-    if (version === listRequestVersion) loading.value = false
-    if (listController === controller) listController = null
-  }
-}
-
-function cancelListRequest(): void {
-  listRequestVersion += 1
-  listController?.abort()
-  listController = null
-  loading.value = false
-}
-
-function cancelUnreadRequest(): void {
-  unreadRequestVersion += 1
-  unreadController?.abort()
-  unreadController = null
-}
-
-async function toggleNotification(n: Notification): Promise<void> {
-  const willExpand = expandedId.value !== n.id
-  expandedId.value = willExpand ? n.id : null
-  if (!willExpand || n.isRead) return
-
-  try {
-    cancelUnreadRequest()
-    await $fetch('/api/notifications/mark-read', { method: 'POST', body: { id: n.id } })
-    n.isRead = true
-    n.readAt = new Date().toISOString()
-    unread.value = Math.max(0, unread.value - 1)
-  } catch { /* ignore */ }
-}
-
-async function markAllRead(): Promise<void> {
-  try {
-    cancelListRequest()
-    cancelUnreadRequest()
-    await $fetch('/api/notifications/mark-all-read', { method: 'POST' })
-    items.value.forEach((n) => {
-      if (!n.isRead) {
-        n.isRead = true
-        n.readAt = new Date().toISOString()
-      }
-    })
-    unread.value = 0
-    expandedId.value = null
-    if (onlyUnread.value) items.value = []
-  } catch { /* ignore */ }
-}
-
-function setOnlyUnread(value: boolean): void {
-  if (onlyUnread.value === value) return
-  onlyUnread.value = value
-}
-
-watch(open, (val) => {
-  if (val) {
-    void fetchList()
-  } else {
-    expandedId.value = null
-  }
-})
-
-watch(onlyUnread, () => {
-  expandedId.value = null
-  if (open.value) void fetchList()
-})
-
-// 未读角标仅在客户端拉取并轮询：避免 SSR 阶段请求 per-user 私有数据并写入 payload
-useIntervalFn(fetchUnreadCount, 60_000)
-onMounted(() => {
-  void fetchUnreadCount()
-})
-onBeforeUnmount(() => {
-  cancelListRequest()
-  cancelUnreadRequest()
-})
 </script>
 
 <template>
@@ -240,7 +101,7 @@ onBeforeUnmount(() => {
             color="neutral"
             variant="outline"
             icon="i-mdi-check-all"
-            :disabled="unread === 0"
+            :disabled="unread === 0 || busy"
             @click="markAllRead"
           >
             {{ $t('common.notifications.markAllRead') }}
@@ -253,12 +114,15 @@ onBeforeUnmount(() => {
               square
               icon="i-lucide-refresh-cw"
               :loading="loading"
+              :disabled="busy"
               :aria-label="$t('common.actions.refresh')"
               @click="fetchList"
             />
           </UTooltip>
         </div>
       </div>
+
+      <UAlert v-if="mutationError" color="error" :title="$t('common.notifications.markReadFailed')" class="mx-4 mt-4" />
 
       <div
         v-if="loading && items.length === 0"

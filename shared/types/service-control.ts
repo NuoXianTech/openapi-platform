@@ -90,10 +90,13 @@ export interface ServiceConfigurationSyncResult {
   revision: number
   configurationHash: string
   targets: ServiceTargetControlState[]
+  /** Saved normalized values; secrets are represented only by configured flags. */
+  values: ServiceConfigurationView['values']
 }
 
 export interface ServiceConfigurationSyncOutcome
   extends ServiceConfigurationSyncResult {
   /** Runtime snapshot published as a result of this sync, if any. */
   routingRevision: RoutingRevisionRef | null
+  routingStatus: 'applied' | 'pending' | 'skipped'
 }

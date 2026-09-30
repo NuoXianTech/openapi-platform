@@ -5,6 +5,7 @@ import {
   readLimitedText,
   safeFetch
 } from '../../../../server/utils/safe-fetch'
+import { fetchUpstreamTarget } from '~~/server/utils/upstream-target-fetch'
 
 type PinnedLookup = (
   hostname: string,
@@ -62,6 +63,34 @@ describe('isHostnameWithin', () => {
 })
 
 describe('safeFetch', () => {
+  it.each(['8.8.8.8', '::ffff:8.8.8.8', '2001:4860:4860::8888'])('rejects managed HTTP names resolving to %s before sending credentials', async (address) => {
+    networkMocks.lookup.mockResolvedValue([{ address, family: address.includes(':') ? 6 : 4 }])
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response('unexpected'))
+    await expect(fetchUpstreamTarget('http://service.internal:8080/configuration', {
+      headers: { authorization: 'Service test-token' }
+    })).rejects.toThrow('public upstream targets must use HTTPS')
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+
+  it('rejects a mixed public/private DNS answer for managed HTTP', async () => {
+    networkMocks.lookup.mockResolvedValue([{ address: '10.0.0.2', family: 4 }, { address: '8.8.8.8', family: 4 }])
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response('unexpected'))
+    await expect(fetchUpstreamTarget('http://service:8080')).rejects.toThrow('must use HTTPS')
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+
+  it('retains private HTTP and public HTTPS support with pinned connections and no redirects', async () => {
+    networkMocks.lookup.mockResolvedValueOnce([{ address: '10.0.0.2', family: 4 }])
+      .mockResolvedValueOnce([{ address: '8.8.8.8', family: 4 }])
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockImplementation(async () => new Response(null, {
+      status: 302, headers: { location: 'https://other.example/configuration' }
+    }))
+    expect((await fetchUpstreamTarget('http://service:8080')).status).toBe(302)
+    expect((await fetchUpstreamTarget('https://public.example')).status).toBe(302)
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+    expect(fetchMock.mock.calls[0]?.[1]).toMatchObject({ redirect: 'manual', dispatcher: expect.anything() })
+  })
+
   it('rejects non-HTTPS URLs before making a request', async () => {
     await expect(safeFetch('http://example.com/resource', {
       allowedHosts: ['example.com']

@@ -239,6 +239,7 @@
       "unread": "未读",
       "unreadCount": "{count} 未读",
       "markAllRead": "全部标为已读",
+      "markReadFailed": "标记已读失败，请重试。",
       "onlyUnread": "只看未读",
       "noUnread": "没有未读消息",
       "empty": "暂无消息",

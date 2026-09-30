@@ -141,6 +141,7 @@ export const platformUpstreamService = {
       const { connectionRecord, ...upstream } = item
       const availability = options.checkAvailability !== true
         || upstream.status !== 'active'
+        || !connectionRecord.serviceDescription
         ? 'unknown'
         : (await resolveServiceAvailability(
             connectionRecord.serviceDescription,

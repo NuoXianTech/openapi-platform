@@ -2,6 +2,7 @@ import { lookup } from 'node:dns/promises'
 import { isIP, type LookupFunction } from 'node:net'
 import { Agent, fetch as undiciFetch, type RequestInit as UndiciRequestInit } from 'undici'
 import { ipInAnyCidr } from '#shared/utils/cidr'
+import { isPrivateUpstreamHostname } from '#shared/utils/upstream-target'
 
 const BLOCKED_NETWORKS = [
   '0.0.0.0/8',
@@ -52,7 +53,7 @@ let transportCacheGeneration = 0
 export interface SafeFetchOptions extends RequestInit {
   allowedHosts: readonly string[]
   maxRedirects?: number
-  allowHttp?: boolean
+  allowHttp?: boolean | 'private-only'
   allowPrivateNetworks?: boolean
   allowNonDefaultPort?: boolean
   /** Allow subdomains of entries in allowedHosts (default: true). */
@@ -185,6 +186,11 @@ async function assertSafeUrl(
   if (!options.allowPrivateNetworks) {
     for (const { address } of addresses) assertPublicAddress(address)
   }
+  if (url.protocol === 'http:' && options.allowHttp === 'private-only') {
+    if (addresses.some(({ address }) => !isIP(address) || !isPrivateUpstreamHostname(address))) {
+      throw new Error('public upstream targets must use HTTPS')
+    }
+  }
   pinnedAddresses.set(hostname, addresses)
 
   return url
@@ -239,7 +245,7 @@ function dispatcherCacheKey(
   return JSON.stringify({
     origin: url.origin,
     allowedHosts: allowedHosts.map(normalizeHostname).sort(),
-    allowHttp: options.allowHttp === true,
+    allowHttp: options.allowHttp ?? false,
     allowPrivateNetworks: options.allowPrivateNetworks === true,
     allowNonDefaultPort: options.allowNonDefaultPort === true,
     allowSubdomains: options.allowSubdomains !== false
