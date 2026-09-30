@@ -42,7 +42,7 @@ const hasFooter = computed(() => Boolean(
 ))
 const contentClass = computed(() => [
   'dashboard-metric-card__content relative z-10 flex flex-1 flex-col',
-  props.compact ? 'gap-3 p-3 sm:p-4' : 'gap-4 p-4 sm:p-5'
+  props.compact ? 'gap-1 p-3 sm:p-4' : 'gap-1 p-4 sm:p-5'
 ])
 const footerClass = computed(() => [
   'dashboard-metric-card__footer relative z-10',
@@ -99,23 +99,10 @@ const sparkline = computed(() => buildSparklinePath(props.sparklineValues ?? [])
     }"
   >
     <div :class="contentClass">
-      <div class="flex items-start justify-between gap-3">
-        <div class="min-w-0 space-y-1">
-          <p class="dashboard-metric-card__label truncate text-xs font-medium text-muted">
-            {{ label }}
-          </p>
-          <div class="flex items-baseline gap-1.5">
-            <span :class="valueClass">
-              {{ value }}
-            </span>
-            <span
-              v-if="unit"
-              class="text-xs font-medium text-muted"
-            >
-              {{ unit }}
-            </span>
-          </div>
-        </div>
+      <div class="flex min-w-0 items-center justify-between gap-3">
+        <p class="dashboard-metric-card__label min-w-0 truncate text-xs font-medium text-muted">
+          {{ label }}
+        </p>
 
         <div :class="iconClass">
           <UIcon
@@ -123,6 +110,18 @@ const sparkline = computed(() => buildSparklinePath(props.sparklineValues ?? [])
             class="size-4.5"
           />
         </div>
+      </div>
+
+      <div class="flex min-w-0 flex-wrap items-baseline gap-x-1.5 gap-y-0">
+        <span :class="valueClass">
+          {{ value }}
+        </span>
+        <span
+          v-if="unit"
+          class="min-w-0 text-xs font-medium text-muted wrap-anywhere"
+        >
+          {{ unit }}
+        </span>
       </div>
     </div>
 
@@ -182,6 +181,7 @@ const sparkline = computed(() => buildSparklinePath(props.sparklineValues ?? [])
 <style scoped>
 .dashboard-metric-card {
   --dashboard-metric-accent: var(--ui-text-toned);
+  min-width: 0;
   border-color: var(--dashboard-border);
   background: var(--dashboard-surface);
   box-shadow:
@@ -214,6 +214,9 @@ const sparkline = computed(() => buildSparklinePath(props.sparklineValues ?? [])
 }
 
 .dashboard-metric-card-value {
+  min-width: 0;
+  max-width: 100%;
+  overflow-wrap: anywhere;
   letter-spacing: 0;
 }
 

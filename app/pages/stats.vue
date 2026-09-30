@@ -383,7 +383,6 @@ const retryActions = computed(() => [{
 }
 
 .stats-metrics-grid :deep(.dashboard-metric-card-value) {
-  margin-top: 8px;
   font-size: 28px;
   font-weight: 600;
   letter-spacing: -0.8px;

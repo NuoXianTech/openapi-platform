@@ -58,11 +58,11 @@ function toMonthKey(date: DateValue): string {
     </template>
 
     <div class="grid grid-cols-2 divide-x divide-default border-b border-default pb-4">
-      <div class="pe-4">
+      <div class="min-w-0 pe-3 sm:pe-4">
         <p class="text-xs font-medium text-muted">
           {{ $t('user.credits.calendar.earnedThisMonth') }}
         </p>
-        <p class="mt-1.5 text-lg font-semibold text-success tabular-nums">
+        <p class="mt-1.5 text-lg font-semibold text-success tabular-nums wrap-anywhere">
           <template v-if="hasVisibleHistory">
             {{ $t('user.credits.calendar.points', { amount: totalAmount.toLocaleString(locale) }) }}
           </template>
@@ -72,11 +72,11 @@ function toMonthKey(date: DateValue): string {
         </p>
       </div>
 
-      <div class="ps-4">
+      <div class="min-w-0 ps-3 sm:ps-4">
         <p class="text-xs font-medium text-muted">
           {{ $t('user.credits.calendar.checkinsThisMonth') }}
         </p>
-        <p class="mt-1.5 text-lg font-semibold text-highlighted tabular-nums">
+        <p class="mt-1.5 text-lg font-semibold text-highlighted tabular-nums wrap-anywhere">
           <template v-if="hasVisibleHistory">
             {{ $t('user.credits.calendar.days', { count: checkedDayCount.toLocaleString(locale) }) }}
           </template>
@@ -95,12 +95,16 @@ function toMonthKey(date: DateValue): string {
       disable-days-outside-current-view
       color="success"
       variant="subtle"
-      size="xl"
+      size="md"
       :locale="locale"
       :model-value="checkedDates"
       :max-value="todayDate"
       :view-control="false"
-      class="mx-auto mt-4 max-w-sm"
+      :ui="{
+        cell: 'min-w-0 w-full',
+        cellTrigger: 'mx-auto my-0.5 aspect-square h-auto w-[calc(100%-0.25rem)] max-w-10'
+      }"
+      class="mx-auto mt-4 w-full max-w-sm"
     />
 
     <div class="mt-4 flex flex-wrap items-center justify-center gap-x-4 gap-y-2 border-t border-default pt-3 text-xs text-muted">

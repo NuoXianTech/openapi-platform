@@ -1,3 +1,22 @@
+.design-focus-inset {
+  --design-focus-offset: -2px;
+}
+
+/* Small status text uses the design's deeper semantic tones. */
+:root {
+  --design-badge-info: #0761d1;
+  --design-badge-error: #c50000;
+  --design-badge-warning: #ab570a;
+  --design-badge-warning-bg: #ffefcf;
+}
+
+.dark {
+  --design-badge-info: var(--ui-info);
+  --design-badge-error: var(--ui-error);
+  --design-badge-warning: var(--ui-warning);
+  --design-badge-warning-bg: color-mix(in oklab, var(--ui-warning) 10%, transparent);
+}
+
 .design-floating-panel,
 :root:has(.public-page) [data-reka-popper-content-wrapper] > [data-slot="content"],
 .design-dialog[role="dialog"] {
@@ -12,7 +31,7 @@
 .design-floating-panel :focus-visible,
 .design-dialog[role="dialog"] :focus-visible {
   outline: 2px solid var(--ui-ring);
-  outline-offset: 2px;
+  outline-offset: var(--design-focus-offset, 2px);
 }
 
 @media (pointer: coarse) {
@@ -36,6 +55,43 @@
   }
 
   .design-input > [data-slot="trailing"] > button {
+    width: 2.75rem;
+    min-width: 2.75rem;
+    height: 2.75rem;
+    padding: 0;
+  }
+
+  /* Keep both stepper orientations horizontal on touch screens so every
+     button has a full hit area without covering the input's text. */
+  .design-input-number > [data-slot="base"] {
+    min-width: 0;
+    min-height: 2.75rem;
+    padding-inline: 0.75rem;
+  }
+
+  .design-input-number:has(> [data-slot="increment"]) > [data-slot="base"] {
+    padding-inline-end: 3.25rem;
+  }
+
+  .design-input-number:has(> [data-slot="decrement"]) > [data-slot="base"] {
+    padding-inline-start: 3.25rem;
+  }
+
+  .design-input-number > :is([data-slot="increment"], [data-slot="decrement"]) {
+    inset-block: 0;
+    padding: 0;
+    scale: 1;
+  }
+
+  .design-input-number > [data-slot="increment"] {
+    inset-inline: auto 0.25rem;
+  }
+
+  .design-input-number > [data-slot="decrement"] {
+    inset-inline: 0.25rem auto;
+  }
+
+  .design-input-number > :is([data-slot="increment"], [data-slot="decrement"]) > button {
     width: 2.75rem;
     min-width: 2.75rem;
     height: 2.75rem;

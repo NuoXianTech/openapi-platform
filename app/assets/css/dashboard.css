@@ -172,7 +172,7 @@
 .dashboard-slideover[role="dialog"] :focus-visible,
 .dashboard-dialog[role="dialog"] :focus-visible {
   outline: 2px solid var(--ui-ring);
-  outline-offset: 2px;
+  outline-offset: var(--design-focus-offset, 2px);
 }
 
 .dashboard-floating-panel,

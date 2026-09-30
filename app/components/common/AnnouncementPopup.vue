@@ -141,7 +141,7 @@ function dismissCurrentAnnouncements() {
         :ui="{
           root: 'overflow-hidden rounded-xl border border-default bg-elevated',
           item: 'border-b border-default last:border-b-0',
-          trigger: 'gap-2 rounded-none px-4 py-3.5 hover:bg-muted/70 focus-visible:bg-accented focus-visible:outline-2 focus-visible:outline-(--ui-ring) focus-visible:-outline-offset-2',
+          trigger: 'design-focus-inset gap-2 rounded-none px-4 py-3.5 hover:bg-muted/70 focus-visible:bg-accented',
           trailingIcon: 'size-4 text-dimmed',
           body: 'px-4 pb-4 pt-0'
         }"

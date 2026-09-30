@@ -3,6 +3,8 @@
 export const dashboardUi = {
   button: { base: 'dashboard-button' },
   input: { root: 'design-input', base: 'dashboard-form-control' },
+  inputNumber: { root: 'design-input-number', base: 'dashboard-form-control' },
+  inputTime: { base: 'dashboard-form-control' },
   textarea: { base: 'dashboard-form-control' },
   select: { base: 'dashboard-form-control', content: 'dashboard-floating-panel' },
   selectMenu: { base: 'dashboard-form-control', content: 'dashboard-floating-panel' },

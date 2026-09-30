@@ -50,6 +50,36 @@ export default defineAppConfig({
       upload: 'i-mdi-upload',
       warning: 'i-mdi-alert-outline'
     },
+    badge: {
+      variants: {
+        size: {
+          xs: { base: 'text-xs/4 px-1 py-0.5 gap-1 rounded-sm' },
+          sm: { base: 'text-xs/4 px-1.5 py-0.5 gap-1 rounded-sm' }
+        }
+      },
+      compoundVariants: [
+        {
+          color: ['info', 'success'],
+          variant: ['outline', 'soft', 'subtle'],
+          class: 'text-(--design-badge-info)'
+        },
+        {
+          color: 'error',
+          variant: ['outline', 'soft', 'subtle'],
+          class: 'text-(--design-badge-error)'
+        },
+        {
+          color: 'warning',
+          variant: ['outline', 'soft', 'subtle'],
+          class: 'text-(--design-badge-warning)'
+        },
+        {
+          color: 'warning',
+          variant: ['soft', 'subtle'],
+          class: 'bg-(--design-badge-warning-bg)'
+        }
+      ]
+    },
     collapsible: {
       slots: {
         content: 'motion-reduce:animate-none'
