@@ -61,7 +61,11 @@ themeConstants = evaluate(readFileSync('app/constants/app-ui.ts','utf8'))
 appConfig = evaluate(readFileSync('app/app.config.ts','utf8')).default
 tv = evaluate(readFileSync('node_modules/@nuxt/ui/dist/runtime/utils/tv.js','utf8'))
 themeContext = evaluate(readFileSync('node_modules/@nuxt/ui/dist/runtime/composables/useComponentProps.js','utf8'))
-for(const name of ['modal','slideover','card']) themes[name]=evaluate(readFileSync('node_modules/.cache/nuxt/.nuxt/ui/'+name+'.ts','utf8')).default
+// `nuxt prepare` writes these templates to the project's default buildDir.
+// The dev cache under node_modules is not available in clean CI checkouts.
+for (const name of ['modal', 'slideover', 'card']) {
+  themes[name] = evaluate(readFileSync(resolve('.nuxt/ui', `${name}.ts`), 'utf8')).default
+}
 const Modal=component('node_modules/@nuxt/ui/dist/runtime/components/Modal.vue')
 const Slideover=component('node_modules/@nuxt/ui/dist/runtime/components/Slideover.vue')
 const Card=component('node_modules/@nuxt/ui/dist/runtime/components/Card.vue')
