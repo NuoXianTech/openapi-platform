@@ -47,6 +47,7 @@
       "more": "More {count}"
     },
     "pagination": {
+      "pageSize": "Rows per page",
       "perPage": "{count} per page",
       "totalRecords": "{count} records"
     },

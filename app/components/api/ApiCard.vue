@@ -314,11 +314,8 @@ function restoreDetailTriggerFocus(event: Event) {
 .api-card__title {
   margin: 0;
   color: var(--ui-text-highlighted);
-  font-family: var(--font-display);
-  font-size: 1rem;
-  font-weight: 600;
-  letter-spacing: 0;
-  line-height: 1.4;
+  font: var(--design-type-heading-md);
+  letter-spacing: var(--design-tracking-heading-md);
 }
 
 .api-card__title-trigger {
@@ -370,8 +367,7 @@ function restoreDetailTriggerFocus(event: Event) {
   margin: 0.35rem 0 0;
   overflow: hidden;
   color: var(--ui-text-muted);
-  font-size: 0.875rem;
-  line-height: 1.6;
+  font: var(--design-type-body-md);
   display: -webkit-box;
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
@@ -475,11 +471,8 @@ function restoreDetailTriggerFocus(event: Event) {
   display: block;
   min-width: 0;
   color: var(--ui-text-highlighted);
-  font-family: var(--font-display);
-  font-size: 1.25rem;
-  font-weight: 600;
-  letter-spacing: 0;
-  line-height: 1.25;
+  font: var(--design-type-heading-md);
+  letter-spacing: var(--design-tracking-heading-md);
   overflow-wrap: anywhere;
 }
 
@@ -487,8 +480,7 @@ function restoreDetailTriggerFocus(event: Event) {
   display: -webkit-box;
   overflow: hidden;
   color: var(--ui-text-muted);
-  font-size: 0.875rem;
-  line-height: 1.6;
+  font: var(--design-type-body-md);
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
 }
@@ -497,7 +489,6 @@ function restoreDetailTriggerFocus(event: Event) {
   .api-card__content { padding-inline: 1rem; }
   .api-card__footer { padding-inline: 1rem; }
   .api-card__footer-meta { gap: 0.75rem; }
-  .api-card__modal-title { font-size: 1.25rem; }
 }
 
 @media (prefers-reduced-motion: reduce) {

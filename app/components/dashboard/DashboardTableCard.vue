@@ -37,7 +37,7 @@ const totalText = computed(() => {
             class="size-4.5 shrink-0 text-muted"
           />
           <div class="min-w-0">
-            <h3 class="text-base leading-6 font-semibold text-highlighted">
+            <h3 class="design-heading-md text-highlighted">
               {{ title }}
             </h3>
             <p
@@ -78,7 +78,7 @@ const totalText = computed(() => {
           class="size-4.5 shrink-0 text-muted"
         />
         <div class="min-w-0">
-          <h3 class="text-base leading-6 font-semibold text-highlighted">
+          <h3 class="design-heading-md text-highlighted">
             {{ title }}
           </h3>
           <p

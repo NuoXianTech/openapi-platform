@@ -20,12 +20,12 @@ defineProps<DashboardSettingsSectionProps>()
     >
       <template #header>
         <div class="min-w-0">
-          <h2 class="text-base font-semibold leading-6 text-highlighted">
+          <h2 class="design-heading-md text-highlighted">
             {{ title }}
           </h2>
           <p
             v-if="description"
-            class="mt-1 max-w-2xl text-sm text-muted"
+            class="mt-1 max-w-2xl text-sm leading-5 text-muted"
           >
             {{ description }}
           </p>

@@ -39,7 +39,8 @@ const emptyActions = computed(() => [{
   to: '/docs',
   color: 'neutral' as const,
   variant: 'outline' as const,
-  trailingIcon: 'i-mdi-arrow-right'
+  trailingIcon: 'i-mdi-arrow-right',
+  class: 'design-marketing-cta'
 }])
 </script>
 
@@ -64,7 +65,7 @@ const emptyActions = computed(() => [{
         color="neutral"
         variant="outline"
         trailing-icon="i-mdi-arrow-right"
-        class="popular-apis__browse"
+        class="design-marketing-cta popular-apis__browse"
       >
         {{ $t('public.home.viewAllApis', { count: props.totalApiCount }) }}
       </UButton>
@@ -122,7 +123,7 @@ const emptyActions = computed(() => [{
   width: calc(100% - 48px);
   max-width: 1180px;
   margin-inline: auto;
-  padding-block: 72px;
+  padding-block: var(--design-space-band);
 }
 
 .popular-apis__heading {
@@ -145,18 +146,15 @@ const emptyActions = computed(() => [{
 .popular-apis h2 {
   margin: 0;
   color: var(--ui-text-highlighted);
-  font-size: 32px;
-  font-weight: 600;
-  line-height: 40px;
-  letter-spacing: -1.28px;
+  font: var(--design-type-heading-lg);
+  letter-spacing: var(--design-tracking-heading-lg);
 }
 
 .popular-apis p {
   max-width: 38rem;
-  margin: 0.55rem 0 0;
+  margin: 8px 0 0;
   color: var(--ui-text-muted);
-  font-size: 0.875rem;
-  line-height: 1.65;
+  font: var(--design-type-body-md);
 }
 
 .popular-apis__results {
@@ -171,9 +169,6 @@ const emptyActions = computed(() => [{
 }
 
 .popular-apis__browse {
-  min-height: 44px;
-  border-radius: 100px;
-  padding-inline: 20px;
   background: var(--ui-bg-elevated);
 }
 .popular-apis__state {

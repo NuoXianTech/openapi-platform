@@ -136,10 +136,10 @@ onBeforeUnmount(() => clearTimeout(sampleTimer))
         </h1>
         <p class="home-hero__description">{{ siteDescription || $t('public.home.defaultDescription') }}</p>
         <div class="home-hero__actions">
-          <UButton :to="primaryAction.to" size="lg" trailing-icon="i-lucide-arrow-up-right" class="home-hero__button">
+          <UButton :to="primaryAction.to" size="lg" trailing-icon="i-lucide-arrow-up-right" class="design-marketing-cta home-hero__button">
             {{ primaryAction.label }}
           </UButton>
-          <UButton to="/docs" color="neutral" variant="outline" size="lg" class="home-hero__button home-hero__button--secondary">
+          <UButton to="/docs" color="neutral" variant="outline" size="lg" class="design-marketing-cta home-hero__button home-hero__button--secondary">
             {{ $t('public.navigation.catalog') }}
           </UButton>
         </div>
@@ -200,7 +200,7 @@ onBeforeUnmount(() => clearTimeout(sampleTimer))
   max-width: 1180px;
   margin-inline: auto;
   gap: 80px;
-  padding-block: 80px;
+  padding-block: var(--design-space-section);
 }
 
 .home-hero__mesh {
@@ -276,26 +276,19 @@ onBeforeUnmount(() => clearTimeout(sampleTimer))
 .home-hero h1 {
   margin: 24px 0 0;
   color: var(--ui-text-highlighted);
-  font-size: clamp(40px, 3.5vw, 48px);
-  font-weight: 600;
-  line-height: 1.2;
-  letter-spacing: -2.4px;
+  font: var(--design-type-display-xl);
+  letter-spacing: var(--design-tracking-display-xl);
 }
 
 .home-hero h1 span {
   display: block;
 }
 
-.home-hero h1 span + span {
-  margin-top: 8px;
-}
-
 .home-hero__description {
   max-width: 560px;
   margin: 24px 0 0;
   color: var(--ui-text-toned);
-  font-size: 16px;
-  line-height: 1.8;
+  font: var(--design-type-body-lg);
   text-wrap: pretty;
 }
 
@@ -308,12 +301,6 @@ onBeforeUnmount(() => clearTimeout(sampleTimer))
 
 .home-hero__button {
   min-width: 144px;
-  min-height: 48px;
-  justify-content: center;
-  padding-inline: 24px;
-  border-radius: 100px;
-  font-size: 16px;
-  font-weight: 500;
 }
 
 .home-hero__button--secondary {
@@ -427,7 +414,8 @@ onBeforeUnmount(() => clearTimeout(sampleTimer))
   flex-shrink: 0;
   min-height: 44px;
   border-radius: 6px;
-  font-size: 12px;
+  font: var(--design-type-button-md);
+  letter-spacing: 0;
 }
 
 .request-demo__run > span {
@@ -470,7 +458,6 @@ onBeforeUnmount(() => clearTimeout(sampleTimer))
 
 @media (width < 1100px) {
   .home-hero__stage { gap: 40px; }
-  .home-hero h1 { font-size: 40px; }
 }
 
 @media (width < 960px) {
@@ -478,11 +465,10 @@ onBeforeUnmount(() => clearTimeout(sampleTimer))
     grid-template-columns: minmax(0, 1fr);
     padding-block: 56px;
   }
-  .home-hero h1 { font-size: 48px; }
   .request-demo pre { height: 220px; }
 }
 
-@media (width < 640px) {
+@media (width <= 640px) {
   .home-hero__stage {
     width: calc(100% - 32px);
     gap: 32px;
@@ -490,19 +476,20 @@ onBeforeUnmount(() => clearTimeout(sampleTimer))
   }
   .home-hero__summary { gap: 12px; }
   .home-hero h1 {
-    font-size: clamp(30px, 7.5vw, 40px);
-    letter-spacing: -1.5px;
+    font: var(--design-type-heading-lg);
+    letter-spacing: var(--design-tracking-heading-lg);
   }
   .home-hero__description {
     margin-top: 20px;
-    font-size: 14px;
+    font: var(--design-type-body-md);
   }
-  .home-hero__actions { margin-top: 24px; }
+  .home-hero__actions {
+    flex-direction: column;
+    margin-top: 24px;
+  }
   .home-hero__button {
-    flex: 1;
+    width: 100%;
     min-width: 0;
-    padding-inline: 16px;
-    font-size: 14px;
   }
   .request-demo__header { padding-inline: 16px; }
   .request-demo__filename { display: none; }

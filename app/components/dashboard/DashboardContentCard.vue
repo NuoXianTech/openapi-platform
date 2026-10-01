@@ -41,7 +41,7 @@ defineOptions({ inheritAttrs: false })
           </span>
 
           <div class="min-w-0">
-            <h3 class="text-base font-semibold leading-6 text-highlighted">
+            <h3 class="design-heading-md text-highlighted">
               {{ title }}
             </h3>
             <p

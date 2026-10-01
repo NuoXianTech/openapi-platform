@@ -47,6 +47,7 @@
       "more": "更多 {count}"
     },
     "pagination": {
+      "pageSize": "每页条数",
       "perPage": "{count} / 页",
       "totalRecords": "共 {count} 条"
     },

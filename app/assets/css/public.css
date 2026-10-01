@@ -26,7 +26,7 @@ body:has(.public-page) {
   background: var(--ui-bg);
 }
 .public-page .site-footer .site-footer__inner {
-  padding-block: 48px 24px;
+  padding-block: var(--design-space-footer);
   gap: 32px;
 }
 .public-page .site-footer .site-footer__description {
@@ -45,6 +45,7 @@ body:has(.public-page) {
 @media (width < 640px) {
   .public-page .site-footer .site-footer__inner {
     width: calc(100% - 32px);
+    padding-block: 40px;
   }
   .public-page .site-footer .site-brand .site-brand__copy strong {
     max-width: 7rem;
@@ -79,18 +80,15 @@ body:has(.public-page) {
 .public-page .public-page-heading h1 {
   margin: 0;
   color: var(--ui-text-highlighted);
-  font-size: 48px;
-  font-weight: 600;
-  line-height: 1.2;
-  letter-spacing: -2.4px;
+  font: var(--design-type-display-xl);
+  letter-spacing: var(--design-tracking-display-xl);
 }
 
 .public-page .public-page-heading p {
   max-width: 640px;
   margin-top: 16px;
   color: var(--ui-text-toned);
-  font-size: 16px;
-  line-height: 1.75;
+  font: var(--design-type-body-lg);
 }
 
 .public-page .public-filter-panel {
@@ -213,15 +211,9 @@ body:has(.public-page) {
 .public-page .api-card-grid .api-card__copy {
   margin-top: 24px;
 }
-.public-page .api-card-grid .api-card__title {
-  font-size: 20px;
-  font-weight: 600;
-  letter-spacing: -0.4px;
-}
 .public-page .api-card-grid .api-card__short {
-  min-height: 44px;
+  min-height: 40px;
   margin-top: 8px;
-  font-size: 13px;
 }
 .public-page .api-card-grid .api-card__endpoint {
   margin-top: 20px;
@@ -263,11 +255,11 @@ body:has(.public-page) {
     padding-bottom: 32px;
   }
   .public-page .public-page-heading h1 {
-    font-size: 32px;
-    letter-spacing: -1.3px;
+    font: var(--design-type-heading-lg);
+    letter-spacing: var(--design-tracking-heading-lg);
   }
   .public-page .public-page-heading p {
-    font-size: 14px;
+    font: var(--design-type-body-md);
   }
   .public-page .public-filter-panel {
     padding: 16px;

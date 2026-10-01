@@ -1,9 +1,38 @@
+.design-heading-md {
+  font: var(--design-type-heading-md);
+  letter-spacing: var(--design-tracking-heading-md);
+}
+
+.design-marketing-cta {
+  min-height: 48px;
+  justify-content: center;
+  padding: 0 14px;
+  border-radius: 100px;
+  font: var(--design-type-button-lg);
+  letter-spacing: 0;
+}
+
 .design-focus-inset {
   --design-focus-offset: -2px;
 }
 
-/* Small status text uses the design's deeper semantic tones. */
+/* Shared typography and section spacing from DESIGN.md. */
 :root {
+  --design-type-display-xl: 600 48px/48px var(--font-display);
+  --design-tracking-display-xl: -2.4px;
+  --design-type-heading-lg: 600 32px/40px var(--font-display);
+  --design-tracking-heading-lg: -1.28px;
+  --design-type-heading-md: 600 20px/28px var(--font-display);
+  --design-tracking-heading-md: -0.4px;
+  --design-type-body-lg: 400 16px/24px var(--font-body);
+  --design-type-body-md: 400 14px/20px var(--font-body);
+  --design-type-button-lg: 500 16px/20px var(--font-body);
+  --design-type-button-md: 500 14px/20px var(--font-body);
+  --design-space-section: 128px;
+  --design-space-band: 96px;
+  --design-space-footer: 64px;
+
+  /* Small status text uses the design's deeper semantic tones. */
   --design-badge-info: #0761d1;
   --design-badge-error: #c50000;
   --design-badge-warning: #ab570a;

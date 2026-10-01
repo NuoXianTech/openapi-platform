@@ -133,7 +133,7 @@ async function copyCodeSnippet(value: string): Promise<void> {
   max-width: 1180px;
   margin-inline: auto;
   gap: 3.5rem;
-  padding-block: 72px;
+  padding-block: var(--design-space-band);
 }
 
 .api-onboarding__content {
@@ -153,18 +153,15 @@ async function copyCodeSnippet(value: string): Promise<void> {
 .api-onboarding h2 {
   margin: 0;
   color: var(--ui-text-highlighted);
-  font-size: 32px;
-  font-weight: 600;
-  line-height: 40px;
-  letter-spacing: -1.28px;
+  font: var(--design-type-heading-lg);
+  letter-spacing: var(--design-tracking-heading-lg);
 }
 
 .api-onboarding__description {
   max-width: 35rem;
   margin: 0.75rem 0 0;
   color: var(--ui-text-muted);
-  font-size: 0.875rem;
-  line-height: 1.7;
+  font: var(--design-type-body-md);
 }
 
 .api-onboarding__steps {

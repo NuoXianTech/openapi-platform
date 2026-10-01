@@ -201,7 +201,7 @@ function onColumnVisibilityChange(value: Record<string, boolean> | undefined) {
       v-if="showPagination"
       class="dashboard-table-pagination flex flex-col gap-3 border-t border-default px-4 py-3 sm:flex-row sm:items-center sm:justify-between"
     >
-      <div class="flex w-full items-center justify-between gap-2 sm:w-auto sm:justify-start">
+      <div class="flex w-full flex-wrap items-center justify-between gap-2 sm:w-auto sm:justify-start">
         <span class="text-xs text-muted tabular-nums">
           {{ t('common.pagination.totalRecords', { count: total.toLocaleString(locale) }) }}
         </span>
@@ -211,7 +211,8 @@ function onColumnVisibilityChange(value: Record<string, boolean> | undefined) {
           :items="localizedPageSizeItems"
           value-key="value"
           size="sm"
-          class="w-24"
+          :aria-label="t('common.pagination.pageSize')"
+          class="w-auto min-w-32 shrink-0"
           @update:model-value="onPageSizeChange"
         />
       </div>
