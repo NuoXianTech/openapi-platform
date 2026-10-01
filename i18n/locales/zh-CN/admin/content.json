@@ -38,6 +38,7 @@
           "createdAt": "创建时间"
         },
         "actions": {
+          "more": "操作公告 {title}",
           "create": "新建公告"
         },
         "delete": {
@@ -99,6 +100,7 @@
           "sentAt": "发送时间"
         },
         "actions": {
+          "more": "操作通知 {title}",
           "send": "发送通知",
           "viewDeliveries": "查看接收详情"
         },
@@ -156,6 +158,7 @@
           "status": "状态"
         },
         "actions": {
+          "more": "操作友情链接 {name}",
           "create": "新增链接"
         },
         "delete": {

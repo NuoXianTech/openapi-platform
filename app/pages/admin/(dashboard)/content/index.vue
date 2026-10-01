@@ -256,6 +256,7 @@ const columns = computed<TableColumn<Announcement>[]>(() => [
             >
               <UButton
                 icon="i-mdi-dots-vertical"
+                :aria-label="$t('admin.content.announcements.actions.more', { title: row.original.title })"
                 color="neutral"
                 variant="ghost"
                 size="sm"

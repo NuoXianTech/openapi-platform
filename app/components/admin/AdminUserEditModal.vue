@@ -99,18 +99,21 @@ async function submit() {
         >
           <UInput
             v-model="form.username"
+            class="w-full"
             disabled
           />
         </UFormField>
         <UFormField :label="$t('admin.users.fields.email')">
           <UInput
             v-model="form.email"
+            class="w-full"
             type="email"
           />
         </UFormField>
         <UFormField :label="$t('admin.users.fields.displayName')">
           <UInput
             v-model="form.displayName"
+            class="w-full"
             :maxlength="32"
           />
         </UFormField>
@@ -132,6 +135,7 @@ async function submit() {
         >
           <UInput
             v-model="form.password"
+            class="w-full"
             type="password"
             :placeholder="$t('admin.users.edit.passwordPlaceholder')"
             autocomplete="new-password"

@@ -152,6 +152,7 @@
         "neverUsed": "Never used"
       },
       "actions": {
+        "more": "Actions for API key {name} (#{id})",
         "edit": "Edit configuration",
         "view": "View key",
         "hide": "Hide key",

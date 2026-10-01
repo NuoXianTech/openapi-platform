@@ -142,7 +142,7 @@ function selectFromPopover(value: string | number) {
                 v-for="tab in filteredPopoverTabs"
                 :key="String(tab.value)"
                 type="button"
-                class="filter-tabs-option"
+                class="design-button filter-tabs-option"
                 :class="{ 'is-active': isActive(tab.value) }"
                 :aria-pressed="isActive(tab.value)"
                 @click="selectFromPopover(tab.value)"

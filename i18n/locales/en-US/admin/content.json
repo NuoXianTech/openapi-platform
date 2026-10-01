@@ -38,6 +38,7 @@
           "createdAt": "Created"
         },
         "actions": {
+          "more": "Actions for announcement {title}",
           "create": "New announcement"
         },
         "delete": {
@@ -99,6 +100,7 @@
           "sentAt": "Sent"
         },
         "actions": {
+          "more": "Actions for notification {title}",
           "send": "Send notification",
           "viewDeliveries": "View recipients"
         },
@@ -156,6 +158,7 @@
           "status": "Status"
         },
         "actions": {
+          "more": "Actions for partner link {name}",
           "create": "Add link"
         },
         "delete": {

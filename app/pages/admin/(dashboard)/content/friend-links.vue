@@ -177,6 +177,7 @@ const columns = computed<TableColumn<FriendLinkItem>[]>(() => [
             >
               <UButton
                 icon="i-mdi-dots-vertical"
+                :aria-label="$t('admin.content.friendLinks.actions.more', { name: row.original.title })"
                 color="neutral"
                 variant="ghost"
                 size="sm"

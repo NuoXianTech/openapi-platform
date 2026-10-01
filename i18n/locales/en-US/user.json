@@ -224,6 +224,7 @@
         }
       },
       "oauth": {
+        "refresh": "Refresh connected accounts",
         "title": "Connected accounts",
         "disabled": "Third-party login is disabled",
         "empty": "No OAuth providers are available",

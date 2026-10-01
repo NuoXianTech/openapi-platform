@@ -40,6 +40,7 @@
         "clear": "Clear selection"
       },
       "actions": {
+        "more": "Actions for user {name}",
         "add": "Add user",
         "showColumns": "Show columns",
         "edit": "Edit user",

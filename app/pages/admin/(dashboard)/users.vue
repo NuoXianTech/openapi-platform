@@ -390,6 +390,7 @@ watch(loading, (isLoading) => {
                 >
                   <UButton
                     icon="i-mdi-dots-vertical"
+                    :aria-label="$t('admin.users.actions.more', { name: row.original.username || row.original.email || row.original.id })"
                     color="neutral"
                     variant="ghost"
                   />

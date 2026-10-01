@@ -40,6 +40,7 @@
         "clear": "取消选择"
       },
       "actions": {
+        "more": "操作用户 {name}",
         "add": "添加用户",
         "showColumns": "显示列",
         "edit": "编辑用户",

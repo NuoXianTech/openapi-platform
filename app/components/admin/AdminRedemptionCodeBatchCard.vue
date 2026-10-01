@@ -72,6 +72,7 @@ function getBatchMenuItems(batch: BatchSummary): DropdownMenuItem[][] {
           >
             <UButton
               icon="i-mdi-dots-vertical"
+              :aria-label="$t('admin.credits.redemptionCodes.batch.actions.more', { batchId: b.batchId })"
               size="xs"
               variant="ghost"
               color="neutral"

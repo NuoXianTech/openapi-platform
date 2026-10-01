@@ -229,6 +229,7 @@ const {
             >
               <UButton
                 icon="i-mdi-dots-vertical"
+                :aria-label="$t('admin.credits.redemptionCodes.actions.more', { id: row.original.id })"
                 color="neutral"
                 variant="ghost"
                 size="sm"

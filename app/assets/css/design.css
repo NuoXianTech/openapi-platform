@@ -53,6 +53,16 @@
     min-height: 2.75rem;
   }
 
+  .design-input-tags > [data-slot="input"] {
+    min-width: 44px;
+    min-height: 44px;
+    font-size: 16px;
+  }
+
+  .design-input-tags [data-slot="itemDelete"] {
+    justify-content: center;
+  }
+
   /* A trailing icon button needs its full hit area plus inset and text spacing.
      Native trailing icons and empty search fields keep their normal padding. */
   .design-input:has(> [data-slot="trailing"] > button) > input {

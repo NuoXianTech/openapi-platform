@@ -4,6 +4,7 @@ export const appUi = {
   button: { slots: { base: 'design-button' } },
   input: { slots: { root: 'design-input', base: 'design-form-control' } },
   inputNumber: { slots: { root: 'design-input-number', base: 'design-form-control' } },
+  inputTags: { slots: { root: 'design-input-tags', input: 'design-form-control', itemDelete: 'design-button' } },
   inputTime: { slots: { base: 'design-form-control' } },
   textarea: { slots: { base: 'design-form-control' } },
   select: { slots: { base: 'design-form-control', content: 'design-floating-panel' } },

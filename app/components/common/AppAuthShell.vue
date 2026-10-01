@@ -168,7 +168,7 @@ withDefaults(defineProps<{
   display: flex;
   align-items: center;
   gap: 0.75rem;
-  color: var(--ui-text-dimmed);
+  color: var(--ui-text-muted);
   font-size: 0.75rem;
   line-height: 1rem;
 }
@@ -230,13 +230,13 @@ withDefaults(defineProps<{
 
 .auth-message--error {
   border-color: color-mix(in oklab, var(--ui-error) 20%, transparent);
-  color: var(--ui-error);
+  color: var(--design-badge-error);
   background: color-mix(in oklab, var(--ui-error) 7%, transparent);
 }
 
 .auth-message--success {
   border-color: color-mix(in oklab, var(--ui-success) 20%, transparent);
-  color: var(--ui-success);
+  color: var(--design-badge-info);
   background: color-mix(in oklab, var(--ui-success) 7%, transparent);
 }
 

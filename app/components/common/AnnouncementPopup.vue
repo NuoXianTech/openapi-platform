@@ -33,6 +33,7 @@ interface AnnouncementItem {
 }
 
 const open = ref(false)
+const previousFocus = shallowRef<HTMLElement | null>(null)
 const expandedIds = ref<string[]>([])
 const dismissedRevision = useLocalStorage('openapi:announcement-popup:dismissed-revision', '')
 const { t, locale } = useI18n()
@@ -74,17 +75,19 @@ function openIfHasAnnouncements() {
   if (!import.meta.client || items.value.length === 0) return
   if (!hasNewerAnnouncement(currentRevision.value, dismissedRevision.value)) return
   expandedIds.value = latestId.value !== null ? [String(latestId.value)] : []
+  if (!open.value) {
+    previousFocus.value = document.activeElement instanceof HTMLElement ? document.activeElement : null
+  }
   open.value = true
 }
 
 onMounted(openIfHasAnnouncements)
 watch(items, openIfHasAnnouncements)
 
-// 弹窗为自动出现（非用户点击触发），阻止打开时的自动聚焦：
-// 否则首条 accordion trigger 会拿到 :focus-visible，在 zinc 黑白主题下 outline-primary
-// 是纯黑描边，看起来像“黑色边框”圈住第一条。键盘 Tab 仍可正常进入弹窗。
-function preventAutoFocus(event: Event) {
+function restorePreviousFocus(event: Event) {
   event.preventDefault()
+  if (previousFocus.value?.isConnected) previousFocus.value.focus()
+  previousFocus.value = null
 }
 
 function dismissCurrentAnnouncements() {
@@ -100,7 +103,7 @@ function dismissCurrentAnnouncements() {
     v-model:open="open"
     :title="$t('public.announcements.title')"
     :description="$t('public.announcements.summary', { count: items.length })"
-    :content="{ onOpenAutoFocus: preventAutoFocus }"
+    :content="{ onCloseAutoFocus: restorePreviousFocus }"
     :ui="{
       overlay: 'bg-elevated/70 backdrop-blur-[2px]',
       content: 'announcement-dialog rounded-xl sm:max-w-2xl',

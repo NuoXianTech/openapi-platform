@@ -148,6 +148,7 @@
           "expired": "Expired"
         },
         "actions": {
+          "more": "Actions for redemption code #{id}",
           "generate": "Generate codes",
           "generateMore": "Generate more",
           "done": "Done",
@@ -186,6 +187,7 @@
           "total": "{count} codes",
           "usage": "Used {used}/{total}",
           "actions": {
+            "more": "Actions for redemption code batch {batchId}",
             "filter": "Show this batch",
             "disable": "Disable batch",
             "enable": "Enable batch",

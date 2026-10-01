@@ -150,7 +150,7 @@ const retryActions = computed(() => [{
             </div>
 
             <div class="stats-hero__aside">
-              <div class="stats-hero__stats grid grid-cols-1 gap-2.5 min-[360px]:grid-cols-3 sm:gap-3">
+              <div class="stats-hero__stats grid grid-cols-1 gap-2.5 md:grid-cols-3 sm:gap-3">
                 <template v-if="isInitialLoading">
                   <CommonHeroStatCard
                     v-for="n in 3"
@@ -363,7 +363,12 @@ const retryActions = computed(() => [{
   letter-spacing: -0.8px;
 }
 
-.stats-hero__stats :deep(.hero-stat-card__label) { font-size: 12px; }
+.stats-hero__stats :deep(.hero-stat-card__label) {
+  font-size: 12px;
+  overflow: visible;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
 
 .stats-metrics-grid {
   display: grid;

@@ -96,7 +96,7 @@ const hasBeian = computed(() => Boolean(icpBeian.value || policeBeian.value))
   gap: 0.5rem;
   border-top: 1px solid var(--ui-border);
   padding-top: 1rem;
-  color: var(--ui-text-dimmed);
+  color: var(--ui-text-muted);
   font-size: 0.75rem;
 }
 

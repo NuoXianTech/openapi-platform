@@ -29,6 +29,7 @@ onMounted(async () => {
           variant="ghost"
           color="neutral"
           icon="i-lucide-refresh-cw"
+          :aria-label="$t('user.settings.oauth.refresh')"
           :loading="isOauthLoading"
           @click="loadOauthBindings"
         />

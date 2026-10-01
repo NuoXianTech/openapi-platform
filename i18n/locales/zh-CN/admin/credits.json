@@ -148,6 +148,7 @@
           "expired": "已过期"
         },
         "actions": {
+          "more": "操作兑换码 #{id}",
           "generate": "生成兑换码",
           "generateMore": "继续生成",
           "done": "完成",
@@ -186,6 +187,7 @@
           "total": "{count} 张",
           "usage": "使用 {used}/{total}",
           "actions": {
+            "more": "操作兑换码批次 {batchId}",
             "filter": "只看本批次",
             "disable": "禁用整批",
             "enable": "启用整批",

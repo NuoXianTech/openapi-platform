@@ -72,7 +72,7 @@ function discardChanges() {
             :aria-pressed="activeGroup === group.key"
             :aria-controls="groupDomId('panel', group.key)"
             :disabled="busy"
-            class="flex shrink-0 items-center justify-between gap-3 rounded-md px-3 py-2.5 text-left text-sm transition-colors disabled:opacity-60"
+            class="design-button flex shrink-0 items-center justify-between gap-3 rounded-md px-3 py-2.5 text-left text-sm transition-colors disabled:opacity-60"
             :class="activeGroup === group.key
               ? 'bg-elevated font-semibold text-highlighted ring-1 ring-inset ring-default'
               : 'text-muted hover:bg-elevated/60 hover:text-highlighted'"

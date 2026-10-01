@@ -59,8 +59,9 @@ const pricingTooltip = computed(() => {
 })
 const detailSummary = computed(() => shortDesc.value || description.value || t('public.api.noSummary'))
 const detailBodyDescription = computed(() => {
-  const value = description.value.trim()
-  return value && value !== detailSummary.value.trim() ? value : ''
+  // The header is only a preview; keep every distinct description in the scrollable body.
+  const paragraphs = [shortDesc.value.trim(), description.value.trim()].filter(Boolean)
+  return [...new Set(paragraphs)].join('\n\n')
 })
 const statusMeta = computed(() => resolveApiStatusMeta(props.status, key => t(key)))
 const statusClass = computed(() => `api-card__status--${statusMeta.value.color}`)
@@ -78,14 +79,11 @@ function openDetails(event: Event) {
   detailsOpen.value = true
 }
 
-function restoreDetailTriggerFocus() {
+function restoreDetailTriggerFocus(event: Event) {
+  event.preventDefault()
   if (detailTriggerElement.value?.isConnected) {
     detailTriggerElement.value.focus()
   }
-}
-
-function preventDetailsAutoFocus(event: Event) {
-  event.preventDefault()
 }
 </script>
 
@@ -179,7 +177,7 @@ function preventDetailsAutoFocus(event: Event) {
 
   <UModal
     v-model:open="detailsOpen"
-    :content="{ onOpenAutoFocus: preventDetailsAutoFocus }"
+    :content="{ onCloseAutoFocus: restoreDetailTriggerFocus }"
     :close="{
       size: 'sm',
       color: 'neutral',
@@ -196,7 +194,6 @@ function preventDetailsAutoFocus(event: Event) {
       close: 'top-3.5 end-4',
       body: 'p-0 sm:p-0'
     }"
-    @after:leave="restoreDetailTriggerFocus"
   >
     <template #title>
       <div class="api-card__modal-heading">
@@ -316,21 +313,20 @@ function preventDetailsAutoFocus(event: Event) {
 
 .api-card__title {
   margin: 0;
-  overflow: hidden;
   color: var(--ui-text-highlighted);
   font-family: var(--font-display);
   font-size: 1rem;
   font-weight: 600;
   letter-spacing: 0;
   line-height: 1.4;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 .api-card__title-trigger {
   appearance: none;
   display: inline-flex;
   max-width: 100%;
+  min-width: 44px;
+  min-height: 44px;
   align-items: center;
   gap: 0.4rem;
   border: 0;

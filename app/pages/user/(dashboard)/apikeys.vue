@@ -541,6 +541,7 @@ function getRowItems(row: ApiKeyItem): DropdownMenuItem[] {
                 >
                   <UButton
                     icon="i-mdi-dots-vertical"
+                    :aria-label="$t('common.apiKeys.actions.more', { name: row.original.name || $t('common.apiKeys.defaultName'), id: row.original.id })"
                     color="neutral"
                     variant="ghost"
                     size="sm"

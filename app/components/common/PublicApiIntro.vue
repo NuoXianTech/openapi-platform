@@ -356,12 +356,12 @@ onBeforeUnmount(() => clearTimeout(sampleTimer))
 }
 
 .request-demo__filename {
-  color: var(--ui-text-dimmed);
+  color: var(--ui-text-muted);
   font: 12px/16px var(--font-code);
 }
 
 .request-demo__example-label {
-  color: var(--ui-text-dimmed);
+  color: var(--ui-text-muted);
   font-size: 12px;
 }
 
@@ -412,7 +412,7 @@ onBeforeUnmount(() => clearTimeout(sampleTimer))
 .request-demo__accept {
   display: block;
   margin-top: 12px;
-  color: var(--ui-text-dimmed);
+  color: var(--ui-text-muted);
   font-size: 12px;
 }
 
@@ -431,7 +431,7 @@ onBeforeUnmount(() => clearTimeout(sampleTimer))
 }
 
 .request-demo__run > span {
-  color: var(--ui-text-dimmed);
+  color: var(--ui-text-muted);
   font-size: 12px;
   line-height: 1.6;
 }
