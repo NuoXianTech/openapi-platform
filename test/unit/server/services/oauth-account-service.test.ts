@@ -1,7 +1,6 @@
-import { PGlite } from '@electric-sql/pglite'
-import { drizzle } from 'drizzle-orm/pglite'
-import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
-import * as schema from '~~/server/db/schema'
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
+import { createTestDatabase } from '../../../helpers/database'
+import { hashPassword } from '~~/server/utils/password'
 
 const testContext = vi.hoisted(() => ({ database: null as unknown }))
 
@@ -12,51 +11,36 @@ vi.mock('~~/server/db/client', () => ({
 }))
 
 const { oauthAccountService } = await import('~~/server/services/oauth-account-service')
-let client: PGlite
+const { userService } = await import('~~/server/services/user-service')
+let fixture: Awaited<ReturnType<typeof createTestDatabase>>
+let passwordHash: string
+const identity = { provider: 'github' as const, providerUserId: 'github-1', nickname: 'Profile', email: null, avatarUrl: null }
+const bindWithPassword = (identifier = 'first', password = 'ValidPassword!42') =>
+  oauthAccountService.bindWithPassword({ identifier, password, identity, lastLoginIp: '127.0.0.1' })
 
 beforeAll(async () => {
-  client = new PGlite()
-  await client.exec(`
-    CREATE TABLE users (id serial PRIMARY KEY);
-    CREATE TABLE oauth_accounts (
-      id serial PRIMARY KEY,
-      user_id integer NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-      provider varchar(32) NOT NULL,
-      provider_user_id varchar(255) NOT NULL,
-      nickname varchar(140),
-      avatar_url varchar(1000),
-      email varchar(255),
-      linked_at timestamptz NOT NULL DEFAULT now(),
-      last_login_at timestamptz,
-      last_login_ip varchar(45),
-      created_at timestamptz NOT NULL DEFAULT now(),
-      updated_at timestamptz NOT NULL DEFAULT now(),
-      UNIQUE (provider, provider_user_id),
-      UNIQUE (user_id, provider)
-    );
-  `)
-  testContext.database = drizzle(client, { schema })
+  fixture = await createTestDatabase()
+  testContext.database = fixture.database
+  passwordHash = await hashPassword('ValidPassword!42')
 })
-
 beforeEach(async () => {
-  await client.exec(`
-    TRUNCATE oauth_accounts, users RESTART IDENTITY CASCADE;
-    INSERT INTO users DEFAULT VALUES;
-    INSERT INTO users DEFAULT VALUES;
-  `)
+  await fixture.client.exec('TRUNCATE users RESTART IDENTITY CASCADE')
+  for (const username of ['first', 'second']) {
+    await userService.addUser({ username, email: username + '@example.com', passwordHash, isActive: true })
+  }
 })
-
-afterAll(async () => client.close())
+afterEach(() => vi.restoreAllMocks())
+afterAll(async () => fixture.client.close())
 
 describe('oauth account service', () => {
   it('updates profile data without changing the binding owner', async () => {
-    const created = await oauthAccountService.upsertAccount({
+    const created = await oauthAccountService.bindAccount({
       userId: 1,
       provider: 'github',
       providerUserId: 'github-1',
       nickname: 'old'
     })
-    const updated = await oauthAccountService.upsertAccount({
+    const updated = await oauthAccountService.bindAccount({
       userId: 1,
       provider: 'github',
       providerUserId: 'github-1',
@@ -67,32 +51,67 @@ describe('oauth account service', () => {
   })
 
   it('never transfers an existing provider identity to another user', async () => {
-    await oauthAccountService.upsertAccount({
+    await oauthAccountService.bindAccount({
       userId: 1,
       provider: 'github',
       providerUserId: 'github-1'
     })
 
-    await expect(oauthAccountService.upsertAccount({
+    await expect(oauthAccountService.bindAccount({
       userId: 2,
       provider: 'github',
       providerUserId: 'github-1'
-    })).rejects.toMatchObject({ statusCode: 409 })
+    })).rejects.toMatchObject({ statusCode: 409, reason: 'already_bound_by_other' })
     await expect(oauthAccountService.findByProviderUserId('github', 'github-1'))
       .resolves.toMatchObject({ userId: 1 })
   })
 
   it('rejects a second identity for the same user and provider', async () => {
-    await oauthAccountService.upsertAccount({
+    await oauthAccountService.bindAccount({
       userId: 1,
       provider: 'github',
       providerUserId: 'github-1'
     })
 
-    await expect(oauthAccountService.upsertAccount({
+    await expect(oauthAccountService.bindAccount({
       userId: 1,
       provider: 'github',
       providerUserId: 'github-2'
-    })).rejects.toMatchObject({ statusCode: 409 })
+    })).rejects.toMatchObject({ statusCode: 409, reason: 'already_bound_same_provider' })
+  })
+})
+
+describe('password-authorized OAuth binding', () => {
+  it.each(['first', 'FIRST@example.com'])('authenticates and binds using %s', async identifier => {
+    const result = await bindWithPassword(identifier)
+    expect(result.user).toMatchObject({ id: 1, username: 'first' })
+    expect(await oauthAccountService.findByProviderUserId('github', 'github-1'))
+      .toMatchObject({ userId: 1, lastLoginIp: '127.0.0.1', nickname: 'Profile' })
+  })
+
+  it.each([['missing', 'ValidPassword!42'], ['first', 'wrong']])('keeps credential failures indistinguishable: %s', async (identifier, password) => {
+    await expect(bindWithPassword(identifier, password)).rejects.toMatchObject({ statusCode: 401, message: '账号或密码错误' })
+    expect(await oauthAccountService.findByProviderUserId('github', 'github-1')).toBeNull()
+  })
+
+  it.each(['inactive', 'banned'])('does not bind an %s account', async state => {
+    await fixture.client.exec(state === 'inactive'
+      ? 'UPDATE users SET is_active = false WHERE id = 1'
+      : 'UPDATE users SET is_banned = true, banned_until = NULL WHERE id = 1')
+    await expect(bindWithPassword()).rejects.toMatchObject({ statusCode: 403 })
+    expect(await oauthAccountService.findByProviderUserId('github', 'github-1')).toBeNull()
+  })
+
+  it('clears an expired ban before binding', async () => {
+    await fixture.client.exec("UPDATE users SET is_banned = true, banned_until = now() - interval '1 hour' WHERE id = 1")
+    await bindWithPassword()
+    expect(await userService.getById(1)).toMatchObject({ isBanned: false, bannedUntil: null })
+    expect(await oauthAccountService.findByProviderUserId('github', 'github-1')).toMatchObject({ userId: 1 })
+  })
+
+  it('preserves another user’s ownership after valid password authentication', async () => {
+    await oauthAccountService.bindAccount({ ...identity, userId: 2 })
+    await expect(bindWithPassword()).rejects.toMatchObject({ statusCode: 409, reason: 'already_bound_by_other' })
+    expect(await oauthAccountService.findByProviderUserId('github', 'github-1')).toMatchObject({ userId: 2 })
   })
 })

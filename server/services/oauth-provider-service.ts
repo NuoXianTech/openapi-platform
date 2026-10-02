@@ -100,37 +100,23 @@ export const oauthProviderService = {
     return rowFromSettings(settings, provider)
   },
 
-  async update(provider: string, patch: OauthProviderPatch): Promise<OauthProviderRow | null> {
+  async update(provider: string, patch: OauthProviderPatch): Promise<OauthProviderRow> {
     if (!isSupportedOauthProvider(provider)) {
       throw createApplicationError({ statusCode: 400, message: 'provider not supported, only github and qq are allowed' })
     }
-    const current = await oauthProviderService.getByProvider(provider)
-    if (!current) {
-      return null // provider 已校验，理论不可达
-    }
-
-    const nextClientId = patch.clientId !== undefined ? patch.clientId.trim() : current.clientId
-    // 明文：undefined = 不改动；其他值（含空串）直接覆盖
-    const nextSecret = patch.clientSecret !== undefined ? patch.clientSecret : current.clientSecret
-    const nextEnabled = patch.isEnabled !== undefined ? patch.isEnabled : current.isEnabled
-
-    if (nextEnabled && (!nextClientId || !nextSecret)) {
-      throw createApplicationError({ statusCode: 400, message: 'clientId 和 clientSecret 都需要配置后才能启用' })
-    }
-
-    const input: SystemSettingsPatch = provider === 'github'
-      ? { oauthGithubClientId: nextClientId, oauthGithubClientSecret: nextSecret, oauthGithubEnabled: nextEnabled }
-      : { oauthQqClientId: nextClientId, oauthQqClientSecret: nextSecret, oauthQqEnabled: nextEnabled }
-    await systemSettingsService.update(input)
-
-    return { provider, clientId: nextClientId, clientSecret: nextSecret, isEnabled: nextEnabled }
+    const columns = PROVIDER_COLUMNS[provider]
+    const input: SystemSettingsPatch = {}
+    // 保留省略语义：只有持锁快照才能决定未提交字段的当前值。
+    if (patch.clientId !== undefined) input[columns.clientId] = patch.clientId
+    if (patch.clientSecret !== undefined) input[columns.clientSecret] = patch.clientSecret
+    if (patch.isEnabled !== undefined) input[columns.isEnabled] = patch.isEnabled
+    const persisted = await systemSettingsService.update(input)
+    return rowFromSettings(persisted, provider)
   },
 
   /** 将绑定策略和全部 provider 配置作为一次数据库更新提交，避免部分保存成功。 */
   async updateAll(batch: OauthProviderBatchUpdate): Promise<OauthProviderRow[]> {
-    const currentSettings = await systemSettingsService.getSettings()
     const input: SystemSettingsPatch = { oauthForceBinding: batch.oauthForceBinding }
-    const rows: OauthProviderRow[] = []
 
     for (const provider of SUPPORTED_OAUTH_PROVIDERS) {
       const submitted = batch.providers.find(item => item.provider === provider)
@@ -138,27 +124,13 @@ export const oauthProviderService = {
         throw createApplicationError({ statusCode: 400, message: `缺少 ${provider} 登录配置` })
       }
 
-      const current = rowFromSettings(currentSettings, provider)
-      const clientId = submitted.clientId.trim()
-      const clientSecret = submitted.clientSecret !== undefined
-        ? submitted.clientSecret
-        : current.clientSecret
-
-      if (submitted.isEnabled && (!clientId || !clientSecret)) {
-        throw createApplicationError({
-          statusCode: 400,
-          message: `${provider} 的 Client ID 和 Client Secret 都配置后才能启用`
-        })
-      }
-
       const columns = PROVIDER_COLUMNS[provider]
-      input[columns.clientId] = clientId
-      input[columns.clientSecret] = clientSecret
+      input[columns.clientId] = submitted.clientId
+      if (submitted.clientSecret !== undefined) input[columns.clientSecret] = submitted.clientSecret
       input[columns.isEnabled] = submitted.isEnabled
-      rows.push({ provider, clientId, clientSecret, isEnabled: submitted.isEnabled })
     }
 
-    await systemSettingsService.update(input)
-    return rows
+    const persisted = await systemSettingsService.update(input)
+    return SUPPORTED_OAUTH_PROVIDERS.map(provider => rowFromSettings(persisted, provider))
   }
 }

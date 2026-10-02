@@ -48,10 +48,11 @@ describe('anonymous registration outcome', () => {
 
   it('keeps OAuth completion errors explicit for an authenticated pending identity', async () => {
     context.email.mockRejectedValue(new Error('SMTP unavailable'))
-    await expect(registrationService.completeRegistration({
-      user: { id: 1, email: 'existing@example.com', tokenVersion: 0 },
-      settings: { emailActivationEnabled: true, emailVerifyExpiresInMinutes: 30, siteUrl: 'https://example.com' },
-      reasonPrefix: 'oauth registration'
-    })).rejects.toMatchObject({ statusCode: 503 })
+    await expect(registrationService.registerOauth({
+      email: 'new@example.com', password: 'ValidPassword!42', lastLoginIp: null,
+      identity: { provider: 'github', providerUserId: 'github-1', nickname: null, avatarUrl: null, email: null }
+    }, { ...SITE_SETTINGS_DEFAULTS, registrationMode: 'open', emailActivationEnabled: true }))
+      .rejects.toMatchObject({ statusCode: 503 })
+    expect((await fixture.client.query('SELECT email FROM users')).rows).toEqual([{ email: 'existing@example.com' }])
   })
 })
