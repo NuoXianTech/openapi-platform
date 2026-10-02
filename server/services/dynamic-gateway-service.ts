@@ -4,7 +4,6 @@ import {
   getRequestProtocol,
   getRequestURL,
   sendNoContent,
-  sendProxy,
   setResponseHeader
 } from 'h3'
 import { dynamicGatewayAccessService } from '~~/server/services/dynamic-gateway-access-service'
@@ -20,21 +19,13 @@ import {
   GatewayExecutionError
 } from '~~/server/errors/gateway-error'
 import { gatewayCallService } from '~~/server/services/dynamic-gateway-call-service'
-import {
-  assertGatewayRequestSize,
-  createGatewayRequestBody
-} from '~~/server/services/dynamic-gateway-stream-service'
-import {
-  buildGatewayTargetUrl,
-  createGatewayProxyFetch,
-  orderedGatewayTargetsAsync
-} from '~~/server/services/dynamic-gateway-target-service'
+import { assertGatewayRequestSize } from '~~/server/services/dynamic-gateway-stream-service'
+import { forwardGatewayRequest } from '~~/server/services/dynamic-gateway-transport'
 import { getAppEventContext } from '~~/server/utils/event-context'
 import { gatewayFail } from '~~/server/utils/gateway-response'
 import { setPublicApiCors } from '~~/server/utils/public-api-cors'
 import { ensureRequestId } from '~~/server/utils/request-id'
 import { readClientIp } from '~~/server/utils/request-meta'
-import { renderUpstreamPath } from '~~/server/utils/route-pattern'
 import { upstreamServiceTokenService } from '~~/server/services/upstream-service-token-service'
 
 const STRIPPED_REQUEST_HEADERS = new Set([
@@ -240,13 +231,6 @@ export const dynamicGatewayService = {
     // the upstream copy when the stream is proxied below.
     setResponseHeader(event, 'X-Request-Id', ensureRequestId(event))
     gatewayCallService.start(event, match)
-    let abortController: AbortController | null = null
-    let abortReason: 'client_disconnected' | 'timeout' | null = null
-    let abortRequest: (() => void) | null = null
-    let abortResponse: (() => void) | null = null
-    let timeout: ReturnType<typeof setTimeout> | null = null
-    let targetId: string | null = null
-    let proxyStarted = false
 
     try {
       assertGatewayRequestSize(event, match.route.maxRequestBytes)
@@ -254,82 +238,12 @@ export const dynamicGatewayService = {
       if (!access.passed) return { matched: true, response: access.response }
 
       const serviceToken = await upstreamServiceTokenService.get(match.upstream.id)
-      const targets = await orderedGatewayTargetsAsync(match)
-      const target = targets[0]!
-      targetId = target.id
-      const upstreamPath = renderUpstreamPath(match.route.upstreamPathTemplate, match.params)
-      const targetUrl = buildGatewayTargetUrl(
-        target.baseUrl,
-        upstreamPath,
-        requestUrl.search
-      )
       const headers = createUpstreamHeaders(event, match, serviceToken)
-      abortController = new AbortController()
-      const abortUpstream = (
-        reason: NonNullable<typeof abortReason>,
-        message: string
-      ) => {
-        if (!abortController || abortController.signal.aborted) return
-        abortReason = reason
-        abortController.abort(new Error(message))
-      }
-      timeout = setTimeout(
-        () => abortUpstream('timeout', 'upstream timeout'),
-        match.route.timeoutMs
-      )
-      abortRequest = () => abortUpstream(
-        'client_disconnected',
-        'client disconnected'
-      )
-      abortResponse = () => {
-        if (!event.node.res.writableEnded) {
-          abortUpstream('client_disconnected', 'client disconnected')
+      const response = await forwardGatewayRequest(event, match, headers, upstreamResponse => {
+        if ([502, 503, 504].includes(upstreamResponse.status)) {
+          setResponseHeader(event, 'Retry-After', UPSTREAM_RETRY_AFTER_SECONDS)
         }
-      }
-      event.node.req.once('aborted', abortRequest)
-      event.node.res.once('close', abortResponse)
-
-      const body = createGatewayRequestBody(event, match.route.maxRequestBytes, requestBytes => {
-        gatewayCallService.observe(event, { requestBytes })
-      })
-      const proxyFetch = createGatewayProxyFetch({
-        match,
-        targets,
-        upstreamPath,
-        search: requestUrl.search,
-        maximumResponseBytes: match.route.maxResponseBytes,
-        onTarget: (selected) => {
-          targetId = selected.id
-          gatewayCallService.observe(event, { target: selected })
-        },
-        onResponseBytes: (receivedBytes) => {
-          gatewayCallService.observe(event, { responseBytes: receivedBytes })
-        }
-      })
-      proxyStarted = true
-      const response = await sendProxy(event, targetUrl.toString(), {
-        fetch: async (request, init) => gatewayCallService.prepareResponse(
-          event,
-          await proxyFetch(request, init),
-          abortController!.signal
-        ),
-        sendStream: true,
-        onResponse: (_proxyEvent, upstreamResponse) => {
-          if ([502, 503, 504].includes(upstreamResponse.status)) {
-            // Retry guidance is a Platform-owned field; the upstream copy is
-            // stripped by the response sanitizer and cannot override it.
-            setResponseHeader(event, 'Retry-After', UPSTREAM_RETRY_AFTER_SECONDS)
-          }
-          captureUpstreamFailure(event, upstreamResponse)
-        },
-        fetchOptions: {
-          method: event.method,
-          headers,
-          body,
-          duplex: body ? 'half' : undefined,
-          redirect: 'manual',
-          signal: abortController.signal
-        }
+        captureUpstreamFailure(event, upstreamResponse)
       })
       return { matched: true, response }
     } catch (caughtError) {
@@ -355,24 +269,6 @@ export const dynamicGatewayService = {
           billingError
         )
       }
-      if (abortReason === 'timeout') {
-        return gatewayFailureResult(
-          event,
-          504,
-          'UPSTREAM_TIMEOUT',
-          '上游服务响应超时',
-          error
-        )
-      }
-      if (abortReason === 'client_disconnected') {
-        return gatewayFailureResult(
-          event,
-          499,
-          'CLIENT_DISCONNECTED',
-          '客户端已断开连接',
-          error
-        )
-      }
       const executionError = findGatewayExecutionError(error)
       if (executionError) {
         return gatewayFailureResult(
@@ -383,30 +279,11 @@ export const dynamicGatewayService = {
           executionError
         )
       }
-      console.error('[gateway] upstream request failed', {
+      console.error('[gateway] request preparation failed', {
         routeId: match.route.id,
-        target: targetId,
         error: error instanceof Error ? error.message : String(error)
       })
-      return proxyStarted
-        ? gatewayFailureResult(
-            event,
-            502,
-            'UPSTREAM_UNAVAILABLE',
-            '上游服务暂时不可用',
-            error
-          )
-        : gatewayFailureResult(
-            event,
-            503,
-            'GATEWAY_UNAVAILABLE',
-            '网关服务暂不可用，请稍后再试',
-            error
-          )
-    } finally {
-      if (timeout) clearTimeout(timeout)
-      if (abortRequest) event.node.req.off('aborted', abortRequest)
-      if (abortResponse) event.node.res.off('close', abortResponse)
+      return gatewayFailureResult(event, 503, 'GATEWAY_UNAVAILABLE', '网关服务暂不可用，请稍后再试', error)
     }
   }
 }

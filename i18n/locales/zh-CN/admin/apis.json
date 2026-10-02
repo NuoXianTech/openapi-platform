@@ -339,6 +339,8 @@
           "discoverySucceeded": "Service 契约与配置 Schema 已同步",
           "discoveryPartial": "Service 契约已同步，但部分 Target 发现失败",
           "discoveryFailed": "Service 发现失败",
+          "discoveryRoutingPending": "Service 契约已保存，流量更新尚未完成",
+          "discoveryRoutingRetry": "请重新发现 Service，以重试流量更新。部分 Target 的发现状态可在详情中查看。",
           "discoverFirstTitle": "先连接 Service",
           "discoverFirstDescription": "同步服务后即可加载配置项。连接失败时，可先检查实例地址与访问凭证。",
           "configurationTitle": "业务配置",

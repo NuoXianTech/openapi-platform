@@ -17,7 +17,7 @@ import {
 } from '~~/server/utils/route-pattern'
 import { firstRow } from '~~/server/utils/row'
 import { routingReferenceService } from '~~/server/services/routing-reference-service'
-import type { RouteBinding, RouteMutationInput } from '~~/server/types/platform-publication'
+import type { HttpMethod, RouteBinding, RouteMutationInput } from '~~/server/types/platform-publication'
 
 interface RouteMutationOptions {
   isSupportRoute?: boolean
@@ -261,5 +261,34 @@ export const platformRouteService = {
       throw createApplicationError({ statusCode: 404, message: 'route not found', data: { code: 'ROUTE_NOT_FOUND' } })
     }
     return removed
+  }
+}
+
+export function routeMutationFromBinding(
+  binding: RouteBinding,
+  patch: Partial<RouteMutationInput> = {}
+): RouteMutationInput {
+  return {
+    apiVersionId: binding.route.apiVersionId,
+    name: binding.route.name,
+    hosts: binding.route.hosts,
+    method: binding.route.method as HttpMethod,
+    pathPattern: binding.route.pathPattern,
+    upstreamServiceId: binding.route.upstreamServiceId,
+    upstreamPathTemplate: binding.route.upstreamPathTemplate,
+    isApiKey: binding.route.isApiKey,
+    isStatistics: binding.route.isStatistics,
+    creditsCost: binding.route.creditsCost,
+    rateLimitPerSecond: binding.route.rateLimitPerSecond,
+    rateLimitPerMinute: binding.route.rateLimitPerMinute,
+    rateLimitPerHour: binding.route.rateLimitPerHour,
+    rateLimitPerDay: binding.route.rateLimitPerDay,
+    timeoutMs: binding.route.timeoutMs,
+    maxRequestBytes: binding.route.maxRequestBytes,
+    maxResponseBytes: binding.route.maxResponseBytes,
+    catalogStatus: binding.route.catalogStatus as RouteMutationInput['catalogStatus'],
+    sensitiveQueryParameters: binding.route.sensitiveQueryParameters,
+    state: binding.route.state as RouteMutationInput['state'],
+    ...patch
   }
 }

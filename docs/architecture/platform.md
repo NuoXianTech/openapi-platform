@@ -61,7 +61,10 @@ Product / Version 复用和支撑 Route 联动是该模块的内部规则。目�
 活动快照中的 Route；发布优先复用期望状态为 active 的 Route；支撑 Route 优先匹配
 所属 Version。这些场景的选择顺序有意保持不同。
 
-通用事务与运行快照发布仍由 `platform-endpoint-publication-service.ts` 负责。
+通用事务与运行快照发布由 `routing-revision-service.ts` 完整负责。
+领域变更通过 `applyPlatformMutation` 在其拥有的事务内执行；独立发布和历史激活复用
+同一提交流程，锁与缓存失效不再向调用方开放，也不接受外部事务作为发布入口。
+Token 与 Target 健康状态的提交后动作继续登记在同一事务中；回滚不执行这些动作。
 Endpoint 协调通过只读的 `getServiceControlView` 读取 Service 契约；Service 发现调用
 支撑 Route 同步入口，协调模块不反向依赖发现入口。
 
@@ -133,6 +136,12 @@ Service 发现和配置同步包含对 Target 的网络调用，不能纳入数�
 `pending` 表示配置与 ACK 已保存但运行快照刷新失败。管理员重新同步已保存配置时沿用当前配置
 Revision，再次尝试刷新运行快照。前端先接纳保存结果，再刷新详情，刷新失败不恢复旧编辑版本。
 
+发现、配置保存和重新同步的提交后运行快照结果统一由 `platform-service-control-service.ts`
+解释。发现的契约和已验证 Token 一旦提交，后续发布失败返回 `routingStatus: pending`，
+不将发现改报失败；成功审计仍记录已提交的发现事实及运行快照结果。再次发现会重新验证
+当前 Target 并重试发布，不自动应用待保存的 Route 草稿。同一 Upstream 的并发发现合并到
+包含发布与结果读取的完整操作。详情和接口目录均对 pending 显示警告，批量发现将其计为部分完成。
+
 Endpoint 批量操作在确认返回和每个子请求派发前检查页面生命周期；页面卸载后停止尚未派发的
 操作，已发出的请求由服务端完成，旧响应不会继续触发页面刷新。
 
@@ -149,6 +158,12 @@ Gateway 按以下顺序处理公开请求：
 7. 选择 Upstream Target 并转发请求。
 8. 根据响应结果结算或释放积分预留。
 9. 写入 Route 调用明细、耗时和积分关联。
+
+`dynamic-gateway-transport.ts` 持有一次转发的完整生命周期：Target 次序、路径构建、
+整体 Deadline、单次尝试计时、请求体限制、响应流和断连清理。Gateway 在准入后调用
+`forwardGatewayRequest`，不再装配这些步骤。最终尝试的 abort 监听保留到正文结束、
+出错或取消，随后释放；已取消的请求不再派发新 Target。转发仍通过调用模块接纳观测和
+准备付费响应，免费流式交付与付费交付前持久化规则不变。
 
 `server/services/dynamic-gateway-call-service.ts` 持有每个请求私有的调用生命周期状态，
 统一接纳准入结果与观测、准备付费响应、释放预留，并在响应后写调用明细和结算。

@@ -2,7 +2,6 @@ import { and, eq } from 'drizzle-orm'
 import type {
   RedactedServiceConfigurationState,
   ServiceConfigurationDefinition,
-  ServiceConfigurationSyncOutcome,
   ServiceConfigurationSyncResult,
   ServiceConfigurationValue,
   StoredServiceConfigurationValues
@@ -36,7 +35,6 @@ import {
   decryptStoredSecret,
   encryptStoredSecret
 } from '~~/server/utils/stored-secret'
-import { refreshPlatformRevision } from '~~/server/services/platform-endpoint-publication-service'
 
 const CONFIGURATION_SYNC_CONCURRENCY = 8
 const MAX_CONFIGURATION_REVISION = 2_147_483_647
@@ -253,32 +251,6 @@ async function pushConfiguration(
   }
 }
 
-async function publishRoutableConfigurationTargets(
-  result: ServiceConfigurationSyncResult
-): Promise<Pick<ServiceConfigurationSyncOutcome, 'routingRevision' | 'routingStatus'>> {
-  // A partial sync still changes the safe Target set: synchronized Targets can
-  // serve the new configuration while failed or drifted Targets must be
-  // removed from the next immutable runtime snapshot.
-  if (result.status === 'failed') {
-    return { routingRevision: null, routingStatus: 'skipped' }
-  }
-  // Named apart from result.revision: that one is the Service configuration
-  // revision, this one is the routing snapshot sequence. Spreading both
-  // under one key silently dropped the configuration revision.
-  try {
-    const { revision } = await refreshPlatformRevision(null)
-    return { routingRevision: revision, routingStatus: 'applied' }
-  } catch (error) {
-    // Desired configuration and ACKs have committed. Resynchronizing reuses
-    // the saved revision and retries publication without replaying a save.
-    console.error('[service-configuration] routing publication pending after synchronization', {
-      configurationRevision: result.revision,
-      error: error instanceof Error ? error.message : 'publication failed'
-    })
-    return { routingRevision: null, routingStatus: 'pending' }
-  }
-}
-
 function reconstructConfiguration(input: {
   definition: ServiceConfigurationDefinition
   stored: StoredServiceConfigurationValues
@@ -412,7 +384,7 @@ export async function updatePlatformServiceConfiguration(
     values: Record<string, unknown>
     secrets: Record<string, string | null>
   }
-): Promise<ServiceConfigurationSyncOutcome> {
+): Promise<ServiceConfigurationSyncResult> {
   const context = await loadServiceControlContext(upstreamServiceId)
   const definition = context.connection.configurationSchema
   const schemaSha256 = context.connection.configurationSchemaSha256
@@ -483,13 +455,12 @@ export async function updatePlatformServiceConfiguration(
     values,
     configurationHash
   })
-  const publication = await publishRoutableConfigurationTargets(result)
-  return { ...result, ...publication }
+  return result
 }
 
 export async function synchronizePlatformServiceConfiguration(
   upstreamServiceId: string
-): Promise<ServiceConfigurationSyncOutcome> {
+): Promise<ServiceConfigurationSyncResult> {
   const context = await loadServiceControlContext(upstreamServiceId)
   const definition = context.connection.configurationSchema
   const schemaSha256 = context.connection.configurationSchemaSha256
@@ -539,6 +510,5 @@ export async function synchronizePlatformServiceConfiguration(
     values,
     configurationHash
   })
-  const publication = await publishRoutableConfigurationTargets(result)
-  return { ...result, ...publication }
+  return result
 }

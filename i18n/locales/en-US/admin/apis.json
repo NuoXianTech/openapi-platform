@@ -339,6 +339,8 @@
           "discoverySucceeded": "Service contract and configuration schema synchronized",
           "discoveryPartial": "Service contract synchronized, but some Targets failed discovery",
           "discoveryFailed": "Service discovery failed",
+          "discoveryRoutingPending": "Service contract saved; traffic update is pending",
+          "discoveryRoutingRetry": "Run Service discovery again to retry the traffic update. Check the details for individual Target discovery status.",
           "discoverFirstTitle": "Connect the Service first",
           "discoverFirstDescription": "Sync the Service to load its settings. If the connection fails, check the instance URLs and access credential.",
           "configurationTitle": "Configuration",

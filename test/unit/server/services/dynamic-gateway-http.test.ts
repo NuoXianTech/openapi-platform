@@ -2,6 +2,8 @@ import { createServer, type IncomingMessage, type ServerResponse } from 'node:ht
 import { createApp, eventHandler, toNodeListener, type H3Event } from 'h3'
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { gatewayCallService } from '~~/server/services/dynamic-gateway-call-service'
+import { gatewayTargetHealth } from '~~/server/services/gateway-target-health'
+import { resetGatewayTargetHealth } from '~~/server/services/dynamic-gateway-transport'
 import type { ResolvedDynamicRoute } from '~~/server/services/routing-runtime-service'
 
 const mocks = vi.hoisted(() => ({
@@ -80,6 +82,7 @@ await new Promise<void>(resolve => gateway.listen(0, '127.0.0.1', resolve))
 const url = `http://127.0.0.1:${(gateway.address() as { port: number }).port}/v1/stream`
 
 beforeEach(() => {
+  resetGatewayTargetHealth()
   vi.clearAllMocks()
   Object.assign(match, structuredClone(originalMatch))
   mocks.resolve.mockResolvedValue(match)
@@ -118,6 +121,36 @@ afterAll(async () => {
 })
 
 describe('gateway over HTTP', () => {
+  it.each(['deadline', 'disconnect'] as const)('cleans up a timed-out first Target and a streaming replacement on %s', async (ending) => {
+    match.route.timeoutMs = 2_700
+    const baseUrl = match.upstream.targets[0]!.baseUrl
+    match.upstream.targets = [
+      { id: 'slow-target', baseUrl: baseUrl + '/slow', weight: 1 },
+      { id: 'replacement-target', baseUrl: baseUrl + '/replacement', weight: 1 }
+    ]
+    const requests: string[] = []
+    const closed = new Set<string>()
+    upstreamHandler = (req, res) => {
+      const path = req.url!
+      requests.push(path)
+      res.once('close', () => closed.add(path))
+      if (path.startsWith('/replacement')) res.write('paid-prefix')
+    }
+    const health = vi.spyOn(gatewayTargetHealth, 'report')
+    const controller = new AbortController()
+    const pending = fetch(url, { signal: controller.signal })
+    const result = pending.then(response => response.json(), () => null)
+    await vi.waitFor(() => expect(requests).toHaveLength(2), { timeout: 4_000 })
+    if (ending === 'disconnect') controller.abort()
+    const body = await result
+    if (ending === 'deadline') expect(body).toMatchObject({ code: 'UPSTREAM_TIMEOUT' })
+    await vi.waitFor(() => expect(closed.size).toBe(2))
+    await vi.waitFor(() => expect(mocks.release).toHaveBeenCalledOnce())
+    expect(mocks.mark).not.toHaveBeenCalled()
+    expect(health.mock.calls.filter(([, healthy]) => !healthy)).toHaveLength(1)
+    expect(lastEvent.node.req.listenerCount('aborted')).toBe(0)
+  }, 6_000)
+
   it('coalesces concurrent and repeated completion without replaying calls or settlement', async () => {
     await (await fetch(url)).text()
     let finishRecord!: (id: number) => void

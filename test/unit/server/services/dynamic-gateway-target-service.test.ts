@@ -5,7 +5,7 @@ import {
   createGatewayProxyFetch,
   orderedGatewayTargets,
   resetGatewayTargetHealth
-} from '~~/server/services/dynamic-gateway-target-service'
+} from '~~/server/services/dynamic-gateway-transport'
 
 vi.mock('~~/server/utils/safe-fetch', () => ({
   safeFetch: (input: RequestInfo | URL, init?: RequestInit) => fetch(input, init)
@@ -48,9 +48,40 @@ describe('dynamic gateway target selection', () => {
     resetGatewayTargetHealth()
   })
   afterEach(() => {
+    vi.restoreAllMocks()
     vi.unstubAllGlobals()
     resetGatewayTargetHealth()
   })
+  it('does not dispatch or blame a Target when the transfer was already aborted', async () => {
+    const request = vi.fn()
+    vi.stubGlobal('fetch', request)
+    const controller = new AbortController()
+    controller.abort(new Error('already disconnected'))
+    await expect(proxyFor(match('pre-abort', 'round_robin', [1, 1]))('http://gateway.invalid', {
+      signal: controller.signal
+    })).rejects.toThrow('already disconnected')
+    expect(request).not.toHaveBeenCalled()
+  })
+
+  it.each(['close', 'error', 'cancel'] as const)('releases the final attempt abort listener when its body ends with %s', async (end) => {
+    let source!: ReadableStreamDefaultController<Uint8Array>
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(new ReadableStream<Uint8Array>({
+      start(controller) { source = controller; controller.enqueue(new Uint8Array([1])) }
+    }))))
+    const controller = new AbortController()
+    const add = vi.spyOn(controller.signal, 'addEventListener')
+    const remove = vi.spyOn(controller.signal, 'removeEventListener')
+    const response = await proxyFor(match('stream-' + end, 'round_robin', [1]))('http://gateway.invalid', { signal: controller.signal })
+    const reader = response.body!.getReader()
+    expect((await reader.read()).value).toEqual(new Uint8Array([1]))
+    const listener = add.mock.calls.find(call => call[0] === 'abort')![1]
+    expect(remove).not.toHaveBeenCalledWith('abort', listener)
+    if (end === 'close') { source.close(); expect((await reader.read()).done).toBe(true) }
+    if (end === 'error') { source.error(new Error('broken stream')); await expect(reader.read()).rejects.toThrow('broken stream') }
+    if (end === 'cancel') await reader.cancel('client stopped reading')
+    expect(remove).toHaveBeenCalledExactlyOnceWith('abort', listener)
+  })
+
   it('rotates round-robin targets for each request', () => {
     const route = match('round-robin-test', 'round_robin', [1, 1, 1])
 

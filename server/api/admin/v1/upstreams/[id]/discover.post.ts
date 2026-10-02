@@ -16,6 +16,8 @@ export default defineAdminEventHandler(async (event, admin) => {
       serviceId: result.connection.serviceId,
       serviceProtocol: result.connection.serviceProtocol,
       openapiSha256: result.connection.openapiSha256,
+      routingStatus: result.routingStatus,
+      routingRevision: result.routingRevision,
       endpointCount: result.endpoints.filter(endpoint => (
         !endpoint.system && !endpoint.support
       )).length

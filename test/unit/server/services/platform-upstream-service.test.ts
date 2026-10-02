@@ -31,7 +31,7 @@ const { platformRuntimeService } = await import(
 const { upstreamServiceTokenService } = await import(
   '~~/server/services/upstream-service-token-service'
 )
-const { routingRevisionService } = await import('~~/server/services/routing-revision-service')
+const revisionCompiler = await import('~~/server/services/routing-revision-compiler')
 const { loadServiceControlContext, commitServiceControlContext } = await import('~~/server/services/platform-service-control-context')
 
 let client: PGlite
@@ -138,7 +138,7 @@ describe('Platform upstream target state', () => {
   it.each(['update', 'remove'] as const)('preserves Target health when %s is rolled back by publication failure', async (operation) => {
     const target = await createConfiguredTarget()
     const reset = vi.spyOn(gatewayTargetHealth, 'reset')
-    vi.spyOn(routingRevisionService, 'publish').mockRejectedValueOnce(new Error('publication rejected'))
+    vi.spyOn(revisionCompiler, 'compileRoutingRevision').mockImplementationOnce(() => { throw new Error('publication rejected') })
     const mutation = operation === 'update'
       ? platformUpstreamService.updateTargetAndPublish(target.id, { enabled: false }, null)
       : platformUpstreamService.removeTargetAndPublish(target.id, null)
@@ -151,10 +151,10 @@ describe('Platform upstream target state', () => {
   it.each(['update', 'remove'] as const)('clears Target health once, after the %s publication commits', async (operation) => {
     const target = await createConfiguredTarget()
     const reset = vi.spyOn(gatewayTargetHealth, 'reset')
-    const publish = routingRevisionService.publish
-    vi.spyOn(routingRevisionService, 'publish').mockImplementation(async (...args) => {
+    const compile = revisionCompiler.compileRoutingRevision
+    vi.spyOn(revisionCompiler, 'compileRoutingRevision').mockImplementation((...args) => {
       expect(reset).not.toHaveBeenCalled()
-      return publish(...args)
+      return compile(...args)
     })
     if (operation === 'update') await platformUpstreamService.updateTargetAndPublish(target.id, { enabled: false }, null)
     else await platformUpstreamService.removeTargetAndPublish(target.id, null)
@@ -248,7 +248,7 @@ describe('Platform upstream target state', () => {
     const id = target.upstreamServiceId
     const before = await platformUpstreamService.findById(id)
     const invalidate = vi.spyOn(upstreamServiceTokenService, 'invalidate')
-    if (failure === 'publication') vi.spyOn(routingRevisionService, 'publish').mockRejectedValueOnce(new Error('publication rejected'))
+    if (failure === 'publication') vi.spyOn(revisionCompiler, 'compileRoutingRevision').mockImplementationOnce(() => { throw new Error('publication rejected') })
     await expect(platformUpstreamService.updateAndPublish(id, {
       name: 'Must not be committed',
       serviceToken: failure === 'token' ? 'short' : 'replacement-service-token-with-at-least-32-characters'

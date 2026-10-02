@@ -19,6 +19,7 @@ import type {
   RoutingRevisionPayload,
   RoutingPublicationScope
 } from '~~/server/types/routing-revision'
+import { withCommittedTransaction } from '~~/server/utils/committed-transaction'
 import { canonicalJson } from '~~/server/utils/canonical-json'
 import { getSqlState } from '~~/server/utils/database-error'
 import { firstRow } from '~~/server/utils/row'
@@ -59,7 +60,7 @@ function revisionDefaultDomain(
 /**
  * 发布与激活都要读到同一行运行时并阻塞并发写者，让冲突校验和激活指针串行。
  */
-export async function lockPlatformRuntime(tx: DatabaseTransaction) {
+async function lockPlatformRuntime(tx: DatabaseTransaction) {
   const runtime = firstRow(await tx.select().from(platformRuntime)
     .where(eq(platformRuntime.id, 1))
     .limit(1)
@@ -68,7 +69,7 @@ export async function lockPlatformRuntime(tx: DatabaseTransaction) {
   return runtime
 }
 
-export async function invalidateRoutingPublicationCaches(): Promise<void> {
+async function invalidateRoutingPublicationCaches(): Promise<void> {
   invalidateRoutingRuntimeCache()
   await invalidatePublicApiCatalogCache()
 }
@@ -92,124 +93,14 @@ export const routingRevisionService = {
     }
   },
 
-  async publish(
-    createdBy: number | null,
-    options: { tx?: DatabaseTransaction, scope?: RoutingPublicationScope } = {}
-  ) {
-    try {
-      const publish = async (tx: DatabaseTransaction) => {
-        // 重新读取运行时单行：同一事务里可能刚改过 defaultDomain，
-        // 冲突校验必须看到最新值。已持有锁时这次读取不再阻塞。
-        const runtime = await lockPlatformRuntime(tx)
-
-        const routeRows = await tx.select({
-          route: apiRoutes,
-          product: apiProducts,
-          version: apiVersions,
-          openapiDocumentId: upstreamServices.openapiDocumentId
-        }).from(apiRoutes)
-          .innerJoin(apiVersions, eq(apiVersions.id, apiRoutes.apiVersionId))
-          .innerJoin(apiProducts, eq(apiProducts.id, apiVersions.productId))
-          .innerJoin(upstreamServices, eq(upstreamServices.id, apiRoutes.upstreamServiceId))
-          .innerJoin(upstreamServiceConnections, eq(
-            upstreamServiceConnections.upstreamServiceId,
-            upstreamServices.id
-          ))
-          .where(and(
-            isNull(apiProducts.deletedAt),
-            isNull(apiRoutes.deletedAt),
-            isNull(upstreamServices.deletedAt)
-          ))
-
-        const activeRevision = runtime.activeRevisionId
-          ? firstRow(await tx.select().from(routingRevisions)
-              .where(eq(routingRevisions.id, runtime.activeRevisionId))
-              .limit(1))
-          : null
-        // Read all compilation inputs under the same runtime lock. Route
-        // selection and Target fallback are owned by the compiler.
-        const [products, versions, currentUpstreams] = await Promise.all([
-          tx.select().from(apiProducts).where(isNull(apiProducts.deletedAt)),
-          tx.select().from(apiVersions),
-          tx.select().from(upstreamServices).where(isNull(upstreamServices.deletedAt))
-        ])
-        const documentIds = [...new Set(routeRows.flatMap(row => row.openapiDocumentId ? [row.openapiDocumentId] : []))]
-        const upstreamIds = currentUpstreams.map(upstream => upstream.id)
-        const [documents, targetRows, connectionRows] = await Promise.all([
-          documentIds.length
-            ? tx.select().from(openapiDocuments).where(inArray(openapiDocuments.id, documentIds))
-            : [],
-          upstreamIds.length
-            ? tx.select().from(upstreamTargets).where(and(
-                inArray(upstreamTargets.upstreamServiceId, upstreamIds),
-                eq(upstreamTargets.enabled, true)
-              ))
-            : [],
-          upstreamIds.length
-            ? tx.select().from(upstreamServiceConnections).where(inArray(upstreamServiceConnections.upstreamServiceId, upstreamIds))
-            : []
-        ])
-        const desiredConfiguration = compileRoutingRevision({
-          routeRows, products, versions, currentUpstreams, targetRows, connectionRows,
-          contracts: documents.map(document => ({
-            id: document.id,
-            endpoints: readStoredServiceEndpoints(document.parsedSummary)
-          }))
-        }, activeRevision?.configPayload ?? null, options.scope ?? { kind: 'all' }, runtime.defaultDomain)
-        if (
-          activeRevision
-          && hasSameRuntimeConfiguration(
-            activeRevision.configPayload,
-            desiredConfiguration
-          )
-        ) return activeRevision
-
-        const sequenceRow = firstRow(await tx.select({ value: max(routingRevisions.sequence) })
-          .from(routingRevisions))
-        const sequence = Number(sequenceRow?.value ?? 0) + 1
-        const revisionId = randomUUID()
-        const generatedAt = new Date()
-        const payload: RoutingRevisionPayload = {
-          ...desiredConfiguration,
-          revisionId,
-          generatedAt: generatedAt.toISOString()
-        }
-
-        const created = firstRow(await tx.insert(routingRevisions).values({
-          id: revisionId,
-          sequence,
-          configPayload: payload,
-          checksum: revisionChecksum(payload),
-          createdBy,
-          publishedAt: generatedAt
-        }).returning())
-        if (!created) throw new Error('revision insert returned no row')
-
-        await tx.update(platformRuntime)
-          .set({ activeRevisionId: created.id, updatedAt: generatedAt })
-          .where(eq(platformRuntime.id, 1))
-
-        return created
-      }
-      const revision = options.tx
-        ? await publish(options.tx)
-        : await db.transaction(publish)
-      if (!options.tx) await invalidateRoutingPublicationCaches()
-      return revision
-    } catch (error) {
-      if (getSqlState(error) === '23505') {
-        throw createApplicationError({
-          statusCode: 409,
-          message: 'routing revision publication conflicted with another publisher; retry the operation',
-          data: { code: 'REVISION_PUBLISH_CONFLICT' }
-        })
-      }
-      throw error
-    }
+  async publish(createdBy: number | null, options: { scope?: RoutingPublicationScope } = {}) {
+    return commitRoutingChange(async tx => ({
+      value: await publishRevision(tx, createdBy, options.scope ?? { kind: 'all' })
+    }))
   },
 
   async activate(revisionId: string) {
-    const revision = await db.transaction(async (tx) => {
+    return commitRoutingChange(async (tx) => {
       const runtime = await lockPlatformRuntime(tx)
 
       const target = firstRow(await tx.select().from(routingRevisions)
@@ -218,7 +109,7 @@ export const routingRevisionService = {
       if (!target) {
         throw createApplicationError({ statusCode: 404, message: 'published routing revision not found', data: { code: 'REVISION_NOT_FOUND' } })
       }
-      if (runtime.activeRevisionId === target.id) return target
+      if (runtime.activeRevisionId === target.id) return { value: target }
 
       const defaultDomain = revisionDefaultDomain(target.configPayload, runtime.defaultDomain)
       validatePublishedRouteConflicts(target.configPayload.routes, defaultDomain)
@@ -229,9 +120,159 @@ export const routingRevisionService = {
           updatedAt: new Date()
         })
         .where(eq(platformRuntime.id, 1))
-      return target
+      return { value: target }
     })
-    await invalidateRoutingPublicationCaches()
-    return revision
   }
+}
+
+// Every public write owns its transaction, lock and post-commit invalidation.
+// Domain writes may register Token/Target effects on the same transaction.
+async function commitRoutingChange<T>(
+  operation: (tx: DatabaseTransaction) => Promise<{ value: T, publishRouting?: boolean }>
+): Promise<T> {
+  const result = await withCommittedTransaction(async tx => {
+    await lockPlatformRuntime(tx)
+    return operation(tx)
+  })
+  if (result.publishRouting !== false) await invalidateRoutingPublicationCaches()
+  return result.value
+}
+
+async function publishRevision(tx: DatabaseTransaction, createdBy: number | null, scope: RoutingPublicationScope) {
+  try {
+    // 重新读取运行时单行：同一事务里可能刚改过 defaultDomain，
+    // 冲突校验必须看到最新值。已持有锁时这次读取不再阻塞。
+    const runtime = await lockPlatformRuntime(tx)
+
+    const routeRows = await tx.select({
+      route: apiRoutes,
+      product: apiProducts,
+      version: apiVersions,
+      openapiDocumentId: upstreamServices.openapiDocumentId
+    }).from(apiRoutes)
+      .innerJoin(apiVersions, eq(apiVersions.id, apiRoutes.apiVersionId))
+      .innerJoin(apiProducts, eq(apiProducts.id, apiVersions.productId))
+      .innerJoin(upstreamServices, eq(upstreamServices.id, apiRoutes.upstreamServiceId))
+      .innerJoin(upstreamServiceConnections, eq(
+        upstreamServiceConnections.upstreamServiceId,
+        upstreamServices.id
+      ))
+      .where(and(
+        isNull(apiProducts.deletedAt),
+        isNull(apiRoutes.deletedAt),
+        isNull(upstreamServices.deletedAt)
+      ))
+
+    const activeRevision = runtime.activeRevisionId
+      ? firstRow(await tx.select().from(routingRevisions)
+          .where(eq(routingRevisions.id, runtime.activeRevisionId))
+          .limit(1))
+      : null
+    // Read all compilation inputs under the same runtime lock. Route
+    // selection and Target fallback are owned by the compiler.
+    const [products, versions, currentUpstreams] = await Promise.all([
+      tx.select().from(apiProducts).where(isNull(apiProducts.deletedAt)),
+      tx.select().from(apiVersions),
+      tx.select().from(upstreamServices).where(isNull(upstreamServices.deletedAt))
+    ])
+    const documentIds = [...new Set(routeRows.flatMap(row => row.openapiDocumentId ? [row.openapiDocumentId] : []))]
+    const upstreamIds = currentUpstreams.map(upstream => upstream.id)
+    const [documents, targetRows, connectionRows] = await Promise.all([
+      documentIds.length
+        ? tx.select().from(openapiDocuments).where(inArray(openapiDocuments.id, documentIds))
+        : [],
+      upstreamIds.length
+        ? tx.select().from(upstreamTargets).where(and(
+            inArray(upstreamTargets.upstreamServiceId, upstreamIds),
+            eq(upstreamTargets.enabled, true)
+          ))
+        : [],
+      upstreamIds.length
+        ? tx.select().from(upstreamServiceConnections).where(inArray(upstreamServiceConnections.upstreamServiceId, upstreamIds))
+        : []
+    ])
+    const desiredConfiguration = compileRoutingRevision({
+      routeRows, products, versions, currentUpstreams, targetRows, connectionRows,
+      contracts: documents.map(document => ({
+        id: document.id,
+        endpoints: readStoredServiceEndpoints(document.parsedSummary)
+      }))
+    }, activeRevision?.configPayload ?? null, scope, runtime.defaultDomain)
+    if (
+      activeRevision
+      && hasSameRuntimeConfiguration(
+        activeRevision.configPayload,
+        desiredConfiguration
+      )
+    ) return activeRevision
+
+    const sequenceRow = firstRow(await tx.select({ value: max(routingRevisions.sequence) })
+      .from(routingRevisions))
+    const sequence = Number(sequenceRow?.value ?? 0) + 1
+    const revisionId = randomUUID()
+    const generatedAt = new Date()
+    const payload: RoutingRevisionPayload = {
+      ...desiredConfiguration,
+      revisionId,
+      generatedAt: generatedAt.toISOString()
+    }
+
+    const created = firstRow(await tx.insert(routingRevisions).values({
+      id: revisionId,
+      sequence,
+      configPayload: payload,
+      checksum: revisionChecksum(payload),
+      createdBy,
+      publishedAt: generatedAt
+    }).returning())
+    if (!created) throw new Error('revision insert returned no row')
+
+    await tx.update(platformRuntime)
+      .set({ activeRevisionId: created.id, updatedAt: generatedAt })
+      .where(eq(platformRuntime.id, 1))
+
+    return created
+  } catch (error) {
+    if (getSqlState(error) === '23505') {
+      throw createApplicationError({
+        statusCode: 409,
+        message: 'routing revision publication conflicted with another publisher; retry the operation',
+        data: { code: 'REVISION_PUBLISH_CONFLICT' }
+      })
+    }
+    throw error
+  }
+}
+
+export interface PlatformPublication {
+  revision: { id: string, sequence: number }
+}
+
+/** Explicitly apply all desired Route changes. */
+export async function applyPlatformRevision(createdBy: number | null): Promise<PlatformPublication> {
+  const revision = await routingRevisionService.publish(createdBy)
+  return { revision: { id: revision.id, sequence: revision.sequence } }
+}
+
+/** Refresh infrastructure/governance while preserving pending Endpoint edits. */
+export async function refreshPlatformRevision(createdBy: number | null): Promise<PlatformPublication> {
+  const revision = await routingRevisionService.publish(createdBy, { scope: { kind: 'applied' } })
+  return { revision: { id: revision.id, sequence: revision.sequence } }
+}
+
+/** Domain changes and their routing snapshot commit or roll back together. */
+export async function applyPlatformMutation<T>(
+  createdBy: number | null,
+  mutate: (tx: DatabaseTransaction) => Promise<{
+    value: T
+    publishRouting?: boolean
+    applyRouteIds?: readonly string[]
+  }>
+) {
+  return commitRoutingChange(async tx => {
+    const mutation = await mutate(tx)
+    const revision = mutation.publishRouting === false ? null : await publishRevision(tx, createdBy,
+      mutation.applyRouteIds ? { kind: 'routes', routeIds: mutation.applyRouteIds } : { kind: 'applied' })
+    return { value: { value: mutation.value, revision }, publishRouting: mutation.publishRouting }
+  })
 }

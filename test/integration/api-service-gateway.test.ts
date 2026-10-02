@@ -50,7 +50,7 @@ const { platformRouteService } = await import(
   '~~/server/services/platform-route-service'
 )
 const { routeMutationFromBinding } = await import(
-  '~~/server/services/platform-endpoint-publication-service'
+  '~~/server/services/platform-route-service'
 )
 const { platformServiceControlService } = await import(
   '~~/server/services/platform-service-control-service'

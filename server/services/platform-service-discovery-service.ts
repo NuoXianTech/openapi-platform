@@ -10,7 +10,6 @@ import {
 } from '~~/server/db/schema'
 import { createApplicationError } from '~~/server/errors/application-error'
 import {
-  buildServiceControlView,
   loadServiceControlContext,
   acceptServiceTargetResults,
   safeServiceControlError,
@@ -20,7 +19,6 @@ import {
   persistServiceOpenApi,
   readStoredServiceEndpoints
 } from '~~/server/services/platform-service-openapi-service'
-import { refreshPlatformRevision } from '~~/server/services/platform-endpoint-publication-service'
 import { platformEndpointService } from '~~/server/services/platform-endpoint-service'
 import { upstreamServiceTokenService } from '~~/server/services/upstream-service-token-service'
 import { canonicalJson } from '~~/server/utils/canonical-json'
@@ -30,7 +28,6 @@ import {
   serviceControlClient
 } from '~~/server/utils/service-control-client'
 import { assertServiceConfigurationDefinition } from '~~/server/utils/service-configuration-values'
-import { hasReadyServiceTarget } from '~~/server/utils/service-upstream-readiness'
 
 interface DiscoveredTarget {
   targetId: string
@@ -61,10 +58,6 @@ interface DiscoveryFetchFailure {
 
 type DiscoveryFetchResult = DiscoveryFetchSuccess | DiscoveryFetchFailure
 
-const activeDiscoveries = new Map<
-  string,
-  ReturnType<typeof performPlatformServiceDiscovery>
->()
 const DISCOVERY_CONCURRENCY = 8
 
 async function allSettledBounded<TItem, TResult>(
@@ -387,7 +380,7 @@ async function commitServiceSnapshot(
   })
 }
 
-async function performPlatformServiceDiscovery(upstreamServiceId: string) {
+export async function discoverPlatformService(upstreamServiceId: string) {
   const context = await loadServiceControlContext(upstreamServiceId)
   if (!context.targets.some(target => target.enabled)) {
     throw createApplicationError({
@@ -421,37 +414,5 @@ async function performPlatformServiceDiscovery(upstreamServiceId: string) {
     throw error
   }
 
-  const refreshed = await loadServiceControlContext(upstreamServiceId)
-  const published = hasReadyServiceTarget(
-    refreshed.targets,
-    refreshed.connection
-  )
-    ? (await refreshPlatformRevision(null)).revision
-    : null
-  return {
-    ...await buildServiceControlView(
-      refreshed,
-      { checkAvailability: true }
-    ),
-    // Distinct from connection.configurationRevision: this is the routing
-    // snapshot sequence published by this discovery.
-    routingRevision: published
-  }
-}
-
-async function runPlatformServiceDiscovery(upstreamServiceId: string) {
-  try {
-    return await performPlatformServiceDiscovery(upstreamServiceId)
-  } finally {
-    activeDiscoveries.delete(upstreamServiceId)
-  }
-}
-
-export function discoverPlatformService(upstreamServiceId: string) {
-  const active = activeDiscoveries.get(upstreamServiceId)
-  if (active) return active
-
-  const discovery = runPlatformServiceDiscovery(upstreamServiceId)
-  activeDiscoveries.set(upstreamServiceId, discovery)
-  return discovery
+  return loadServiceControlContext(upstreamServiceId)
 }

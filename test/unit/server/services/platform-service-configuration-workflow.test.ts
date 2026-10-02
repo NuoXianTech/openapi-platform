@@ -1,4 +1,6 @@
+import { createHash } from 'node:crypto'
 import { resolve } from 'node:path'
+import type { H3Event } from 'h3'
 import { PGlite } from '@electric-sql/pglite'
 import { eq } from 'drizzle-orm'
 import { drizzle } from 'drizzle-orm/pglite'
@@ -7,20 +9,26 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } 
 import type { ServiceDescription } from '#shared/types/service-control'
 import * as schema from '~~/server/db/schema'
 import { calculateServiceConfigurationHash } from '~~/server/utils/service-configuration-values'
+import { canonicalJson } from '~~/server/utils/canonical-json'
+import * as availability from '~~/server/services/service-availability-service'
 import { isServiceTargetReady } from '~~/server/utils/service-upstream-readiness'
 
-const context = vi.hoisted(() => ({ database: null as unknown }))
+const context = vi.hoisted(() => ({ database: null as unknown, upstreamId: '', audit: vi.fn() }))
+vi.mock('~~/server/utils/auth', () => ({ defineAdminEventHandler: (handler: (event: H3Event, admin: { id: number, username: string }) => Promise<unknown>) => (event: H3Event) => handler(event, { id: 1, username: 'admin' }) }))
+vi.mock('~~/server/utils/router-param', () => ({ readUuidRouterParam: () => context.upstreamId }))
+vi.mock('~~/server/utils/request-operation-log', () => ({ addRequestOperationLog: context.audit }))
 vi.mock('~~/server/db/client', () => ({ get db() { return context.database } }))
-vi.mock('~~/server/services/platform-endpoint-publication-service', async (original) => ({
-  ...await original<typeof import('~~/server/services/platform-endpoint-publication-service')>(),
+vi.mock('~~/server/services/routing-revision-service', async (original) => ({
+  ...await original<typeof import('~~/server/services/routing-revision-service')>(),
   refreshPlatformRevision: vi.fn(async () => ({ revision: { id: 'published', sequence: 1 } }))
 }))
 const { platformUpstreamService } = await import('~~/server/services/platform-upstream-service')
-const { synchronizePlatformServiceConfiguration, updatePlatformServiceConfiguration } = await import('~~/server/services/platform-service-configuration-service')
+const { platformServiceControlService } = await import('~~/server/services/platform-service-control-service')
+const { synchronizeConfiguration: synchronizePlatformServiceConfiguration, updateConfiguration: updatePlatformServiceConfiguration, discover: discoverPlatformService } = platformServiceControlService
 const { serviceControlClient } = await import('~~/server/utils/service-control-client')
-const { refreshPlatformRevision } = await import('~~/server/services/platform-endpoint-publication-service')
-const { discoverPlatformService } = await import('~~/server/services/platform-service-discovery-service')
+const { refreshPlatformRevision } = await import('~~/server/services/routing-revision-service')
 const { acceptServiceTargetResults, loadServiceControlContext } = await import('~~/server/services/platform-service-control-context')
+const { default: discoverHandler } = await import('~~/server/api/admin/v1/upstreams/[id]/discover.post')
 let client: PGlite
 let database: ReturnType<typeof drizzle<typeof schema>>
 const schemaHash = 'a'.repeat(64)
@@ -73,6 +81,49 @@ function response(revision = 1): Awaited<ReturnType<typeof serviceControlClient.
 }
 
 describe('configuration result acceptance', () => {
+  it('preserves discovered contract and verified Token when publication fails, then retries through the control interface', async () => {
+    const upstream = await configuredUpstream()
+    const original = await loadServiceControlContext(upstream.id)
+    const definition = { schemaVersion: 1 as const, groups: [] }
+    const document = { openapi: '3.1.0', info: { title: 'Workflow', version: '2' }, paths: {} }
+    const fingerprint = (value: unknown) => createHash('sha256').update(canonicalJson(value)).digest('hex')
+    const description = { ...original.connection.serviceDescription!, version: '2', openapiSha256: fingerprint(document),
+      configuration: { ...original.connection.serviceDescription!.configuration, schemaSha256: fingerprint(definition) } }
+    const state = { ...response().data, schemaSha256: fingerprint(definition) }
+    await platformUpstreamService.updateServiceToken(upstream.id, 'replacement-service-token-with-at-least-32-characters')
+    const getDescription = vi.spyOn(serviceControlClient, 'getDescription').mockResolvedValue({
+      data: description, headers: new Headers({ 'x-openapi-sha256': description.openapiSha256 }), url: 'http://127.0.0.1:8080/description'
+    })
+    vi.spyOn(serviceControlClient, 'getConfigurationDefinition').mockResolvedValue({
+      data: definition, headers: new Headers({ 'x-configuration-schema-sha256': fingerprint(definition) }), url: 'http://127.0.0.1:8080/schema'
+    })
+    vi.spyOn(serviceControlClient, 'getConfigurationState').mockResolvedValue({ data: state, headers: new Headers(), url: 'http://127.0.0.1:8080/config' })
+    vi.spyOn(serviceControlClient, 'getOpenAPI').mockResolvedValue({ data: document, headers: new Headers({ 'x-openapi-sha256': description.openapiSha256 }), url: 'http://127.0.0.1:8080/openapi.json' })
+    vi.spyOn(availability, 'resolveServiceAvailability').mockResolvedValue({ overall: 'online', targets: new Map() })
+    vi.mocked(refreshPlatformRevision).mockRejectedValueOnce(new Error('publication unavailable'))
+    const first = discoverPlatformService(upstream.id)
+    expect(discoverPlatformService(upstream.id)).toBe(first)
+    context.upstreamId = upstream.id
+    const audited = discoverHandler({} as H3Event)
+    const result = await first
+    expect(await audited).toEqual(result)
+    expect(context.audit).toHaveBeenCalledExactlyOnceWith(expect.anything(), expect.objectContaining({
+      action: 'admin.platform.service.discover', resourceId: upstream.id,
+      detail: expect.objectContaining({ routingStatus: 'pending', routingRevision: null, openapiSha256: description.openapiSha256 })
+    }))
+    expect(result).toMatchObject({ routingStatus: 'pending', routingRevision: null,
+      connection: { serviceVersion: '2', openapiSha256: description.openapiSha256, lastDiscoveryError: null } })
+    const saved = await loadServiceControlContext(upstream.id)
+    expect(saved.connection.pendingServiceTokenCiphertext).toBeNull()
+    expect(saved.connection.serviceTokenCiphertext).not.toBe(original.connection.serviceTokenCiphertext)
+    expect(saved.service.openapiDocumentId).toBeTruthy()
+    expect(getDescription).toHaveBeenCalledOnce()
+    const retry = await discoverPlatformService(upstream.id)
+    expect(retry.routingStatus).toBe('applied')
+    expect((await loadServiceControlContext(upstream.id)).service.openapiDocumentId).toBe(saved.service.openapiDocumentId)
+    expect(getDescription).toHaveBeenCalledTimes(2)
+  })
+
   it('returns normalized saved values without exposing secret plaintext', async () => {
     const upstream = await configuredUpstream()
     await database.update(schema.upstreamServiceConnections).set({

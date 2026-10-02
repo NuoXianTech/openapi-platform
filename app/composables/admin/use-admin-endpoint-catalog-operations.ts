@@ -6,7 +6,7 @@ import type {
   PlatformEndpointPublicationPatch,
   PlatformEndpointPublicationResult
 } from '#shared/types/platform'
-import type { ServiceConfigurationView } from '#shared/types/service-control'
+import type { ServiceDiscoveryOutcome } from '#shared/types/service-control'
 import { parseFetchError } from '~/utils/client-error'
 import type { PrivateReadResult } from '~/composables/dashboard/use-private-resource'
 
@@ -165,10 +165,14 @@ export function useAdminEndpointCatalogOperations(options: {
     if (!quiet) catalogFeedback.value = null
     discoveringServices.value.add(upstreamId)
     try {
-      const result = await $fetch<ServiceConfigurationView>(`/api/admin/v1/upstreams/${upstreamId}/discover`, { method: 'POST' })
+      const result = await $fetch<ServiceDiscoveryOutcome>(`/api/admin/v1/upstreams/${upstreamId}/discover`, { method: 'POST' })
       if (disposed.value) return false
       if (!quiet) {
-        catalogFeedback.value = {
+        catalogFeedback.value = result.routingStatus === 'pending' ? {
+          message: t('admin.apis.routing.serviceControl.discoveryRoutingPending'),
+          description: t('admin.apis.routing.serviceControl.discoveryRoutingRetry'),
+          color: 'warning'
+        } : {
           message: result.connection.lastDiscoveryError
             ? t('admin.apis.routing.serviceControl.discoveryPartial')
             : t('admin.apis.routing.catalog.feedback.serviceDiscovered'),
@@ -176,7 +180,7 @@ export function useAdminEndpointCatalogOperations(options: {
         }
         await refreshAfterPublication()
       }
-      return result.connection.lastDiscoveryError ? 'partial' as const : true
+      return result.connection.lastDiscoveryError || result.routingStatus === 'pending' ? 'partial' as const : true
     } catch (error: unknown) {
       if (disposed.value) return false
       if (!quiet) {

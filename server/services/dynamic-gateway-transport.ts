@@ -1,10 +1,13 @@
+import { getRequestURL, sendProxy, type H3Event } from 'h3'
+import { gatewayCallService } from '~~/server/services/dynamic-gateway-call-service'
 import {
+  findBillingPersistenceError,
   findGatewayExecutionError,
   GatewayExecutionError
 } from '~~/server/errors/gateway-error'
-import { limitGatewayUpstreamResponse } from '~~/server/services/dynamic-gateway-stream-service'
+import { createGatewayRequestBody, limitGatewayUpstreamResponse } from '~~/server/services/dynamic-gateway-stream-service'
 import type { ResolvedDynamicRoute } from '~~/server/services/routing-runtime-service'
-import { normalizeRoutePath } from '~~/server/utils/route-pattern'
+import { normalizeRoutePath, renderUpstreamPath } from '~~/server/utils/route-pattern'
 import { gatewayTargetHealth } from '~~/server/services/gateway-target-health'
 import { fetchUpstreamTarget } from '~~/server/utils/upstream-target-fetch'
 
@@ -69,7 +72,7 @@ export function orderedGatewayTargets(
   ]
 }
 
-export async function orderedGatewayTargetsAsync(match: ResolvedDynamicRoute): Promise<GatewayTarget[]> {
+async function orderedGatewayTargetsAsync(match: ResolvedDynamicRoute): Promise<GatewayTarget[]> {
   await gatewayTargetHealth.hydrate(match.upstream.id, match.upstream.targets)
   return orderedGatewayTargets(match)
 }
@@ -154,6 +157,7 @@ export function createGatewayProxyFetch(input: {
     let lastErrorWasAttemptTimeout = false
 
     for (let index = 0; index < targets.length; index += 1) {
+      overallSignal?.throwIfAborted()
       const target = targets[index]!
       const targetUrl = buildGatewayTargetUrl(
         target.baseUrl,
@@ -204,12 +208,10 @@ export function createGatewayProxyFetch(input: {
           await response.body?.cancel().catch(() => undefined)
           continue
         }
-        return limitGatewayUpstreamResponse(
-          response,
-          input.maximumResponseBytes,
-          input.onResponseBytes,
-          allowCaching
+        const limited = await limitGatewayUpstreamResponse(
+          response, input.maximumResponseBytes, input.onResponseBytes, allowCaching
         )
+        return releaseAfterBody(limited, releaseAttempt)
       } catch (error) {
         releaseAttempt()
         if (findGatewayExecutionError(error)) throw error
@@ -230,5 +232,113 @@ export function createGatewayProxyFetch(input: {
       )
     }
     throw lastError ?? new Error('upstream target selection failed')
+  }
+}
+
+// The final attempt remains connected to the overall abort signal until its
+// body closes, errors or is cancelled, then releases the listener exactly once.
+function releaseAfterBody(response: Response, release: () => void): Response {
+  if (!response.body) {
+    release()
+    return response
+  }
+  const reader = response.body.getReader()
+  let released = false
+  const finish = () => {
+    if (released) return
+    released = true
+    release()
+    reader.releaseLock()
+  }
+  return new Response(new ReadableStream<Uint8Array>({
+    async pull(controller) {
+      try {
+        const { done, value } = await reader.read()
+        if (done) { finish(); controller.close() }
+        else controller.enqueue(value)
+      } catch (error) {
+        finish()
+        controller.error(error)
+      }
+    },
+    async cancel(reason) {
+      try { await reader.cancel(reason) } finally { finish() }
+    }
+  }, { highWaterMark: 0 }), {
+    status: response.status, statusText: response.statusText, headers: response.headers
+  })
+}
+
+/** Own one transfer through the last response byte, including all attempts. */
+export async function forwardGatewayRequest(
+  event: H3Event,
+  match: ResolvedDynamicRoute,
+  headers: Headers,
+  onResponse: (response: Response) => void
+): Promise<unknown> {
+  const controller = new AbortController()
+  let abortError: GatewayExecutionError | null = null
+  let timeout: ReturnType<typeof setTimeout> | undefined
+  let targetId: string | null = null
+  let proxyStarted = false
+  const abort = (error: GatewayExecutionError) => {
+    if (controller.signal.aborted) return
+    abortError = error
+    controller.abort(error)
+  }
+  const disconnect = () => abort(new GatewayExecutionError(499, 'CLIENT_DISCONNECTED', '客户端已断开连接'))
+  const close = () => { if (!event.node.res.writableEnded) disconnect() }
+  event.node.req.once('aborted', disconnect)
+  event.node.res.once('close', close)
+  try {
+    if (event.node.req.aborted || event.node.res.destroyed) disconnect()
+    controller.signal.throwIfAborted()
+    const targets = await orderedGatewayTargetsAsync(match)
+    controller.signal.throwIfAborted()
+    const requestUrl = getRequestURL(event)
+    const upstreamPath = renderUpstreamPath(match.route.upstreamPathTemplate, match.params)
+    const url = buildGatewayTargetUrl(targets[0]!.baseUrl, upstreamPath, requestUrl.search)
+    targetId = targets[0]!.id
+    timeout = setTimeout(() => abort(new GatewayExecutionError(504, 'UPSTREAM_TIMEOUT', '上游服务响应超时')), match.route.timeoutMs)
+    const body = createGatewayRequestBody(event, match.route.maxRequestBytes, requestBytes => {
+      gatewayCallService.observe(event, { requestBytes })
+    })
+    const fetch = createGatewayProxyFetch({
+      match, targets, upstreamPath, search: requestUrl.search,
+      maximumResponseBytes: match.route.maxResponseBytes,
+      onTarget: target => {
+        targetId = target.id
+        gatewayCallService.observe(event, { target })
+      },
+      onResponseBytes: responseBytes => gatewayCallService.observe(event, { responseBytes })
+    })
+    proxyStarted = true
+    return await sendProxy(event, url.toString(), {
+      fetch: async (request, init) => gatewayCallService.prepareResponse(event, await fetch(request, init), controller.signal),
+      sendStream: true,
+      onResponse: (_event, response) => onResponse(response),
+      fetchOptions: {
+        method: event.method, headers, body, duplex: body ? 'half' : undefined,
+        redirect: 'manual', signal: controller.signal
+      }
+    })
+  } catch (error) {
+    if (findBillingPersistenceError(error)) throw error
+    if (abortError) throw abortError
+    if (findGatewayExecutionError(error)) throw error
+    console.error('[gateway] upstream request failed', {
+      routeId: match.route.id, target: targetId,
+      error: error instanceof Error ? error.message : String(error)
+    })
+    throw proxyStarted
+      ? new GatewayExecutionError(502, 'UPSTREAM_UNAVAILABLE', '上游服务暂时不可用')
+      : new GatewayExecutionError(503, 'GATEWAY_UNAVAILABLE', '网关服务暂不可用，请稍后再试')
+  } finally {
+    if (timeout) clearTimeout(timeout)
+    event.node.req.off('aborted', disconnect)
+    event.node.res.off('close', close)
+    // A failed delivery/preparation may leave a body unread. Terminate its
+    // transport even when no client-disconnect event was emitted.
+    controller.abort()
   }
 }

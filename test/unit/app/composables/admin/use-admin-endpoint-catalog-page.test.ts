@@ -82,6 +82,19 @@ afterEach(() => {
 })
 
 describe('endpoint selection and feedback', () => {
+  it('reports pending discovery publication in both individual and batch feedback', async () => {
+    const { page, service } = setup([])
+    fetchMock.mockResolvedValue({ connection: { lastDiscoveryError: null }, routingStatus: 'pending', routingRevision: null })
+    expect(await page.discoverService(service.upstream.id)).toBe('partial')
+    expect(page.catalogFeedback.value).toMatchObject({
+      message: 'admin.apis.routing.serviceControl.discoveryRoutingPending', color: 'warning'
+    })
+    await page.discoverAllServices()
+    expect(page.catalogFeedback.value).toMatchObject({
+      message: 'admin.apis.routing.catalog.feedback.discoveryCompleted:{"succeeded":0,"partial":1,"failed":0}', color: 'warning'
+    })
+  })
+
   it('stops undispatched batch writes when the page scope closes', async () => {
     const { page } = setup(['one', 'two', 'three'].map(key => endpoint(key, 'available')))
     page.selectAllEndpoints(true)

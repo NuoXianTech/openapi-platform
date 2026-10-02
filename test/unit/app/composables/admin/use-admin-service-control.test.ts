@@ -76,6 +76,18 @@ afterEach(() => {
 })
 
 describe('Service control', () => {
+  it('accepts discovered state and shows publication pending even when the follow-up read fails', async () => {
+    const { control, service } = setup()
+    const result = { ...view(), routingStatus: 'pending', routingRevision: null }
+    result.connection.serviceVersion = '2.0'
+    fetchMock.mockResolvedValueOnce(result)
+    service.refresh.mockResolvedValueOnce({ status: 'error', error: new Error('read unavailable') })
+    expect(await control.discover()).toBe(true)
+    expect(control.view.value?.connection.serviceVersion).toBe('2.0')
+    expect(control.pageFeedback.value).toMatchObject({ color: 'warning', message: 'admin.apis.routing.serviceControl.discoveryRoutingPending' })
+    expect(control.loadError.value).toBeTruthy()
+  })
+
   it('retains the saved revision and values when publication is pending and refresh fails', async () => {
     const { control, service } = setup()
     fetchMock.mockResolvedValueOnce({ ...outcome, routingStatus: 'pending', routingRevision: null })
