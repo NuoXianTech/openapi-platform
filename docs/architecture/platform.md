@@ -227,7 +227,9 @@ Target 支持内网地址、容器名、HTTP 与 HTTPS，公网 HTTP 会被拒�
 重放。业务配置仍始终下发到全部启用 Target，与业务流量选择相互独立。
 
 Target 更新和删除通过 `committed-transaction.ts` 将健康状态清除登记到最外层事务。
-独立变更等待自身提交，带发布的变更等待 Target 与 Routing Revision 一并提交；
+管理调用与行为测试使用 `platform-upstream-service.ts` 的完整变更入口；底层写入、发布判断
+和 Target 删除保护均为私有步骤，不再向调用方提供可选事务或跳过发布保护的写入方式。
+无需发布的变更等待自身提交，带发布的变更等待 Target 与 Routing Revision 一并提交；
 提交失败不清除本地或 Redis 健康状态。登记提交后动作的内部写入必须使用
 `withCommittedTransaction` 所拥有的事务，不能把普通外部事务当作已经提交。
 

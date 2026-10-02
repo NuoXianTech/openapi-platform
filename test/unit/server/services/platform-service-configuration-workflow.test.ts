@@ -23,6 +23,7 @@ vi.mock('~~/server/services/routing-revision-service', async (original) => ({
   refreshPlatformRevision: vi.fn(async () => ({ revision: { id: 'published', sequence: 1 } }))
 }))
 const { platformUpstreamService } = await import('~~/server/services/platform-upstream-service')
+const { platformRuntimeService } = await import('~~/server/services/platform-runtime-service')
 const { platformServiceControlService } = await import('~~/server/services/platform-service-control-service')
 const { synchronizeConfiguration: synchronizePlatformServiceConfiguration, updateConfiguration: updatePlatformServiceConfiguration, discover: discoverPlatformService } = platformServiceControlService
 const { serviceControlClient } = await import('~~/server/utils/service-control-client')
@@ -50,6 +51,7 @@ beforeEach(async () => {
   vi.clearAllMocks()
   vi.stubGlobal('useRuntimeConfig', () => ({ apiKeySecret: '0123456789abcdef0123456789abcdef' }))
   await client.exec('TRUNCATE TABLE platform_runtime, routing_revisions, api_products, upstream_services CASCADE;')
+  await platformRuntimeService.ensureDefault()
 })
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals() })
 afterAll(async () => client.close())
@@ -175,8 +177,8 @@ describe('configuration result acceptance', () => {
 
   it.each(['discovery', 'configuration'] as const)('accepts mixed %s observations with one timestamp and preserves failed Target facts', async (operation) => {
     const upstream = await configuredUpstream()
-    const { target: drifted } = await platformUpstreamService.createTarget(upstream.id, { baseUrl: 'http://127.0.0.1:9090', weight: 1, enabled: true })
-    const { target: failed } = await platformUpstreamService.createTarget(upstream.id, { baseUrl: 'http://127.0.0.1:9091', weight: 1, enabled: true })
+    const { target: drifted } = await platformUpstreamService.createTargetAndPublish(upstream.id, { baseUrl: 'http://127.0.0.1:9090', weight: 1, enabled: true }, null)
+    const { target: failed } = await platformUpstreamService.createTargetAndPublish(upstream.id, { baseUrl: 'http://127.0.0.1:9091', weight: 1, enabled: true }, null)
     await database.update(schema.upstreamTargets).set({
       configurationRevision: 1, configurationHash: hash, configurationState: response().data
     }).where(eq(schema.upstreamTargets.id, failed.id))
@@ -244,7 +246,7 @@ describe('configuration result acceptance', () => {
     const pending = discoverPlatformService(upstream.id)
     const rejected = expect(pending).rejects.toMatchObject({ data: { code: 'SERVICE_DISCOVERY_FAILED' } })
     await started.promise
-    if (changed) await platformUpstreamService.updateTarget(upstream.targets[0]!.id, { baseUrl: 'http://127.0.0.1:9090' })
+    if (changed) await platformUpstreamService.updateTargetAndPublish(upstream.targets[0]!.id, { baseUrl: 'http://127.0.0.1:9090' }, null)
     resume.resolve(undefined)
     await rejected
     const [target] = await database.select().from(schema.upstreamTargets).where(eq(schema.upstreamTargets.id, upstream.targets[0]!.id))
@@ -261,15 +263,15 @@ describe('configuration result acceptance', () => {
     const pending = synchronizePlatformServiceConfiguration(upstream.id)
     const rejected = expect(pending).rejects.toMatchObject({ data: { code: 'SERVICE_CONFIGURATION_REVISION_CONFLICT' } })
     await started.promise
-    if (change === 'address') await platformUpstreamService.updateTarget(target.id, { baseUrl: 'http://127.0.0.1:9090' })
+    if (change === 'address') await platformUpstreamService.updateTargetAndPublish(target.id, { baseUrl: 'http://127.0.0.1:9090' }, null)
     if (change === 'reenable') {
       vi.spyOn(Date, 'now').mockReturnValue(0)
-      await platformUpstreamService.updateTarget(target.id, { enabled: false })
-      await platformUpstreamService.updateTarget(target.id, { enabled: true })
+      await platformUpstreamService.updateTargetAndPublish(target.id, { enabled: false }, null)
+      await platformUpstreamService.updateTargetAndPublish(target.id, { enabled: true }, null)
     }
     if (change === 'token') await platformUpstreamService.updateServiceToken(upstream.id, 'replacement-test-token-with-at-least-32-characters')
     if (change === 'configuration') await database.update(schema.upstreamServiceConnections).set({ configurationRevision: 2 }).where(eq(schema.upstreamServiceConnections.upstreamServiceId, upstream.id))
-    if (change === 'membership') await platformUpstreamService.createTarget(upstream.id, { baseUrl: 'http://127.0.0.1:9090', weight: 1, enabled: true })
+    if (change === 'membership') await platformUpstreamService.createTargetAndPublish(upstream.id, { baseUrl: 'http://127.0.0.1:9090', weight: 1, enabled: true }, null)
     ack.resolve(response())
     await rejected
     const [current] = await database.select().from(schema.upstreamTargets).where(eq(schema.upstreamTargets.id, target.id))
@@ -288,7 +290,7 @@ describe('configuration result acceptance', () => {
 
   it('publishes successful Targets when another unchanged Target fails', async () => {
     const upstream = await configuredUpstream()
-    await platformUpstreamService.createTarget(upstream.id, { baseUrl: 'http://127.0.0.1:9090', weight: 1, enabled: true })
+    await platformUpstreamService.createTargetAndPublish(upstream.id, { baseUrl: 'http://127.0.0.1:9090', weight: 1, enabled: true }, null)
     vi.spyOn(serviceControlClient, 'updateConfiguration').mockImplementation(async (url) => {
       if (url.includes('9090')) throw new Error('offline')
       return response()

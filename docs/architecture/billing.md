@@ -18,7 +18,7 @@
 4. 付费成功响应先按实际字节累计校验 `maxResponseBytes`，在该上限内完整缓冲，再把预留改为 `pending`，最后才向客户端发送响应头和正文；免费响应继续流式转发。失败响应则原子恢复 API Key 配额并删除预留。成功结果无法持久化时返回 `503 BILLING_UNAVAILABLE`，避免成功调用逃逸扣费。付费响应的首字节延迟包含完整上游接收和持久化耗时，单个响应的缓冲量受 Route 大小上限约束。
 5. `server/plugins/api-call-stats.ts` 在响应发出后记录 `api_calls`、更新 `api_call_stats`，关联调用日志并尝试立即结算。
 6. `creditService.finalizeReservation` 在同一事务内扣减余额、写入 `credit_transactions`、更新 `api_calls.credits_cost` 并删除预留。事务按 `creditReservationId` 幂等；即使进程在调用日志写入前退出，后台任务也能先完成扣费，再安全补挂调用日志。
-7. `server/plugins/credit-reservations-retry.ts` 每 30 秒在 Redis lease 下扫描到期的 `pending` 预留并退避重试；达到上限后进入 `dead_letter`。未配置 Redis 的单实例使用进程内 lease 回退。
+7. `server/plugins/credit-reservations-retry.ts` 每 30 秒调用 `creditService.recoverReservations`，只负责定时器启停。积分模块在同一轮恢复中管理 lease、过期释放、到期扫描、逐条结算与失败退避，每批最多结算 20 条；达到重试上限后进入 `dead_letter`。未配置 Redis 的单实例使用进程内 lease 回退，租约被占用或必需的 Redis 不可用时不执行恢复写入。
 8. 后台任务会释放超过 10 分钟的 `active` 预留并恢复 API Key 配额。`pending` 和 `dead_letter` 预留不会被自动释放。
 
 ## 可靠性规则
@@ -36,6 +36,12 @@
 - 配置 `NUXT_REDIS_URL` 后，公开 API 与身份防刷使用共享 Redis 原子计数，多实例可获得一致的限流结果。
 - 多实例生产必须配置 `NUXT_REDIS_URL`。配置 Redis 后不可用时限流链路 fail-closed，避免实例退回各自内存后绕过限制。
 - Route 的秒、分、时、日窗口由 `rateLimitPerSecond/Minute/Hour/Day` 控制；API Key 自身配额不等同于用户余额或 `totalCalls`。
+
+Route 限流由 `server/utils/rate-limit/index.ts` 的 `consumeRateLimitWindows` 完整执行。
+Gateway 只提供调用主体和窗口配置、呈现允许或拒绝结果；存储选择、忽略未启用窗口、
+单窗口与多窗口执行、计数键兼容及 Redis 错误处理均留在限流模块。
+Redis 多窗口先检查全部窗口，全部允许才原子计数；内存仍顺序消费，遇到拒绝时停止，
+先前窗口的计数不撤销。Redis 响应丢失或格式异常可能发生在计数之后，不能换路径再次消费。
 
 ## 人工处置
 

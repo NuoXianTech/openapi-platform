@@ -161,10 +161,10 @@ describe('Platform upstream target state', () => {
     expect(reset).toHaveBeenCalledExactlyOnceWith(target.upstreamServiceId, target.id)
   })
 
-  it('also clears health for a standalone Target update after its transaction commits', async () => {
+  it('clears health after an address update commits without publishing an unverified Target', async () => {
     const target = await createConfiguredTarget()
     const reset = vi.spyOn(gatewayTargetHealth, 'reset')
-    await platformUpstreamService.updateTarget(target.id, { baseUrl: 'http://127.0.0.1:9090' })
+    await platformUpstreamService.updateTargetAndPublish(target.id, { baseUrl: 'http://127.0.0.1:9090' }, null)
     expect(reset).toHaveBeenCalledExactlyOnceWith(target.upstreamServiceId, target.id)
   })
 
@@ -314,23 +314,23 @@ describe('Platform upstream target state', () => {
       loadBalancing: 'round_robin',
       targets: [{ baseUrl: 'http://127.0.0.1:8080', weight: 1 }]
     })
-    const created = await platformUpstreamService.createTarget(
+    const created = await platformUpstreamService.createTargetAndPublish(
       upstream.id,
       {
         baseUrl: 'http://127.0.0.1:8081',
         weight: 1,
         enabled: true
-      }
+      }, null
     )
 
-    expect(created.publishRouting).toBe(false)
+    expect(created.revision).toBeNull()
   })
 
   it('resets Service state when a Target address changes', async () => {
     const target = await createConfiguredTarget()
-    const updated = await platformUpstreamService.updateTarget(target.id, {
+    const updated = await platformUpstreamService.updateTargetAndPublish(target.id, {
       baseUrl: 'http://127.0.0.1:8081'
-    })
+    }, null)
 
     expect(updated.target).toMatchObject({
       baseUrl: 'http://127.0.0.1:8081/',
@@ -345,10 +345,10 @@ describe('Platform upstream target state', () => {
 
   it('resets Service state when a disabled Target is enabled again', async () => {
     const target = await createConfiguredTarget()
-    await platformUpstreamService.updateTarget(target.id, { enabled: false })
-    const updated = await platformUpstreamService.updateTarget(target.id, {
+    await platformUpstreamService.updateTargetAndPublish(target.id, { enabled: false }, null)
+    const updated = await platformUpstreamService.updateTargetAndPublish(target.id, {
       enabled: true
-    })
+    }, null)
 
     expect(updated.target).toMatchObject({
       enabled: true,
@@ -363,19 +363,19 @@ describe('Platform upstream target state', () => {
 
   it('keeps a ready Target online while another enabled Target is unverified', async () => {
     const readyTarget = await createConfiguredTarget()
-    await platformUpstreamService.createTarget(
+    await platformUpstreamService.createTargetAndPublish(
       readyTarget.upstreamServiceId,
       {
         baseUrl: 'http://127.0.0.1:8081',
         weight: 1,
         enabled: true
-      }
+      }, null
     )
     await createActiveRoute(readyTarget.upstreamServiceId)
 
-    await expect(platformUpstreamService.updateTarget(readyTarget.id, {
+    await expect(platformUpstreamService.updateTargetAndPublish(readyTarget.id, {
       enabled: false
-    })).rejects.toMatchObject({
+    }, null)).rejects.toMatchObject({
       statusCode: 409,
       data: { code: 'UPSTREAM_LAST_TARGET_REQUIRED' }
     })
@@ -412,7 +412,7 @@ describe('Platform upstream target state', () => {
     await createActiveRoute(upstream.id)
 
     const results = await Promise.allSettled(upstream.targets.map(target => (
-      platformUpstreamService.updateTarget(target.id, { enabled: false })
+      platformUpstreamService.updateTargetAndPublish(target.id, { enabled: false }, null)
     )))
 
     expect(results.filter(result => result.status === 'fulfilled')).toHaveLength(1)

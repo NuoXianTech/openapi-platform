@@ -9,7 +9,7 @@ export interface RateLimitResult {
 }
 
 export interface RateLimiter {
-  readonly name: 'memory' | 'redis' | 'redis-atomic-multi-window'
+  readonly name: 'memory' | 'redis'
   consume(key: string, limit: number, window: RateLimitWindow): Promise<RateLimitResult>
 }
 

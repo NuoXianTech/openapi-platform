@@ -99,6 +99,159 @@ async function assertCanDisableLastTarget(
   })
 }
 
+async function updateUpstream(tx: DatabaseTransaction, id: string, input: UpdateUpstreamInput) {
+  try {
+    const updated = firstRow(await tx.update(upstreamServices).set({
+      ...input,
+      updatedAt: new Date()
+    }).where(and(eq(upstreamServices.id, id), isNull(upstreamServices.deletedAt))).returning())
+    if (!updated) {
+      throw createApplicationError({ statusCode: 404, message: 'upstream not found', data: { code: 'UPSTREAM_NOT_FOUND' } })
+    }
+    return updated
+  } catch (error) {
+    if (getSqlState(error) === '23505') {
+      throw createApplicationError({ statusCode: 409, message: 'upstream slug already exists', data: { code: 'UPSTREAM_CONFLICT' } })
+    }
+    throw error
+  }
+}
+
+async function removeUpstream(tx: DatabaseTransaction, id: string) {
+  const service = await platformUpstreamService.findById(id, { transaction: tx })
+  if (!service || service.deletedAt) {
+    throw createApplicationError({ statusCode: 404, message: 'upstream not found', data: { code: 'UPSTREAM_NOT_FOUND' } })
+  }
+  if (await routingReferenceService.hasUpstream(id, tx)) {
+    throw createApplicationError({
+      statusCode: 409,
+      message: 'upstream is still referenced by an active routing revision',
+      data: { code: 'UPSTREAM_STILL_PUBLISHED' }
+    })
+  }
+  const routeCount = firstRow(await tx.select({ value: count() }).from(apiRoutes)
+    .where(and(eq(apiRoutes.upstreamServiceId, id), isNull(apiRoutes.deletedAt))))
+  if (Number(routeCount?.value ?? 0) > 0) {
+    throw createApplicationError({
+      statusCode: 409,
+      message: 'remove every route before deleting the upstream',
+      data: { code: 'UPSTREAM_HAS_ROUTES' }
+    })
+  }
+  const now = new Date()
+  const removed = firstRow(await tx.update(upstreamServices).set({
+    status: 'disabled',
+    deletedAt: now,
+    updatedAt: now
+  }).where(and(eq(upstreamServices.id, id), isNull(upstreamServices.deletedAt))).returning())
+  if (!removed) {
+    throw createApplicationError({ statusCode: 404, message: 'upstream not found', data: { code: 'UPSTREAM_NOT_FOUND' } })
+  }
+  return removed
+}
+
+async function createTarget(tx: DatabaseTransaction, upstreamServiceId: string, input: CreateTargetInput) {
+  const service = await platformUpstreamService.findById(
+    upstreamServiceId,
+    { transaction: tx }
+  )
+  if (!service || service.deletedAt) {
+    throw createApplicationError({ statusCode: 404, message: 'upstream not found', data: { code: 'UPSTREAM_NOT_FOUND' } })
+  }
+  const url = normalizeUpstreamTargetUrl(input.baseUrl)
+  try {
+    const target = firstRow(await tx.insert(upstreamTargets).values({
+      upstreamServiceId,
+      baseUrl: url.toString(),
+      weight: input.weight,
+      enabled: input.enabled
+    }).returning())
+    if (!target) throw new Error('target insert returned no row')
+    return target
+  } catch (error) {
+    if (getSqlState(error) === '23505') {
+      throw createApplicationError({ statusCode: 409, message: 'target URL already exists for this upstream', data: { code: 'TARGET_CONFLICT' } })
+    }
+    throw error
+  }
+}
+
+async function updateTarget(tx: DatabaseTransaction, id: string, input: UpdateTargetInput) {
+  try {
+    const binding = await findTargetBindingForUpdate(tx, id)
+    if (!binding) {
+      throw createApplicationError({ statusCode: 404, message: 'target not found', data: { code: 'TARGET_NOT_FOUND' } })
+    }
+    if (binding.target.enabled && input.enabled === false) {
+      await assertCanDisableLastTarget(
+        tx,
+        binding.service.id,
+        binding.target.id
+      )
+    }
+    const baseUrl = input.baseUrl === undefined
+      ? binding.target.baseUrl
+      : normalizeUpstreamTargetUrl(input.baseUrl).toString()
+    const resetServiceState = baseUrl !== binding.target.baseUrl
+      || (!binding.target.enabled && input.enabled === true)
+    const target = firstRow(await tx.update(upstreamTargets).set({
+      ...input,
+      baseUrl,
+      ...(resetServiceState
+        ? {
+            configurationRevision: null,
+            configurationHash: null,
+            configurationStatus: 'unknown',
+            configurationState: null,
+            lastConfigurationSyncAt: null,
+            lastError: null
+          }
+        : {}),
+      updatedAt: new Date(Math.max(Date.now(), binding.target.updatedAt.getTime() + 1))
+    }).where(eq(upstreamTargets.id, id)).returning())
+    if (!target) throw new Error('target update returned no row')
+    if (input.baseUrl !== undefined || input.enabled !== undefined) {
+      afterCommit(tx, () => gatewayTargetHealth.reset(target.upstreamServiceId, target.id))
+    }
+    const disablingPublishedTarget = binding.target.enabled
+      && target.enabled === false
+    const updatingPublishedTarget = !resetServiceState
+      && target.enabled
+      && input.weight !== undefined
+      && input.weight !== binding.target.weight
+    return {
+      target,
+      publishRouting: disablingPublishedTarget
+        || updatingPublishedTarget
+    }
+  } catch (error) {
+    if (getSqlState(error) === '23505') {
+      throw createApplicationError({ statusCode: 409, message: 'target URL already exists for this upstream', data: { code: 'TARGET_CONFLICT' } })
+    }
+    throw error
+  }
+}
+
+// Only the complete mutation calls this step, in the transaction that also
+// publishes the removal and invalidates Target health after commit.
+async function removeTarget(tx: DatabaseTransaction, id: string) {
+  const binding = await findTargetBindingForUpdate(tx, id)
+  if (!binding) {
+    throw createApplicationError({ statusCode: 404, message: 'target not found', data: { code: 'TARGET_NOT_FOUND' } })
+  }
+  const published = await routingReferenceService.hasTarget(id, tx)
+  if (binding.target.enabled || published) {
+    await assertCanDisableLastTarget(
+      tx,
+      binding.service.id,
+      binding.target.id
+    )
+  }
+  await tx.delete(upstreamTargets).where(eq(upstreamTargets.id, id))
+  afterCommit(tx, () => gatewayTargetHealth.reset(binding.target.upstreamServiceId, binding.target.id))
+  return binding.target
+}
+
 export const platformUpstreamService = {
   async list(
     options: { checkAvailability?: boolean, ids?: string[] } = {}
@@ -231,203 +384,6 @@ export const platformUpstreamService = {
     return row?.service
   },
 
-  async update(
-    id: string,
-    input: UpdateUpstreamInput,
-    options: { transaction?: DatabaseTransaction } = {}
-  ) {
-    const executor = options.transaction ?? db
-    try {
-      const updated = firstRow(await executor.update(upstreamServices).set({
-        ...input,
-        updatedAt: new Date()
-      }).where(and(eq(upstreamServices.id, id), isNull(upstreamServices.deletedAt))).returning())
-      if (!updated) {
-        throw createApplicationError({ statusCode: 404, message: 'upstream not found', data: { code: 'UPSTREAM_NOT_FOUND' } })
-      }
-      return updated
-    } catch (error) {
-      if (getSqlState(error) === '23505') {
-        throw createApplicationError({ statusCode: 409, message: 'upstream slug already exists', data: { code: 'UPSTREAM_CONFLICT' } })
-      }
-      throw error
-    }
-  },
-
-  async remove(
-    id: string,
-    options: { transaction?: DatabaseTransaction } = {}
-  ) {
-    const executor = options.transaction ?? db
-    const service = await platformUpstreamService.findById(id, options)
-    if (!service || service.deletedAt) {
-      throw createApplicationError({ statusCode: 404, message: 'upstream not found', data: { code: 'UPSTREAM_NOT_FOUND' } })
-    }
-    if (await routingReferenceService.hasUpstream(id, options.transaction)) {
-      throw createApplicationError({
-        statusCode: 409,
-        message: 'upstream is still referenced by an active routing revision',
-        data: { code: 'UPSTREAM_STILL_PUBLISHED' }
-      })
-    }
-    const routeCount = firstRow(await executor.select({ value: count() }).from(apiRoutes)
-      .where(and(eq(apiRoutes.upstreamServiceId, id), isNull(apiRoutes.deletedAt))))
-    if (Number(routeCount?.value ?? 0) > 0) {
-      throw createApplicationError({
-        statusCode: 409,
-        message: 'remove every route before deleting the upstream',
-        data: { code: 'UPSTREAM_HAS_ROUTES' }
-      })
-    }
-    const now = new Date()
-    const removed = firstRow(await executor.update(upstreamServices).set({
-      status: 'disabled',
-      deletedAt: now,
-      updatedAt: now
-    }).where(and(eq(upstreamServices.id, id), isNull(upstreamServices.deletedAt))).returning())
-    if (!removed) {
-      throw createApplicationError({ statusCode: 404, message: 'upstream not found', data: { code: 'UPSTREAM_NOT_FOUND' } })
-    }
-    return removed
-  },
-
-  async createTarget(
-    upstreamServiceId: string,
-    input: CreateTargetInput,
-    options: { transaction?: DatabaseTransaction } = {}
-  ) {
-    const executor = options.transaction ?? db
-    const service = await platformUpstreamService.findById(
-      upstreamServiceId,
-      options
-    )
-    if (!service || service.deletedAt) {
-      throw createApplicationError({ statusCode: 404, message: 'upstream not found', data: { code: 'UPSTREAM_NOT_FOUND' } })
-    }
-    const url = normalizeUpstreamTargetUrl(input.baseUrl)
-    try {
-      const target = firstRow(await executor.insert(upstreamTargets).values({
-        upstreamServiceId,
-        baseUrl: url.toString(),
-        weight: input.weight,
-        enabled: input.enabled
-      }).returning())
-      if (!target) throw new Error('target insert returned no row')
-      return {
-        target,
-        publishRouting: false
-      }
-    } catch (error) {
-      if (getSqlState(error) === '23505') {
-        throw createApplicationError({ statusCode: 409, message: 'target URL already exists for this upstream', data: { code: 'TARGET_CONFLICT' } })
-      }
-      throw error
-    }
-  },
-
-  async updateTarget(
-    id: string,
-    input: UpdateTargetInput,
-    options: { transaction?: DatabaseTransaction } = {}
-  ) {
-    try {
-      const update = async (tx: DatabaseTransaction) => {
-        const binding = await findTargetBindingForUpdate(tx, id)
-        if (!binding) {
-          throw createApplicationError({ statusCode: 404, message: 'target not found', data: { code: 'TARGET_NOT_FOUND' } })
-        }
-        if (binding.target.enabled && input.enabled === false) {
-          await assertCanDisableLastTarget(
-            tx,
-            binding.service.id,
-            binding.target.id
-          )
-        }
-        const baseUrl = input.baseUrl === undefined
-          ? binding.target.baseUrl
-          : normalizeUpstreamTargetUrl(input.baseUrl).toString()
-        const resetServiceState = baseUrl !== binding.target.baseUrl
-          || (!binding.target.enabled && input.enabled === true)
-        const target = firstRow(await tx.update(upstreamTargets).set({
-          ...input,
-          baseUrl,
-          ...(resetServiceState
-            ? {
-                configurationRevision: null,
-                configurationHash: null,
-                configurationStatus: 'unknown',
-                configurationState: null,
-                lastConfigurationSyncAt: null,
-                lastError: null
-              }
-            : {}),
-          updatedAt: new Date(Math.max(Date.now(), binding.target.updatedAt.getTime() + 1))
-        }).where(eq(upstreamTargets.id, id)).returning())
-        if (!target) throw new Error('target update returned no row')
-        if (input.baseUrl !== undefined || input.enabled !== undefined) {
-          afterCommit(tx, () => gatewayTargetHealth.reset(target.upstreamServiceId, target.id))
-        }
-        const disablingPublishedTarget = binding.target.enabled
-          && target.enabled === false
-        const updatingPublishedTarget = !resetServiceState
-          && target.enabled
-          && input.weight !== undefined
-          && input.weight !== binding.target.weight
-        return {
-          target,
-          publishRouting: disablingPublishedTarget
-            || updatingPublishedTarget
-        }
-      }
-      const result = options.transaction
-        ? await update(options.transaction)
-        : await withCommittedTransaction(update)
-      return result
-    } catch (error) {
-      if (getSqlState(error) === '23505') {
-        throw createApplicationError({ statusCode: 409, message: 'target URL already exists for this upstream', data: { code: 'TARGET_CONFLICT' } })
-      }
-      throw error
-    }
-  },
-
-  async removeTarget(
-    id: string,
-    options: {
-      transaction?: DatabaseTransaction
-      allowActiveRoutingRemoval?: boolean
-    } = {}
-  ) {
-    const remove = async (tx: DatabaseTransaction) => {
-      const binding = await findTargetBindingForUpdate(tx, id)
-      if (!binding) {
-        throw createApplicationError({ statusCode: 404, message: 'target not found', data: { code: 'TARGET_NOT_FOUND' } })
-      }
-      const published = await routingReferenceService.hasTarget(id, tx)
-      if (published && !options.allowActiveRoutingRemoval) {
-        throw createApplicationError({
-          statusCode: 409,
-          message: 'disable the target and publish routing before deleting it',
-          data: { code: 'TARGET_STILL_PUBLISHED' }
-        })
-      }
-      if (binding.target.enabled || published) {
-        await assertCanDisableLastTarget(
-          tx,
-          binding.service.id,
-          binding.target.id
-        )
-      }
-      await tx.delete(upstreamTargets).where(eq(upstreamTargets.id, id))
-      afterCommit(tx, () => gatewayTargetHealth.reset(binding.target.upstreamServiceId, binding.target.id))
-      return binding.target
-    }
-    const removed = options.transaction
-      ? await remove(options.transaction)
-      : await withCommittedTransaction(remove)
-    return removed
-  },
-
   async updateServiceToken(id: string, serviceToken: string) {
     const connection = await withCommittedTransaction(tx => upstreamServiceTokenService.stage(tx, id, serviceToken))
     return toServiceConnectionView(connection)
@@ -440,7 +396,7 @@ export const platformUpstreamService = {
   ) {
     const { serviceToken, ...patch } = input
     const committed = await applyPlatformMutation(createdBy, async (tx) => {
-      const upstream = await platformUpstreamService.update(id, patch, { transaction: tx })
+      const upstream = await updateUpstream(tx, id, patch)
       if (serviceToken !== undefined) await upstreamServiceTokenService.stage(tx, id, serviceToken)
       return { value: upstream, publishRouting: Object.keys(patch).length > 0 }
     })
@@ -450,7 +406,7 @@ export const platformUpstreamService = {
 
   async removeAndPublish(id: string, createdBy: number | null) {
     const committed = await applyPlatformMutation(createdBy, async tx => ({
-      value: await platformUpstreamService.remove(id, { transaction: tx })
+      value: await removeUpstream(tx, id)
     }))
     const { value: upstream, ...publication } = committed
     return { upstream, ...publication }
@@ -462,12 +418,8 @@ export const platformUpstreamService = {
     createdBy: number | null
   ) {
     const committed = await applyPlatformMutation(createdBy, async (tx) => {
-      const created = await platformUpstreamService.createTarget(
-        upstreamServiceId,
-        input,
-        { transaction: tx }
-      )
-      return { value: created.target, publishRouting: created.publishRouting }
+      const target = await createTarget(tx, upstreamServiceId, input)
+      return { value: target, publishRouting: false }
     })
     const { value: target, ...publication } = committed
     return { target, ...publication }
@@ -479,9 +431,7 @@ export const platformUpstreamService = {
     createdBy: number | null
   ) {
     const committed = await applyPlatformMutation(createdBy, async (tx) => {
-      const updated = await platformUpstreamService.updateTarget(id, input, {
-        transaction: tx
-      })
+      const updated = await updateTarget(tx, id, input)
       return { value: updated.target, publishRouting: updated.publishRouting }
     })
     const { value: target, ...publication } = committed
@@ -490,10 +440,7 @@ export const platformUpstreamService = {
 
   async removeTargetAndPublish(id: string, createdBy: number | null) {
     const committed = await applyPlatformMutation(createdBy, async tx => ({
-      value: await platformUpstreamService.removeTarget(id, {
-        transaction: tx,
-        allowActiveRoutingRemoval: true
-      })
+      value: await removeTarget(tx, id)
     }))
     const { value: target, ...publication } = committed
     return { target, ...publication }

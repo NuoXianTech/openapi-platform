@@ -1,24 +1,14 @@
 import { RATE_LIMIT_WINDOW_SECONDS, type RateLimitWindow } from '~~/server/config/api-access'
-import type { RateLimiter, RateLimitResult } from '~~/server/types/api-access'
+import type { RateLimitResult } from '~~/server/types/api-access'
 import { getAuthSecret } from '~~/server/utils/auth-secret'
 import { createHmacSignature } from '~~/server/utils/secure-token'
 import {
   createRedisUnavailableError,
-  getRedisClient,
-  getRedisConfig,
   type RedisConfig
 } from '~~/server/utils/redis'
 
 interface RedisEvalClient {
   eval(script: string, numberOfKeys: number, ...args: string[]): Promise<unknown>
-}
-
-interface CreateAtomicMultiWindowRateLimiterOptions {
-  client: RedisEvalClient
-  config: Pick<RedisConfig, 'keyPrefix' | 'required'>
-  fallback: RateLimiter
-  hashKey?: (key: string) => string
-  now?: () => number
 }
 
 /**
@@ -105,67 +95,6 @@ function getWindowSeconds(window: RateLimitWindow): number {
   return seconds
 }
 
-export function createAtomicMultiWindowRateLimiter(
-  options: CreateAtomicMultiWindowRateLimiterOptions
-): RateLimiter {
-  let hasLoggedFallback = false
-
-  return {
-    name: 'redis-atomic-multi-window',
-    async consume(key, limit, window) {
-      const windowSeconds = getWindowSeconds(window)
-      const nowMs = options.now?.() ?? Date.now()
-      const windowStart = alignWindow(nowMs, windowSeconds)
-      const resetAtMs = windowStart + windowSeconds * 1_000
-
-      if (limit <= 0) {
-        return {
-          allowed: true,
-          remaining: Number.MAX_SAFE_INTEGER,
-          resetAtMs,
-          limit,
-          window
-        } satisfies RateLimitResult
-      }
-
-      // This is a single-window fallback when called directly.
-      // The multi-window orchestration happens in the access service.
-      const hashedKey = (options.hashKey ?? defaultHashKey)(key)
-      const redisKey = `${options.config.keyPrefix}rate-limit:${window}:${windowStart}:${hashedKey}`
-
-      try {
-        const { consumed, counts } = parseRedisResult(
-          await options.client.eval(
-            ATOMIC_MULTI_WINDOW_SCRIPT,
-            1,
-            redisKey,
-            String(limit),
-            String(resetAtMs)
-          ),
-          1
-        )
-        const count = counts[0]!
-        return {
-          allowed: consumed && count <= limit,
-          remaining: Math.max(limit - count, 0),
-          resetAtMs,
-          limit,
-          window
-        } satisfies RateLimitResult
-      } catch (error) {
-        if (options.config.required) {
-          throw createRedisUnavailableError('限流服务暂不可用，请稍后再试', error)
-        }
-        if (!hasLoggedFallback) {
-          hasLoggedFallback = true
-          console.warn('[rate-limit] Redis unavailable; falling back to process memory')
-        }
-        return options.fallback.consume(key, limit, window)
-      }
-    }
-  }
-}
-
 /**
  * Check and consume multiple rate limit windows atomically.
  * All windows are checked first; only if all pass are any incremented.
@@ -174,11 +103,9 @@ export async function consumeMultiWindowAtomic(
   client: RedisEvalClient,
   config: Pick<RedisConfig, 'keyPrefix'>,
   baseKey: string,
-  windows: Array<{ window: RateLimitWindow, limit: number }>,
-  options: { hashKey?: (key: string) => string, now?: () => number } = {}
+  windows: readonly { window: RateLimitWindow, limit: number }[]
 ): Promise<RateLimitResult[]> {
-  const nowMs = options.now?.() ?? Date.now()
-  const hashKey = options.hashKey ?? defaultHashKey
+  const nowMs = Date.now()
 
   const keys: string[] = []
   const args: string[] = []
@@ -191,7 +118,7 @@ export async function consumeMultiWindowAtomic(
     // The existing sequential limiter hashes a key that already contains the
     // window name. Keep the atomic path byte-for-byte compatible so changing
     // between one and multiple configured windows does not reset counters.
-    const hashedKey = hashKey(`${baseKey}:${window}`)
+    const hashedKey = defaultHashKey(`${baseKey}:${window}`)
     const redisKey = `${config.keyPrefix}rate-limit:${window}:${windowStart}:${hashedKey}`
 
     keys.push(redisKey)
@@ -232,20 +159,4 @@ export async function consumeMultiWindowAtomic(
   }
 
   return results
-}
-
-let atomicMultiWindowRateLimiter: RateLimiter | null = null
-let atomicMultiWindowRateLimiterFingerprint = ''
-
-export function getAtomicMultiWindowRateLimiter(fallback: RateLimiter): RateLimiter | null {
-  const config = getRedisConfig()
-  const client = getRedisClient()
-  if (!client) return null
-
-  const fingerprint = `${config.url}|${config.keyPrefix}|${config.required}`
-  if (!atomicMultiWindowRateLimiter || atomicMultiWindowRateLimiterFingerprint !== fingerprint) {
-    atomicMultiWindowRateLimiterFingerprint = fingerprint
-    atomicMultiWindowRateLimiter = createAtomicMultiWindowRateLimiter({ client, config, fallback })
-  }
-  return atomicMultiWindowRateLimiter
 }

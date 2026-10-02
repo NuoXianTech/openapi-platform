@@ -436,7 +436,7 @@ describe('routing revision service', () => {
   it('allows an existing disabled upstream binding but rejects a new one', async () => {
     const disabled = await createRoutingGraph({ productSlug: 'disabled-upstream' })
     const active = await createRoutingGraph({ productSlug: 'active-upstream' })
-    await platformUpstreamService.update(disabled.upstream.id, { status: 'disabled' })
+    await platformUpstreamService.updateAndPublish(disabled.upstream.id, { status: 'disabled' }, null)
 
     await expect(platformRouteService.update(
       disabled.route.id,
@@ -698,10 +698,65 @@ describe('routing revision service', () => {
       .rejects.toMatchObject({ data: { code: 'PRODUCT_STILL_PUBLISHED' } })
     await expect(platformProductService.removeVersion(graph.product.versions[0]!.id))
       .rejects.toMatchObject({ data: { code: 'VERSION_STILL_PUBLISHED' } })
-    await expect(platformUpstreamService.remove(graph.upstream.id))
+    await expect(platformUpstreamService.removeAndPublish(graph.upstream.id, null))
       .rejects.toMatchObject({ data: { code: 'UPSTREAM_STILL_PUBLISHED' } })
-    await expect(platformUpstreamService.removeTarget(graph.upstream.targets[0]!.id))
-      .rejects.toMatchObject({ data: { code: 'TARGET_STILL_PUBLISHED' } })
+    await expect(platformUpstreamService.removeTargetAndPublish(graph.upstream.targets[0]!.id, null))
+      .rejects.toMatchObject({ data: { code: 'UPSTREAM_LAST_TARGET_REQUIRED' } })
+  })
+
+
+  it.each(['disable', 'remove'] as const)('commits a published Target %s with its replacement runtime snapshot', async (operation) => {
+    const graph = await createRoutingGraph({ productSlug: 'target-mutation' })
+    const originalTarget = graph.upstream.targets[0]!
+    const created = await platformUpstreamService.createTargetAndPublish(graph.upstream.id, {
+      baseUrl: 'http://127.0.0.1:8081', weight: 1, enabled: true
+    }, null)
+    const [verified] = await database.select().from(schema.upstreamTargets)
+      .where(eq(schema.upstreamTargets.id, originalTarget.id))
+    await database.update(schema.upstreamTargets).set({
+      configurationRevision: verified!.configurationRevision,
+      configurationHash: verified!.configurationHash,
+      configurationState: verified!.configurationState
+    }).where(eq(schema.upstreamTargets.id, created.target.id))
+    const before = await routingRevisionService.publish(null)
+    const request = () => routingRuntimeService.resolve('GET', '/v1/proxy-smoke/42', 'localhost')
+    expect((await request()).match?.upstream.targets).toHaveLength(2)
+
+    const changed = operation === 'disable'
+      ? await platformUpstreamService.updateTargetAndPublish(originalTarget.id, { enabled: false }, null)
+      : await platformUpstreamService.removeTargetAndPublish(originalTarget.id, null)
+
+    expect(changed.revision?.id).not.toBe(before.id)
+    const runtime = await request()
+    expect(runtime.match?.revisionId).toBe(changed.revision?.id)
+    expect(runtime.match?.upstream.targets.map(target => target.id)).toEqual([created.target.id])
+    const stored = await database.select().from(schema.upstreamTargets)
+      .where(eq(schema.upstreamTargets.id, originalTarget.id))
+    if (operation === 'remove') expect(stored).toHaveLength(0)
+    else {
+      expect(stored[0]?.enabled).toBe(false)
+      const reenabled = await platformUpstreamService.updateTargetAndPublish(originalTarget.id, { enabled: true }, null)
+      expect(reenabled.revision).toBeNull()
+      expect(reenabled.target.configurationState).toBeNull()
+      expect((await request()).match?.upstream.targets.map(target => target.id)).toEqual([created.target.id])
+    }
+  })
+
+  it('keeps unverified creation and address edits out of the active snapshot through complete mutations', async () => {
+    const graph = await createRoutingGraph({ productSlug: 'unverified-mutations' })
+    const before = await routingRevisionService.publish(null)
+    const created = await platformUpstreamService.createTargetAndPublish(graph.upstream.id, {
+      baseUrl: 'http://127.0.0.1:8081', weight: 1, enabled: true
+    }, null)
+    const changed = await platformUpstreamService.updateTargetAndPublish(graph.upstream.targets[0]!.id, {
+      baseUrl: 'http://127.0.0.1:8082'
+    }, null)
+    expect(created.revision).toBeNull()
+    expect(changed.revision).toBeNull()
+    expect(changed.target.configurationState).toBeNull()
+    const runtime = await routingRuntimeService.resolve('GET', '/v1/proxy-smoke/42', 'localhost')
+    expect(runtime.match?.revisionId).toBe(before.id)
+    expect(runtime.match?.upstream.targets).toEqual(before.configPayload.upstreams[0]!.targets)
   })
 
   it('excludes routes whose API version is not published', async () => {
