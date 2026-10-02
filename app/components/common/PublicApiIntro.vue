@@ -145,39 +145,47 @@ onBeforeUnmount(() => clearTimeout(sampleTimer))
         </div>
       </div>
 
-      <div class="request-demo" :aria-label="$t('public.home.simulatedExample')">
+      <section class="request-demo" aria-labelledby="request-demo-title">
         <header class="request-demo__header">
-          <div class="request-demo__tabs">
-            <span class="request-demo__tab"><UIcon name="i-lucide-terminal" class="size-4" aria-hidden="true" />{{ $t('public.home.hero.request') }}</span>
-            <span class="request-demo__filename">example.http</span>
+          <div class="request-demo__title">
+            <UIcon name="i-lucide-terminal" class="size-4" aria-hidden="true" />
+            <h2 id="request-demo-title">{{ $t('public.home.hero.request') }}</h2>
           </div>
-          <span class="request-demo__example-label">{{ $t('public.home.simulatedExample') }}</span>
         </header>
-        <div class="request-demo__body">
-          <div class="request-demo__request">
-            <span class="request-demo__label">{{ $t('public.home.requestAddress') }}</span>
+        <div class="request-demo__request">
+          <div class="request-demo__request-code">
             <div class="request-demo__address">
               <span class="request-demo__method">GET</span>
-              <code :title="sampleUrl">{{ sampleUrl }}</code>
-              <UButton color="neutral" variant="ghost" square icon="i-lucide-copy" :aria-label="$t('public.api.copyEndpoint')" class="request-demo__copy" @click="copyText(sampleUrl)" />
-            </div>
-            <code class="request-demo__accept">Accept: application/json</code>
-            <div class="request-demo__run">
-              <UButton color="neutral" variant="outline" icon="i-lucide-play" :loading="isRunning" :disabled="isRunning" @click="runSample">
-                {{ $t('public.home.runExample') }}
-              </UButton>
-              <span>{{ $t('public.home.hero.demoHint') }}</span>
+              <code :title="sampleUrl">{{ samplePath }}</code>
             </div>
           </div>
-          <div class="request-demo__response" :aria-busy="isRunning">
-            <div class="request-demo__response-heading">
-              <span class="request-demo__label">{{ $t('public.home.responsePreview') }}</span>
-              <span class="request-demo__status">{{ isRunning ? $t('public.home.requesting') : `200 OK · ${responseLatency}ms` }}</span>
-            </div>
-            <pre tabindex="0" :aria-label="$t('public.home.responsePreview')"><code>{{ isRunning ? $t('public.home.requesting') : responsePreview }}</code></pre>
-          </div>
+          <UButton
+            color="neutral"
+            variant="ghost"
+            size="sm"
+            square
+            icon="i-lucide-copy"
+            :aria-label="$t('public.api.copyEndpoint')"
+            class="request-demo__copy"
+            @click="copyText(sampleUrl)"
+          />
         </div>
-      </div>
+        <div class="request-demo__response" :aria-busy="isRunning">
+          <div class="request-demo__response-heading">
+            <span class="request-demo__label">{{ $t('public.home.responsePreview') }}</span>
+            <span class="request-demo__status" role="status" :class="{ 'is-running': isRunning }">
+              {{ isRunning ? $t('public.home.requesting') : `200 OK · ${responseLatency}ms` }}
+            </span>
+          </div>
+          <pre tabindex="0" :aria-label="$t('public.home.responsePreview')"><code>{{ responsePreview }}</code></pre>
+        </div>
+        <footer class="request-demo__footer">
+          <span>{{ $t('public.home.hero.demoHint') }}</span>
+          <UButton size="sm" icon="i-lucide-play" :loading="isRunning" :disabled="isRunning" class="request-demo__run" @click="runSample">
+            {{ $t('public.home.runExample') }}
+          </UButton>
+        </footer>
+      </section>
     </div>
 
   </section>
@@ -316,7 +324,6 @@ onBeforeUnmount(() => clearTimeout(sampleTimer))
   border: 1px solid var(--ui-border);
   border-radius: 12px;
   background: var(--ui-bg-elevated);
-  box-shadow: 0 1px 1px #0000000a;
 }
 
 .request-demo__header {
@@ -325,131 +332,145 @@ onBeforeUnmount(() => clearTimeout(sampleTimer))
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  padding-inline: 20px;
+  padding-inline: 16px;
   border-bottom: 1px solid var(--ui-border);
 }
 
-.request-demo__tabs,
-.request-demo__tab {
+.request-demo__title {
   display: flex;
   align-items: center;
-}
-
-.request-demo__tabs { gap: 16px; }
-
-.request-demo__tab {
   gap: 8px;
   color: var(--ui-text-highlighted);
-  font-size: 12px;
-  font-weight: 500;
 }
 
-.request-demo__filename {
-  color: var(--ui-text-muted);
-  font: 12px/16px var(--font-code);
-}
-
-.request-demo__example-label {
-  color: var(--ui-text-muted);
-  font-size: 12px;
+.request-demo__title h2 {
+  margin: 0;
+  font: var(--design-type-button-md);
+  letter-spacing: -0.28px;
 }
 
 .request-demo__request {
+  display: flex;
   min-width: 0;
-  padding: 20px;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 16px;
 }
 
-.request-demo__label {
-  color: var(--ui-text-muted);
-  font-size: 12px;
+.request-demo__request-code {
+  min-width: 0;
+  flex: 1;
 }
 
 .request-demo__address {
   display: flex;
-  align-items: center;
-  gap: 10px;
-  margin-top: 12px;
-  padding-left: 12px;
-  border: 1px solid var(--ui-border);
-  border-radius: 6px;
-  background: var(--ui-bg);
+  align-items: baseline;
+  gap: 12px;
+  color: var(--ui-text-highlighted);
+  font: 400 14px/20px var(--font-code);
 }
 
 .request-demo__method {
-  color: var(--ui-text-highlighted);
-  font: 500 12px/16px var(--font-code);
+  flex-shrink: 0;
+  font-weight: 500;
 }
 
 .request-demo__address code {
   min-width: 0;
-  flex: 1;
-  overflow-x: auto;
-  color: var(--ui-text-highlighted);
-  font-size: 14px;
-  line-height: 20px;
-  white-space: nowrap;
-  scrollbar-width: thin;
+  overflow-wrap: anywhere;
+  font: inherit;
 }
 
 .request-demo__copy {
   flex-shrink: 0;
-  min-width: 44px;
-  min-height: 44px;
+  width: 44px;
+  height: 44px;
+  justify-content: center;
+  padding: 0;
+  border: 0;
   border-radius: 6px;
+  color: var(--ui-text-toned);
+  background: transparent;
+  box-shadow: none;
+  transition: color 160ms ease;
 }
 
-.request-demo__accept {
-  display: block;
-  margin-top: 12px;
-  color: var(--ui-text-muted);
-  font-size: 12px;
+.request-demo__copy:hover,
+.request-demo__copy:active {
+  color: var(--ui-text-highlighted);
+  background: transparent;
+}
+
+.request-demo__footer {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 16px;
+  border-top: 1px solid var(--ui-border);
 }
 
 .request-demo__run {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  margin-top: 16px;
-}
-
-.request-demo__run > button {
   flex-shrink: 0;
-  min-height: 44px;
+  min-height: 32px;
+  margin-inline-start: auto;
+  padding: 0 6px;
   border-radius: 6px;
+  color: var(--ui-text-inverted);
+  background: var(--ui-primary);
   font: var(--design-type-button-md);
   letter-spacing: 0;
+  box-shadow: none;
 }
 
-.request-demo__run > span {
+.request-demo__footer > span {
+  flex: 1 0 180px;
   color: var(--ui-text-muted);
   font-size: 12px;
-  line-height: 1.6;
+  line-height: 16px;
 }
 
 .request-demo__response {
   min-width: 0;
   border-top: 1px solid var(--ui-border);
-  padding: 20px;
-  background: color-mix(in srgb, var(--ui-bg) 60%, var(--ui-bg-elevated));
 }
 
 .request-demo__response-heading {
   display: flex;
+  min-height: 40px;
   align-items: center;
   justify-content: space-between;
+  gap: 12px;
+  padding: 12px 16px 0;
+}
+
+.request-demo__label {
+  color: var(--ui-text-toned);
+  font-size: 12px;
+  line-height: 16px;
 }
 
 .request-demo__status {
-  color: var(--ui-text-toned);
+  flex-shrink: 0;
+  color: var(--design-badge-info);
   font: 12px/16px var(--font-code);
 }
 
-.request-demo pre {
-  height: 240px;
-  margin: 12px 0 0;
-  overflow: auto;
+.request-demo__status.is-running {
   color: var(--ui-text-toned);
+}
+
+.request-demo pre {
+  max-height: 320px;
+  margin: 0;
+  overflow: auto;
+  overscroll-behavior: contain;
+  padding: 16px;
+  color: var(--ui-text-highlighted);
   font: 400 14px/20px var(--font-code);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
   scrollbar-width: thin;
 }
 
@@ -467,7 +488,6 @@ onBeforeUnmount(() => clearTimeout(sampleTimer))
     grid-template-columns: minmax(0, 1fr);
     padding-block: 56px;
   }
-  .request-demo pre { height: 220px; }
 }
 
 @media (width <= 640px) {
@@ -485,14 +505,13 @@ onBeforeUnmount(() => clearTimeout(sampleTimer))
     margin-top: 20px;
     font: var(--design-type-body-md);
   }
-  .request-demo__header { padding-inline: 16px; }
-  .request-demo__filename { display: none; }
-  .request-demo__request,
-  .request-demo__response { padding: 16px; }
-  .request-demo pre { height: 200px; }
 }
 
 @media (width <= 640px), (pointer: coarse) {
   .home-hero__button { min-height: 44px; }
+}
+
+@media (pointer: coarse) {
+  .request-demo__run { min-height: 44px; }
 }
 </style>
