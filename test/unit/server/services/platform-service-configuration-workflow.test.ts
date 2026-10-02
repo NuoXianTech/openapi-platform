@@ -27,7 +27,7 @@ const { platformServiceControlService } = await import('~~/server/services/platf
 const { synchronizeConfiguration: synchronizePlatformServiceConfiguration, updateConfiguration: updatePlatformServiceConfiguration, discover: discoverPlatformService } = platformServiceControlService
 const { serviceControlClient } = await import('~~/server/utils/service-control-client')
 const { refreshPlatformRevision } = await import('~~/server/services/routing-revision-service')
-const { acceptServiceTargetResults, loadServiceControlContext } = await import('~~/server/services/platform-service-control-context')
+const { acceptServiceTargetResults, loadServiceControlContext, getServiceControlView } = await import('~~/server/services/platform-service-control-context')
 const { default: discoverHandler } = await import('~~/server/api/admin/v1/upstreams/[id]/discover.post')
 let client: PGlite
 let database: ReturnType<typeof drizzle<typeof schema>>
@@ -141,6 +141,23 @@ describe('configuration result acceptance', () => {
     })
     expect(result).toMatchObject({ status: 'synced', values: { enabled: false, secret: { configured: true } } })
     expect(JSON.stringify(result)).not.toContain('must-not-leak')
+
+    const saved = await loadServiceControlContext(upstream.id)
+    expect((await getServiceControlView(upstream.id)).values).toEqual(result.values)
+    const synchronized = await synchronizePlatformServiceConfiguration(upstream.id)
+    expect(synchronized).toMatchObject({ revision: 2, values: result.values, configurationHash: result.configurationHash })
+    expect((await loadServiceControlContext(upstream.id)).connection.configurationValues).toEqual(saved.connection.configurationValues)
+    const preserved = await updatePlatformServiceConfiguration(upstream.id, {
+      expectedRevision: 2, values: {}, secrets: {}
+    })
+    expect(preserved.values).toEqual(result.values)
+    expect(preserved.configurationHash).toBe(result.configurationHash)
+    const cleared = await updatePlatformServiceConfiguration(upstream.id, {
+      expectedRevision: 3, values: {}, secrets: { secret: null }
+    })
+    expect(cleared.values.secret).toEqual({ configured: false })
+    expect((await getServiceControlView(upstream.id)).values).toEqual(cleared.values)
+    expect((await loadServiceControlContext(upstream.id)).connection.configurationValues.secrets).toEqual({})
   })
 
   it('preserves saved configuration on publication failure and retries without advancing its revision', async () => {

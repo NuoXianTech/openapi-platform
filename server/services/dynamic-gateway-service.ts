@@ -10,6 +10,7 @@ import { dynamicGatewayAccessService } from '~~/server/services/dynamic-gateway-
 import {
   routingRuntimeService,
   RoutingRuntimeUnavailableError,
+  type RoutingResolution,
   type ResolvedDynamicRoute
 } from '~~/server/services/routing-runtime-service'
 import {
@@ -164,18 +165,20 @@ function routingRuntimeUnavailableResult(
 export const dynamicGatewayService = {
   async tryHandle(event: H3Event): Promise<DynamicGatewayResult> {
     const requestUrl = getRequestURL(event)
+    let resolution: RoutingResolution
+    try {
+      resolution = await routingRuntimeService.resolve(
+        event.method,
+        requestUrl.pathname,
+        requestUrl.hostname
+      )
+    } catch (error) {
+      const unavailable = routingRuntimeUnavailableResult(event, error)
+      if (unavailable) return unavailable
+      throw error
+    }
+    const { match, allowedMethods } = resolution
     if (event.method.toUpperCase() === 'OPTIONS') {
-      let allowedMethods: string[]
-      try {
-        allowedMethods = await routingRuntimeService.resolveAllowedMethods(
-          requestUrl.pathname,
-          requestUrl.hostname
-        )
-      } catch (error) {
-        const unavailable = routingRuntimeUnavailableResult(event, error)
-        if (unavailable) return unavailable
-        throw error
-      }
       if (allowedMethods.length === 0) return { matched: false }
       const cors = setPublicApiCors(event, allowedMethods)
       if (cors.rejectedRequestHeaders.length > 0) {
@@ -191,31 +194,7 @@ export const dynamicGatewayService = {
       }
       return { matched: true, response: sendNoContent(event) }
     }
-
-    let match: ResolvedDynamicRoute | null
-    try {
-      match = await routingRuntimeService.resolve(
-        event.method,
-        requestUrl.pathname,
-        requestUrl.hostname
-      )
-    } catch (error) {
-      const unavailable = routingRuntimeUnavailableResult(event, error)
-      if (unavailable) return unavailable
-      throw error
-    }
     if (!match) {
-      let allowedMethods: string[]
-      try {
-        allowedMethods = await routingRuntimeService.resolveAllowedMethods(
-          requestUrl.pathname,
-          requestUrl.hostname
-        )
-      } catch (error) {
-        const unavailable = routingRuntimeUnavailableResult(event, error)
-        if (unavailable) return unavailable
-        throw error
-      }
       if (allowedMethods.length === 0) return { matched: false }
       setPublicApiCors(event, allowedMethods)
       setResponseHeader(event, 'allow', allowedMethods.join(', '))

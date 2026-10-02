@@ -2,13 +2,10 @@ import { and, eq } from 'drizzle-orm'
 import type {
   RedactedServiceConfigurationState,
   ServiceAvailability,
-  ServiceConfigurationDefinition,
-  ServiceConfigurationValue,
   ServiceConfigurationView,
   ServiceTargetAvailability,
   ServiceConnectionView,
-  ServiceTargetControlState,
-  StoredServiceConfigurationValues
+  ServiceTargetControlState
 } from '#shared/types/service-control'
 import { db, type DatabaseTransaction } from '~~/server/db/client'
 import { withCommittedTransaction } from '~~/server/utils/committed-transaction'
@@ -23,8 +20,7 @@ import { resolveServiceAvailability } from '~~/server/services/service-availabil
 import { upstreamServiceTokenService } from '~~/server/services/upstream-service-token-service'
 import { readStoredServiceEndpoints } from '~~/server/services/platform-service-openapi-service'
 import {
-  defaultServiceConfigurationValues,
-  serviceConfigurationFields
+  publicStoredServiceConfiguration
 } from '~~/server/utils/service-configuration-values'
 import { toNullableIsoString } from '~~/server/utils/date'
 import { firstRow } from '~~/server/utils/row'
@@ -67,25 +63,6 @@ export function toServiceConnectionView(
     ),
     lastDiscoveryError: connection.lastDiscoveryError
   }
-}
-
-function publicDesiredValues(
-  definition: ServiceConfigurationDefinition | null,
-  stored: StoredServiceConfigurationValues
-): Record<
-  string,
-  ServiceConfigurationValue | { configured: boolean }
-> {
-  if (!definition) return {}
-  const defaults = defaultServiceConfigurationValues(definition)
-  return Object.fromEntries(
-    serviceConfigurationFields(definition).map(field => [
-      field.key,
-      field.type === 'secret'
-        ? { configured: Boolean(stored.secrets[field.key]) }
-        : stored.values[field.key] ?? defaults[field.key]!
-    ])
-  )
 }
 
 export function serviceTargetControlState(
@@ -310,7 +287,7 @@ export async function buildServiceControlView(
       availability.overall
     ),
     definition: context.connection.configurationSchema ?? null,
-    values: publicDesiredValues(
+    values: publicStoredServiceConfiguration(
       context.connection.configurationSchema ?? null,
       context.connection.configurationValues
     ),

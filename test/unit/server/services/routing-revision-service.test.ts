@@ -248,7 +248,7 @@ describe('routing revision service', () => {
     await platformRuntimeService.updateDefaultDomain('api.example.test', null)
     await refreshPlatformRevision(null)
     expect((await currentPayload()).appliedRoutes).toEqual([])
-    await expect(routingRuntimeService.resolve('GET', '/v1/staged', 'api.example.test')).resolves.toBeNull()
+    await expect(routingRuntimeService.resolve('GET', '/v1/staged', 'api.example.test').then(result => result.match)).resolves.toBeNull()
     const applied = await applyPlatformRevision(null)
     expect((await currentPayload()).routes.map(route => route.id)).toContain(staged.route.id)
     expect((await applyPlatformRevision(null)).revision.id).toBe(applied.revision.id)
@@ -484,7 +484,7 @@ describe('routing revision service', () => {
       'GET',
       '/v1/proxy-smoke/42',
       'api.example.test'
-    )).resolves.toMatchObject({
+    ).then(result => result.match)).resolves.toMatchObject({
       revisionId: firstRevision.id,
       route: { id: graph.route.id },
       params: { id: '42' }
@@ -510,7 +510,7 @@ describe('routing revision service', () => {
       'GET',
       '/v1/revision-two-only',
       'api.example.test'
-    )).resolves.toMatchObject({ revisionId: secondRevision.id })
+    ).then(result => result.match)).resolves.toMatchObject({ revisionId: secondRevision.id })
 
     const activated = await routingRevisionService.activate(firstRevision.id)
     expect(activated.id).toBe(firstRevision.id)
@@ -527,7 +527,7 @@ describe('routing revision service', () => {
       'GET',
       '/v1/revision-two-only',
       'api.example.test'
-    )).resolves.toBeNull()
+    ).then(result => result.match)).resolves.toBeNull()
   })
 
   it('restores the snapshotted default domain when activating a revision', async () => {
@@ -556,12 +556,12 @@ describe('routing revision service', () => {
       'GET',
       '/v1/revision-domain',
       'first.example.test'
-    )).resolves.toMatchObject({ route: { id: graph.route.id } })
+    ).then(result => result.match)).resolves.toMatchObject({ route: { id: graph.route.id } })
     await expect(routingRuntimeService.resolve(
       'GET',
       '/v1/revision-domain',
       'second.example.test'
-    )).resolves.toBeNull()
+    ).then(result => result.match)).resolves.toBeNull()
   })
 
   it('reuses the active revision when the runtime configuration is unchanged', async () => {
@@ -772,14 +772,14 @@ describe('routing revision service', () => {
       'GET',
       '/v1/items/special',
       'api.example.test'
-    )).resolves.toMatchObject({ route: { id: exactGraph.route.id } })
+    ).then(result => result.match)).resolves.toMatchObject({ route: { id: exactGraph.route.id } })
     // The host-specific Route declines other domains, so the fallback shape
     // takes the same path with `special` captured as the parameter.
     await expect(routingRuntimeService.resolve(
       'GET',
       '/v1/items/special',
       'other.example.test'
-    )).resolves.toMatchObject({
+    ).then(result => result.match)).resolves.toMatchObject({
       route: { id: fallbackGraph.route.id },
       params: { id: 'special' }
     })
@@ -787,7 +787,7 @@ describe('routing revision service', () => {
       'GET',
       '/v1/items/42',
       'other.example.test'
-    )).resolves.toMatchObject({ route: { id: fallbackGraph.route.id } })
+    ).then(result => result.match)).resolves.toMatchObject({ route: { id: fallbackGraph.route.id } })
   })
 
   it('confines Routes without their own Host to the default domain', async () => {
@@ -802,7 +802,7 @@ describe('routing revision service', () => {
       'GET',
       '/v1/default-domain',
       'anything.example.test'
-    )).resolves.toMatchObject({ route: { id: graph.route.id } })
+    ).then(result => result.match)).resolves.toMatchObject({ route: { id: graph.route.id } })
 
     await platformRuntimeService.updateDefaultDomain('api.example.test', null)
 
@@ -810,12 +810,12 @@ describe('routing revision service', () => {
       'GET',
       '/v1/default-domain',
       'api.example.test'
-    )).resolves.toMatchObject({ route: { id: graph.route.id } })
+    ).then(result => result.match)).resolves.toMatchObject({ route: { id: graph.route.id } })
     await expect(routingRuntimeService.resolve(
       'GET',
       '/v1/default-domain',
       'anything.example.test'
-    )).resolves.toBeNull()
+    ).then(result => result.match)).resolves.toBeNull()
   })
 
   it('publishes discovered Service endpoints and applies governance changes automatically', async () => {

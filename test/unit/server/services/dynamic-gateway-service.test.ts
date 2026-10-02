@@ -10,7 +10,6 @@ const mocks = vi.hoisted(() => ({
   markReservationPending: vi.fn(),
   releaseReservation: vi.fn(),
   resolve: vi.fn(),
-  resolveAllowedMethods: vi.fn(),
   sendProxy: vi.fn()
 }))
 
@@ -41,8 +40,7 @@ vi.mock('~~/server/services/dynamic-gateway-access-service', () => ({
 }))
 vi.mock('~~/server/services/routing-runtime-service', () => ({
   routingRuntimeService: {
-    resolve: mocks.resolve,
-    resolveAllowedMethods: mocks.resolveAllowedMethods
+    resolve: mocks.resolve
   }
 }))
 vi.mock('~~/server/services/credit-service', () => ({
@@ -131,8 +129,7 @@ function installBilling(event: H3Event) {
 
 beforeEach(() => {
   vi.clearAllMocks()
-  mocks.resolve.mockResolvedValue(match)
-  mocks.resolveAllowedMethods.mockResolvedValue([])
+  mocks.resolve.mockResolvedValue({ match, allowedMethods: ['GET', 'HEAD'] })
   mocks.getServiceToken.mockResolvedValue('service-token')
   mocks.markReservationPending.mockResolvedValue(true)
   mocks.releaseReservation.mockResolvedValue(true)

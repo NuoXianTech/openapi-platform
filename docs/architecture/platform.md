@@ -147,6 +147,11 @@ Endpoint 批量操作在确认返回和每个子请求派发前检查页面生�
 
 ## 5. 动态 Gateway
 
+路由判定由 `routing-runtime-service.ts` 的 `resolve` 一次返回匹配 Route 与允许方法集合。
+两者来自同一份已验证 Routing Revision，并在同一次遍历中完成 Host、Path、Method 判定；
+Gateway 据此呈现普通转发、OPTIONS 或 405，不在未命中后另读运行快照。
+HEAD 优先匹配显式 HEAD Route，否则回退 GET；未匹配路径与运行快照不可用仍分别处理。
+
 Gateway 按以下顺序处理公开请求：
 
 1. 根据 Host、Method 和 Path 匹配活动 Route。
@@ -249,6 +254,17 @@ Target 状态共用一次读取范围及一次探测集合。详情不会为补�
 详情页将 Target 操作状态纳入 Service 控制操作的禁用规则。
 
 ## 8. Service 控制面
+
+业务配置值由 `service-configuration-values.ts` 完整管理默认值、更新校验、Secret 保留与清空、
+规范化、指纹及存储表示。保存与同步通过 `prepareServiceConfiguration` 获得同一份规范化值、
+指纹与公开投影，保存时才生成密文；重新同步不会重新加密已保存配置。
+详情读取通过 `publicStoredServiceConfiguration` 复用公开投影规则，只检查 Secret 是否已配置，
+不解密密文。配置 Revision、事务、Target 下发与冲突恢复仍由原协调模块负责。
+
+单个 Target 的契约读取由 `service-target-contract.ts` 完成：先读取 description，再并行读取
+配置 Schema 与状态，校验字段定义、指纹和 Service 身份的一致性后交给发现流程。
+发现流程保留有界并发、契约分组、当前契约优先与提交时上下文校验；OpenAPI 文档仍在选定
+兼容契约分组后，仅从该分组的选定 Target 读取。
 
 管理台通过 `app/composables/admin/use-admin-service-control.ts` 协调发现、Token 更新、
 配置保存与同步。该模块持有控制视图、刷新和反馈，统一输出操作准入状态，并与 Target 操作互斥。

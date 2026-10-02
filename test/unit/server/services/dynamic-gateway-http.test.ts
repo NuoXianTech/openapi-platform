@@ -11,7 +11,10 @@ const mocks = vi.hoisted(() => ({
   record: vi.fn(), addCall: vi.fn(), link: vi.fn(), finalize: vi.fn(), usage: vi.fn()
 }))
 vi.mock('~~/server/services/dynamic-gateway-access-service', () => ({ dynamicGatewayAccessService: { authorize: mocks.authorize } }))
-vi.mock('~~/server/services/routing-runtime-service', () => ({ routingRuntimeService: { resolve: mocks.resolve, resolveAllowedMethods: async () => [] } }))
+vi.mock('~~/server/services/routing-runtime-service', async (original) => ({
+  ...await original<typeof import('~~/server/services/routing-runtime-service')>(),
+  routingRuntimeService: { resolve: mocks.resolve }
+}))
 vi.mock('~~/server/services/credit-service', () => ({ creditService: {
   markReservationPending: mocks.mark, releaseReservation: mocks.release,
   linkApiCall: mocks.link, finalizeReservation: mocks.finalize
@@ -85,7 +88,7 @@ beforeEach(() => {
   resetGatewayTargetHealth()
   vi.clearAllMocks()
   Object.assign(match, structuredClone(originalMatch))
-  mocks.resolve.mockResolvedValue(match)
+  mocks.resolve.mockResolvedValue({ match, allowedMethods: ['GET', 'HEAD'] })
   mocks.mark.mockImplementation(() => {
     expect(lastEvent.node.res.headersSent).toBe(false)
     return Promise.resolve(true)
@@ -121,6 +124,31 @@ afterAll(async () => {
 })
 
 describe('gateway over HTTP', () => {
+  it.each([
+    ['POST', ['GET', 'HEAD'], 405],
+    ['OPTIONS', ['GET', 'HEAD'], 204],
+    ['POST', [], 404],
+    ['OPTIONS', [], 404]
+  ] as const)('presents %s with %j from one routing decision as HTTP %s', async (method, allowedMethods, status) => {
+    mocks.resolve.mockResolvedValue({ match: null, allowedMethods })
+    const response = await fetch(url, { method })
+    expect(response.status).toBe(status)
+    if (status === 405) expect(response.headers.get('allow')).toBe('GET, HEAD')
+    if (status === 204) expect(response.headers.get('access-control-allow-methods')).toContain('GET')
+    await response.arrayBuffer()
+    expect(mocks.resolve).toHaveBeenCalledOnce()
+    expect(mocks.authorize).not.toHaveBeenCalled()
+  })
+
+  it('returns unavailable instead of a missing route when the routing read fails', async () => {
+    mocks.resolve.mockRejectedValueOnce(Object.assign(new Error('offline'), { code: 'ROUTING_RUNTIME_UNAVAILABLE' }))
+    const response = await fetch(url)
+    expect(response.status).toBe(503)
+    expect(await response.json()).toMatchObject({ code: 'ROUTING_RUNTIME_UNAVAILABLE' })
+    expect(mocks.resolve).toHaveBeenCalledOnce()
+    expect(mocks.authorize).not.toHaveBeenCalled()
+  })
+
   it.each(['deadline', 'disconnect'] as const)('cleans up a timed-out first Target and a streaming replacement on %s', async (ending) => {
     match.route.timeoutMs = 2_700
     const baseUrl = match.upstream.targets[0]!.baseUrl
