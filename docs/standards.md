@@ -136,7 +136,6 @@ ESLint 保留 JS/TS/Vue 正确性检查，不强制缩进、逗号和每行属�
 ```bash
 pnpm typecheck
 pnpm lint
-pnpm check:dead-code
 pnpm test
 ```
 

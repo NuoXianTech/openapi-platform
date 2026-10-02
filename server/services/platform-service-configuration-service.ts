@@ -1,11 +1,7 @@
 import { and, eq } from 'drizzle-orm'
 import type {
   RedactedServiceConfigurationState,
-  ServiceConfigurationDefinition,
-  ServiceConfigurationSyncOutcome,
-  ServiceConfigurationSyncResult,
-  ServiceConfigurationValue,
-  StoredServiceConfigurationValues
+  ServiceConfigurationSyncResult
 } from '#shared/types/service-control'
 import {
   upstreamServiceConnections,
@@ -26,17 +22,10 @@ import {
   serviceControlClient
 } from '~~/server/utils/service-control-client'
 import {
-  calculateServiceConfigurationHash,
-  defaultServiceConfigurationValues,
-  normalizeServiceConfigurationValues,
-  serviceConfigurationFields,
+  prepareServiceConfiguration,
+  type PreparedServiceConfiguration,
   ServiceConfigurationValueError
 } from '~~/server/utils/service-configuration-values'
-import {
-  decryptStoredSecret,
-  encryptStoredSecret
-} from '~~/server/utils/stored-secret'
-import { refreshPlatformRevision } from '~~/server/services/platform-endpoint-publication-service'
 
 const CONFIGURATION_SYNC_CONCURRENCY = 8
 const MAX_CONFIGURATION_REVISION = 2_147_483_647
@@ -134,47 +123,16 @@ async function mapBounded<TItem, TResult>(
   return results
 }
 
-function redactedStateFromValues(input: {
-  serviceId: string
-  schemaSha256: string
-  revision: number
-  configurationSha256: string
-  values: Record<string, ServiceConfigurationValue>
-  definition: ServiceConfigurationDefinition
-  updatedAt: string
-}): RedactedServiceConfigurationState {
-  return {
-    schemaVersion: 1,
-    serviceId: input.serviceId,
-    schemaSha256: input.schemaSha256,
-    revision: input.revision,
-    configurationSha256: input.configurationSha256,
-    values: redactConfigurationValues(input.definition, input.values),
-    updatedAt: input.updatedAt
-  }
-}
-
-function redactConfigurationValues(definition: ServiceConfigurationDefinition, values: Record<string, ServiceConfigurationValue>): ServiceConfigurationSyncResult['values'] {
-  return Object.fromEntries(serviceConfigurationFields(definition).map(field => {
-    const value = values[field.key]!
-    return [field.key, field.type === 'secret'
-      ? { configured: typeof value === 'string' && value.length > 0 }
-      : value]
-  }))
-}
-
 async function pushConfiguration(
   context: PlatformServiceControlContext,
   revision: number,
-  values: Record<string, ServiceConfigurationValue>,
-  configurationHash: string,
+  configuration: PreparedServiceConfiguration,
   recoverRevisionConflict: boolean
 ): Promise<ServiceConfigurationSyncResult> {
-  const definition = context.connection.configurationSchema
   const description = context.connection.serviceDescription
   const serviceId = context.connection.serviceId
   const schemaSha256 = context.connection.configurationSchemaSha256
-  if (!definition || !description || !serviceId || !schemaSha256) {
+  if (!description || !serviceId || !schemaSha256) {
     throw createApplicationError({
       statusCode: 409,
       message: 'discover the Service before synchronizing configuration',
@@ -204,17 +162,17 @@ async function pushConfiguration(
         target.baseUrl,
         description.configuration.update,
         token,
-        { revision, values }
+        { revision, values: configuration.values }
       )
-      const state = redactedStateFromValues({
+      const state: RedactedServiceConfigurationState = {
+        schemaVersion: 1,
         serviceId: response.data.serviceId,
         schemaSha256: response.data.schemaSha256,
         revision: response.data.revision,
         configurationSha256: response.data.configurationSha256,
-        values,
-        definition,
+        values: configuration.publicValues,
         updatedAt: response.data.updatedAt
-      })
+      }
       return { ok: true as const, targetId: target.id, state }
     } catch (error) {
       return {
@@ -245,112 +203,12 @@ async function pushConfiguration(
   return {
     status: accepted.status,
     revision,
-    configurationHash,
-    values: redactConfigurationValues(definition, values),
+    configurationHash: configuration.hash,
+    values: configuration.publicValues,
     targets: accepted.targets.map(target => (
       serviceTargetControlState(target, 'unknown')
     ))
   }
-}
-
-async function publishRoutableConfigurationTargets(
-  result: ServiceConfigurationSyncResult
-): Promise<Pick<ServiceConfigurationSyncOutcome, 'routingRevision' | 'routingStatus'>> {
-  // A partial sync still changes the safe Target set: synchronized Targets can
-  // serve the new configuration while failed or drifted Targets must be
-  // removed from the next immutable runtime snapshot.
-  if (result.status === 'failed') {
-    return { routingRevision: null, routingStatus: 'skipped' }
-  }
-  // Named apart from result.revision: that one is the Service configuration
-  // revision, this one is the routing snapshot sequence. Spreading both
-  // under one key silently dropped the configuration revision.
-  try {
-    const { revision } = await refreshPlatformRevision(null)
-    return { routingRevision: revision, routingStatus: 'applied' }
-  } catch (error) {
-    // Desired configuration and ACKs have committed. Resynchronizing reuses
-    // the saved revision and retries publication without replaying a save.
-    console.error('[service-configuration] routing publication pending after synchronization', {
-      configurationRevision: result.revision,
-      error: error instanceof Error ? error.message : 'publication failed'
-    })
-    return { routingRevision: null, routingStatus: 'pending' }
-  }
-}
-
-function reconstructConfiguration(input: {
-  definition: ServiceConfigurationDefinition
-  stored: StoredServiceConfigurationValues
-  valueUpdates: Record<string, unknown>
-  secretUpdates: Record<string, string | null>
-}) {
-  const fields = serviceConfigurationFields(input.definition)
-  const fieldMap = new Map(fields.map(field => [field.key, field]))
-  const unknownValue = Object.keys(input.valueUpdates)
-    .find(key => fieldMap.get(key)?.type === 'secret' || !fieldMap.has(key))
-  if (unknownValue) {
-    throw new ServiceConfigurationValueError(
-      unknownValue,
-      `invalid non-secret configuration field: ${unknownValue}`
-    )
-  }
-  const unknownSecret = Object.keys(input.secretUpdates)
-    .find(key => fieldMap.get(key)?.type !== 'secret')
-  if (unknownSecret) {
-    throw new ServiceConfigurationValueError(
-      unknownSecret,
-      `invalid secret configuration field: ${unknownSecret}`
-    )
-  }
-
-  const defaults = defaultServiceConfigurationValues(input.definition)
-  const candidate: Record<string, unknown> = {}
-  for (const field of fields) {
-    if (field.type === 'secret') {
-      if (Object.hasOwn(input.secretUpdates, field.key)) {
-        candidate[field.key] = input.secretUpdates[field.key] ?? ''
-      } else {
-        const ciphertext = input.stored.secrets[field.key]
-        candidate[field.key] = ciphertext
-          ? decryptStoredSecret(ciphertext, 'service-configuration')
-          : ''
-      }
-      continue
-    }
-    candidate[field.key] = Object.hasOwn(input.valueUpdates, field.key)
-      ? input.valueUpdates[field.key]
-      : input.stored.values[field.key] ?? defaults[field.key]
-  }
-  return normalizeServiceConfigurationValues(
-    input.definition,
-    candidate,
-    defaults
-  )
-}
-
-function storeConfigurationValues(
-  definition: ServiceConfigurationDefinition,
-  values: Record<string, ServiceConfigurationValue>
-): StoredServiceConfigurationValues {
-  const stored: StoredServiceConfigurationValues = {
-    values: {},
-    secrets: {}
-  }
-  for (const field of serviceConfigurationFields(definition)) {
-    const value = values[field.key]
-    if (field.type === 'secret') {
-      if (typeof value === 'string' && value.length > 0) {
-        stored.secrets[field.key] = encryptStoredSecret(
-          value,
-          'service-configuration'
-        )
-      }
-    } else if (value !== undefined) {
-      stored.values[field.key] = value
-    }
-  }
-  return stored
 }
 
 async function advanceStoredConfigurationRevision(input: {
@@ -375,8 +233,7 @@ async function advanceStoredConfigurationRevision(input: {
 async function pushConfigurationWithRevisionRecovery(input: {
   context: PlatformServiceControlContext
   revision: number
-  values: Record<string, ServiceConfigurationValue>
-  configurationHash: string
+  configuration: PreparedServiceConfiguration
 }): Promise<ServiceConfigurationSyncResult> {
   let context = input.context
   let revision = input.revision
@@ -385,8 +242,7 @@ async function pushConfigurationWithRevisionRecovery(input: {
       return await pushConfiguration(
         context,
         revision,
-        input.values,
-        input.configurationHash,
+        input.configuration,
         attempt === 0
       )
     } catch (error) {
@@ -412,7 +268,7 @@ export async function updatePlatformServiceConfiguration(
     values: Record<string, unknown>
     secrets: Record<string, string | null>
   }
-): Promise<ServiceConfigurationSyncOutcome> {
+): Promise<ServiceConfigurationSyncResult> {
   const context = await loadServiceControlContext(upstreamServiceId)
   const definition = context.connection.configurationSchema
   const schemaSha256 = context.connection.configurationSchemaSha256
@@ -434,10 +290,11 @@ export async function updatePlatformServiceConfiguration(
     })
   }
 
-  let values: Record<string, ServiceConfigurationValue>
+  let configuration: PreparedServiceConfiguration
   try {
-    values = reconstructConfiguration({
+    configuration = prepareServiceConfiguration({
       definition,
+      schemaSha256,
       stored: context.connection.configurationValues,
       valueUpdates: input.values,
       secretUpdates: input.secrets
@@ -456,16 +313,12 @@ export async function updatePlatformServiceConfiguration(
     context.connection.configurationRevision,
     context.targets
   )
-  const configurationHash = calculateServiceConfigurationHash(
-    schemaSha256,
-    values
-  )
-  const stored = storeConfigurationValues(definition, values)
+  const stored = configuration.toStoredValues()
   const updated = await commitServiceControlContext(context, 'configuration', async (tx, _current, now) => {
     await tx.update(upstreamServiceConnections).set({
       configurationValues: stored,
       configurationRevision: revision,
-      configurationHash,
+      configurationHash: configuration.hash,
       updatedAt: now
     }).where(eq(upstreamServiceConnections.upstreamServiceId, upstreamServiceId))
     await tx.update(upstreamTargets).set({
@@ -480,16 +333,14 @@ export async function updatePlatformServiceConfiguration(
   const result = await pushConfigurationWithRevisionRecovery({
     context: updated,
     revision,
-    values,
-    configurationHash
+    configuration
   })
-  const publication = await publishRoutableConfigurationTargets(result)
-  return { ...result, ...publication }
+  return result
 }
 
 export async function synchronizePlatformServiceConfiguration(
   upstreamServiceId: string
-): Promise<ServiceConfigurationSyncOutcome> {
+): Promise<ServiceConfigurationSyncResult> {
   const context = await loadServiceControlContext(upstreamServiceId)
   const definition = context.connection.configurationSchema
   const schemaSha256 = context.connection.configurationSchemaSha256
@@ -505,17 +356,14 @@ export async function synchronizePlatformServiceConfiguration(
       data: { code: 'SERVICE_CONFIGURATION_NOT_SAVED' }
     })
   }
-  const values = reconstructConfiguration({
+  const configuration = prepareServiceConfiguration({
     definition,
+    schemaSha256,
     stored: context.connection.configurationValues,
     valueUpdates: {},
     secretUpdates: {}
   })
-  const configurationHash = calculateServiceConfigurationHash(
-    schemaSha256,
-    values
-  )
-  if (configurationHash !== context.connection.configurationHash) {
+  if (configuration.hash !== context.connection.configurationHash) {
     throw createApplicationError({
       statusCode: 500,
       message: 'stored Service configuration fingerprint is invalid',
@@ -524,7 +372,7 @@ export async function synchronizePlatformServiceConfiguration(
   }
   const revision = serviceConfigurationSynchronizationRevision(
     context.connection.configurationRevision,
-    configurationHash,
+    configuration.hash,
     context.targets
   )
   const synchronizedContext = revision === context.connection.configurationRevision
@@ -536,9 +384,7 @@ export async function synchronizePlatformServiceConfiguration(
   const result = await pushConfigurationWithRevisionRecovery({
     context: synchronizedContext,
     revision,
-    values,
-    configurationHash
+    configuration
   })
-  const publication = await publishRoutableConfigurationTargets(result)
-  return { ...result, ...publication }
+  return result
 }

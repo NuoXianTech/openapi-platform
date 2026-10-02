@@ -1,14 +1,11 @@
 <script setup lang="ts">
-import { LazyApiKeyResetModal, LazyApiKeySecretModal } from '#components'
 import { parseFetchError } from '~/utils/client-error'
 import type { DropdownMenuItem, TableColumn } from '@nuxt/ui'
 import { useApiKeys } from '~/composables/api/use-api-keys'
-import { useApiKeyForm } from '~/composables/api/use-api-key-form'
 import { useApiKeyDisplay } from '~/composables/api/use-api-key-display'
 import { PAGE_SIZE_OPTIONS } from '~/constants/pagination'
 import { useClientPagination } from '~/composables/dashboard/use-client-pagination'
 import { useDashboardColumnVisibility } from '~/composables/dashboard/use-dashboard-column-visibility'
-import { usePrivateResource } from '~/composables/dashboard/use-private-resource'
 import { adminModalUi } from '~/utils/admin-modal-ui'
 import type { ApiKeyItem, CreatedApiKeyItem } from '#shared/types/api'
 
@@ -31,125 +28,10 @@ const {
 } = useApiKeyDisplay()
 
 const {
-  data: items,
-  loading,
-  error,
-  refresh
-} = usePrivateResource<ApiKeyItem[]>({
-  path: '/api/user/apikeys/list',
-  defaultData: () => []
-})
-
-watch(error, (err) => {
-  if (!err) return
-  toast.add({ title: parseFetchError(err, t('user.apiKeys.loadFailed')), color: 'error' })
-})
-
-// 数据层：接口范围下拉 + CRUD（成功后自动 refresh 列表）
-const {
-  scopeSelectItems,
-  scopeLabelMap,
-  allScopes,
-  ensureScopeOptions,
-  create: createKeys,
-  update: updateKey,
-  reset: resetKey,
-  remove: removeKey
-} = useApiKeys({ scope: 'user', refresh })
-
-const {
-  form: formState,
-  reset: resetForm,
-  loadFrom: loadEditForm,
-  preselectAllScopes: preselectEditScopes,
-  ipLineErrors,
-  error: formError,
-  buildPayload
-} = useApiKeyForm()
-
-type ApiKeyFormMode = 'create' | 'edit'
-
-const formMode = ref<ApiKeyFormMode>('create')
-const formOpen = ref(false)
-const formTargetId = ref<number | null>(null)
-const submittingForm = ref(false)
-const isCreating = computed(() => formMode.value === 'create')
-
-async function openCreate() {
-  formMode.value = 'create'
-  formTargetId.value = null
-  resetForm()
-  formOpen.value = true
-  await ensureScopeOptions()
-  // 默认 all 模式；预选全部作为切到 pick 时的起点
-  formState.scopesSelected = [...allScopes.value]
-}
-
-async function openEdit(row: ApiKeyItem) {
-  formMode.value = 'edit'
-  formTargetId.value = row.id
-  loadEditForm(row)
-  formOpen.value = true
-  await ensureScopeOptions()
-  preselectEditScopes(allScopes.value)
-}
-
-async function submitForm() {
-  if (formError.value) {
-    toast.add({ title: formError.value, color: 'warning' })
-    return
-  }
-  const creating = formMode.value === 'create'
-  const targetId = formTargetId.value
-  if (!creating && targetId === null) return
-
-  submittingForm.value = true
-  try {
-    if (creating) {
-      const result = await createKeys({ ...buildPayload(), count: formState.count })
-      toast.add({
-        title: result.count > 1
-          ? t('user.apiKeys.createdMany', { count: result.count.toLocaleString(locale.value) })
-          : t('user.apiKeys.createdOne'),
-        color: 'success'
-      })
-      secretModal.open({ keys: result.keys })
-    } else {
-      if (targetId === null) throw new Error('API Key edit target is missing')
-      await updateKey(targetId, buildPayload())
-      toast.add({ title: t('common.feedback.updated'), color: 'success' })
-    }
-    formOpen.value = false
-  } catch (err) {
-    toast.add({
-      title: parseFetchError(
-        err,
-        creating ? t('common.feedback.createFailed') : t('common.feedback.updateFailed')
-      ),
-      color: 'error'
-    })
-  } finally {
-    submittingForm.value = false
-  }
-}
-
-// ------------------------------------------------------------
-// 重置
-// ------------------------------------------------------------
-const overlay = useOverlay()
-const resetModal = overlay.create(LazyApiKeyResetModal, { destroyOnClose: true })
-const secretModal = overlay.create(LazyApiKeySecretModal, { destroyOnClose: true })
-
-function openReset(row: ApiKeyItem) {
-  resetModal.open({
-    target: row,
-    onReset: async (id: number) => {
-      const result = await resetKey(id)
-      forgetRevealedKey(id)
-      return result
-    }
-  })
-}
+  items, loading, scopeSelectItems, scopeLabelMap,
+  form: formState, formError, ipLineErrors, formOpen, submitting: submittingForm, isCreating,
+  openCreate, openEdit, submitForm, openReset, toggleActive, remove: openDelete
+} = useApiKeys({ scope: 'user', onKeyRevoked: forgetRevealedKey })
 
 function forgetRevealedKey(id: number) {
   cancelReveal(id)
@@ -207,37 +89,6 @@ onBeforeUnmount(() => {
 async function copyRevealedKey(id: number) {
   const apiKey = revealedKeys.value[id]
   if (apiKey) await copyText(apiKey)
-}
-
-// ------------------------------------------------------------
-// 删除 / 启停
-// ------------------------------------------------------------
-const confirm = useConfirmDialog()
-
-async function toggleActive(row: ApiKeyItem) {
-  try {
-    await updateKey(row.id, { isActive: !row.isActive })
-    toast.add({ title: row.isActive ? t('common.apiKeys.feedback.disabled') : t('common.apiKeys.feedback.enabled'), color: 'success' })
-  } catch (err) {
-    toast.add({ title: parseFetchError(err, t('common.feedback.operationFailed')), color: 'error' })
-  }
-}
-
-async function openDelete(row: ApiKeyItem) {
-  await confirm({
-    title: t('common.apiKeys.delete.title', { name: row.name || t('common.apiKeys.defaultName') }),
-    description: t('common.apiKeys.delete.description'),
-    onConfirm: async () => {
-      try {
-        await removeKey(row.id)
-        forgetRevealedKey(row.id)
-        toast.add({ title: t('common.feedback.deleted'), color: 'success' })
-      } catch (err) {
-        toast.add({ title: parseFetchError(err, t('common.feedback.deleteFailed')), color: 'error' })
-        throw err
-      }
-    }
-  })
 }
 
 // ------------------------------------------------------------

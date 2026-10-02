@@ -196,6 +196,10 @@ function normalizePatch(input: SystemSettingsPatch): SystemSettingsPatch {
 
 function assertSettingsUpdate(next: SystemSettings, patch: SystemSettingsPatch): void {
   if (updatesClientIpSettings(patch)) assertClientIpSettings(next)
+  if ((next.oauthGithubEnabled && (!next.oauthGithubClientId || !next.oauthGithubClientSecret))
+    || (next.oauthQqEnabled && (!next.oauthQqClientId || !next.oauthQqClientSecret))) {
+    throw createApplicationError({ statusCode: 400, message: 'clientId 和 clientSecret 都需要配置后才能启用' })
+  }
   if (next.registrationMode === 'invite' && !next.registrationInviteCode) {
     throw createApplicationError({
       statusCode: 400,

@@ -1,5 +1,5 @@
 import { computed, getCurrentScope, onScopeDispose, ref, shallowRef, watch, type Ref } from 'vue'
-import type { PlatformUpstreamDetail, ServiceConfigurationSyncOutcome, ServiceConfigurationView } from '#shared/types/service-control'
+import type { PlatformUpstreamDetail, ServiceConfigurationSyncOutcome, ServiceDiscoveryOutcome } from '#shared/types/service-control'
 import { UPSTREAM_CONSTRAINTS } from '#shared/schemas/platform-constraints'
 import { usePrivateResource } from '~/composables/dashboard/use-private-resource'
 import { useAdminTargetOperations } from '~/composables/admin/use-admin-target-operations'
@@ -141,12 +141,16 @@ export function useAdminServiceControl(upstreamId: Readonly<Ref<string>>) {
     return runOperation({
       kind: 'discover',
       feedback: pageFeedback,
-      request: id => $fetch<ServiceConfigurationView>(`/api/admin/v1/upstreams/${id}/discover`, { method: 'POST' }),
+      request: id => $fetch<ServiceDiscoveryOutcome>(`/api/admin/v1/upstreams/${id}/discover`, { method: 'POST' }),
       accept: (result) => {
         if (resource.data.value) {
           resource.data.value = { ...result, upstream: { ...resource.data.value.upstream, connection: result.connection } }
         }
-        pageFeedback.value = {
+        pageFeedback.value = result.routingStatus === 'pending' ? {
+          message: t('admin.apis.routing.serviceControl.discoveryRoutingPending'),
+          description: t('admin.apis.routing.serviceControl.discoveryRoutingRetry'),
+          color: 'warning'
+        } : {
           message: result.connection.lastDiscoveryError
             ? t('admin.apis.routing.serviceControl.discoveryPartial')
             : t('admin.apis.routing.serviceControl.discoverySucceeded'),

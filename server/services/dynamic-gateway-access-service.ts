@@ -3,16 +3,15 @@ import { getHeader, getQuery, setResponseHeaders } from 'h3'
 import { and, eq, lte, or } from 'drizzle-orm'
 import { db } from '~~/server/db/client'
 import { apiKeys, users } from '~~/server/db/schema'
-import { API_ACCESS_ERROR, type RateLimitWindow } from '~~/server/config/api-access'
+import { API_ACCESS_ERROR } from '~~/server/config/api-access'
 import { creditService } from '~~/server/services/credit-service'
 import { gatewayCallService } from '~~/server/services/dynamic-gateway-call-service'
 import type { ResolvedDynamicRoute } from '~~/server/services/routing-runtime-service'
 import type { ApiCreditReservationContext, GateOutcome, RateLimitResult } from '~~/server/types/api-access'
 import { getAppEventContext } from '~~/server/utils/event-context'
 import { gatewayFail, type GatewayResponse } from '~~/server/utils/gateway-response'
-import { getRateLimiter } from '~~/server/utils/rate-limit'
-import { consumeMultiWindowAtomic } from '~~/server/utils/rate-limit/atomic-multi-window'
-import { getRedisClient, getRedisConfig, isRedisUnavailableError } from '~~/server/utils/redis'
+import { consumeRateLimitWindows } from '~~/server/utils/rate-limit'
+import { isRedisUnavailableError } from '~~/server/utils/redis'
 import { ensureRequestId } from '~~/server/utils/request-id'
 import { readClientIp, toClientIpRateLimitValue } from '~~/server/utils/request-meta'
 import { readQueryString } from '~~/server/utils/request-query'
@@ -92,62 +91,6 @@ function rateLimitHeaders(results: RateLimitResult[]): Record<string, string> {
     'X-RateLimit-Reset': String(Math.ceil(primary.resetAtMs / 1000)),
     'X-RateLimit-Window': primary.window
   }
-}
-
-async function checkRateLimits(
-  match: ResolvedDynamicRoute,
-  subject: string
-): Promise<{ results: RateLimitResult[] } | { denied: RateLimitResult }> {
-  const limits: Array<{ window: RateLimitWindow, limit: number }> = [
-    { window: 'second' as const, limit: match.route.rateLimitPerSecond },
-    { window: 'minute' as const, limit: match.route.rateLimitPerMinute },
-    { window: 'hour' as const, limit: match.route.rateLimitPerHour },
-    { window: 'day' as const, limit: match.route.rateLimitPerDay }
-  ].filter(item => item.limit > 0)
-
-  if (limits.length === 0) {
-    return { results: [] }
-  }
-
-  const baseKey = `route:${match.route.id}:${subject}`
-  const redisClient = getRedisClient()
-  const redisConfig = getRedisConfig()
-
-  // Use atomic multi-window check if Redis is available
-  if (redisClient && limits.length > 1) {
-    try {
-      const results = await consumeMultiWindowAtomic(
-        redisClient,
-        redisConfig,
-        baseKey,
-        limits
-      )
-      const denied = results.find(result => !result.allowed)
-      if (denied) return { denied }
-      return { results }
-    } catch (error) {
-      if (redisConfig.required && isRedisUnavailableError(error)) {
-        throw error
-      }
-      // Fall through to sequential check
-      console.warn('[rate-limit] Atomic multi-window check failed; falling back to sequential', error)
-    }
-  }
-
-  // Fallback: sequential check with independent window consumption
-  const limiter = getRateLimiter()
-  const results: RateLimitResult[] = []
-  for (const item of limits) {
-    // Use same base key structure as atomic path for consistency
-    const result = await limiter.consume(
-      `${baseKey}:${item.window}`,
-      item.limit,
-      item.window
-    )
-    results.push(result)
-    if (!result.allowed) return { denied: result }
-  }
-  return { results }
 }
 
 function reject(event: H3Event, rejection: AccessRejection): DynamicAccessResult {
@@ -283,9 +226,14 @@ export const dynamicGatewayAccessService = {
     const subject = apiKey
       ? `apikey:${apiKey.id}`
       : `ip:${toClientIpRateLimitValue(clientIp)}`
-    let rateLimits: Awaited<ReturnType<typeof checkRateLimits>>
+    let rateLimits: Awaited<ReturnType<typeof consumeRateLimitWindows>>
     try {
-      rateLimits = await checkRateLimits(match, subject)
+      rateLimits = await consumeRateLimitWindows(`route:${match.route.id}:${subject}`, [
+        { window: 'second', limit: match.route.rateLimitPerSecond },
+        { window: 'minute', limit: match.route.rateLimitPerMinute },
+        { window: 'hour', limit: match.route.rateLimitPerHour },
+        { window: 'day', limit: match.route.rateLimitPerDay }
+      ])
     } catch (error) {
       if (!isRedisUnavailableError(error)) throw error
       return reject(event, {

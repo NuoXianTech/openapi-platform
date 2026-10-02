@@ -1,12 +1,8 @@
 <script setup lang="ts">
-import { LazyApiKeyResetModal, LazyApiKeySecretModal } from '#components'
 import type { AdminUserItem } from '~/composables/admin/use-admin-users-page'
 import { adminModalUi } from '~/utils/admin-modal-ui'
-import { parseFetchError } from '~/utils/client-error'
 import { useApiKeys } from '~/composables/api/use-api-keys'
-import { useApiKeyForm } from '~/composables/api/use-api-key-form'
 import { useApiKeyDisplay } from '~/composables/api/use-api-key-display'
-import type { ApiKeyItem } from '#shared/types/api'
 
 const props = defineProps<{
   open: boolean
@@ -17,152 +13,17 @@ const emit = defineEmits<{
   'update:open': [value: boolean]
 }>()
 
-const toast = useToast()
-const { t, locale } = useI18n()
-const overlay = useOverlay()
-const resetModal = overlay.create(LazyApiKeyResetModal, { destroyOnClose: true })
-const secretModal = overlay.create(LazyApiKeySecretModal, { destroyOnClose: true })
+const { locale } = useI18n()
+const { getIpText, getQuotaText, getScopesText, getStatus } = useApiKeyDisplay()
 const {
-  getIpText,
-  getQuotaText,
-  getScopesText,
-  getStatus
-} = useApiKeyDisplay()
-const keys = ref<ApiKeyItem[]>([])
-const loading = ref(false)
-
-async function load() {
-  if (!props.target) return
-  loading.value = true
-  try {
-    keys.value = (await $fetch<ApiKeyItem[]>('/api/admin/users/apikeys', { query: { userId: props.target.id } })) || []
-  } catch (error) {
-    keys.value = []
-    toast.add({
-      title: parseFetchError(error, t('admin.users.apiKeys.loadFailed')),
-      color: 'error'
-    })
-  } finally {
-    loading.value = false
-  }
-}
-
-// 数据层：接口范围下拉 + CRUD（admin 端点；创建时按 target 用户定位；成功后 refresh=load）
-const {
-  scopeSelectItems,
-  scopeLabelMap,
-  allScopes,
-  ensureScopeOptions,
-  create: createKey,
-  update: updateKey,
-  reset: resetKey,
-  remove: removeKey
-} = useApiKeys({ scope: 'admin', getUserId: () => props.target?.id, refresh: load })
-
-// 创建 / 编辑共用同一份表单（editingId 非 null 即编辑）
-const {
-  form,
-  reset: resetForm,
-  loadFrom,
-  preselectAllScopes,
-  ipLineErrors,
-  error: formError,
-  buildPayload
-} = useApiKeyForm()
-
-const formOpen = ref(false)
-const creating = ref(false)
-const editingId = ref<number | null>(null)
-
-watch(() => [props.open, props.target?.id] as const, ([isOpen]) => {
-  if (isOpen) {
-    void load()
-    void ensureScopeOptions()
-    resetForm()
-    creating.value = false
-    formOpen.value = false
-    editingId.value = null
-  }
-})
+  items: keys, loading, scopeSelectItems, scopeLabelMap,
+  form, formError, ipLineErrors, formOpen, editingId, submitting: creating,
+  openCreate, openEdit: openEditForm, submitForm, openReset, toggleActive, remove: removeKeyAction
+} = useApiKeys({ scope: 'admin', getUserId: () => props.target?.id, open: () => props.open })
 
 function toggleForm() {
-  formOpen.value = !formOpen.value
-  if (formOpen.value) {
-    editingId.value = null
-    resetForm()
-    form.scopesSelected = [...allScopes.value]
-  }
-}
-
-function openEditForm(key: ApiKeyItem) {
-  editingId.value = key.id
-  loadFrom(key)
-  formOpen.value = true
-  preselectAllScopes(allScopes.value)
-}
-
-async function submitForm() {
-  if (!props.target) return
-  if (formError.value) {
-    toast.add({ title: formError.value, color: 'warning' })
-    return
-  }
-  creating.value = true
-  try {
-    if (editingId.value) {
-      await updateKey(editingId.value, buildPayload())
-      toast.add({ title: t('common.feedback.updated'), color: 'success' })
-    } else {
-      const res = await createKey({ ...buildPayload(), count: form.count })
-      toast.add({
-        title: res.count > 1
-          ? t('admin.users.apiKeys.feedback.createdMany', { count: res.count })
-          : t('admin.users.apiKeys.feedback.createdOne'),
-        color: 'success'
-      })
-      secretModal.open({ keys: res.keys })
-    }
-    formOpen.value = false
-    editingId.value = null
-    resetForm()
-  } catch (err) {
-    toast.add({
-      title: parseFetchError(
-        err,
-        editingId.value ? t('common.feedback.updateFailed') : t('common.feedback.createFailed')
-      ),
-      color: 'error'
-    })
-  } finally {
-    creating.value = false
-  }
-}
-
-function openReset(key: ApiKeyItem) {
-  resetModal.open({ target: key, onReset: resetKey })
-}
-
-async function toggleActive(key: ApiKeyItem) {
-  try {
-    await updateKey(key.id, { isActive: !key.isActive })
-    toast.add({
-      title: key.isActive
-        ? t('common.apiKeys.feedback.disabled')
-        : t('common.apiKeys.feedback.enabled'),
-      color: 'success'
-    })
-  } catch (err) {
-    toast.add({ title: parseFetchError(err, t('common.feedback.operationFailed')), color: 'error' })
-  }
-}
-
-async function removeKeyAction(id: number) {
-  try {
-    await removeKey(id)
-    toast.add({ title: t('common.feedback.deleted'), color: 'success' })
-  } catch (err) {
-    toast.add({ title: parseFetchError(err, t('common.feedback.deleteFailed')), color: 'error' })
-  }
+  if (formOpen.value) formOpen.value = false
+  else void openCreate()
 }
 </script>
 
@@ -296,7 +157,7 @@ async function removeKeyAction(id: number) {
                 size="xs"
                 variant="outline"
                 color="error"
-                @click="removeKeyAction(key.id)"
+                @click="removeKeyAction(key)"
               >
                 {{ $t('common.actions.delete') }}
               </UButton>

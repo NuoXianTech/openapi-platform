@@ -2,13 +2,10 @@ import { and, eq } from 'drizzle-orm'
 import type {
   RedactedServiceConfigurationState,
   ServiceAvailability,
-  ServiceConfigurationDefinition,
-  ServiceConfigurationValue,
   ServiceConfigurationView,
   ServiceTargetAvailability,
   ServiceConnectionView,
-  ServiceTargetControlState,
-  StoredServiceConfigurationValues
+  ServiceTargetControlState
 } from '#shared/types/service-control'
 import { db, type DatabaseTransaction } from '~~/server/db/client'
 import { withCommittedTransaction } from '~~/server/utils/committed-transaction'
@@ -23,8 +20,7 @@ import { resolveServiceAvailability } from '~~/server/services/service-availabil
 import { upstreamServiceTokenService } from '~~/server/services/upstream-service-token-service'
 import { readStoredServiceEndpoints } from '~~/server/services/platform-service-openapi-service'
 import {
-  defaultServiceConfigurationValues,
-  serviceConfigurationFields
+  publicStoredServiceConfiguration
 } from '~~/server/utils/service-configuration-values'
 import { toNullableIsoString } from '~~/server/utils/date'
 import { firstRow } from '~~/server/utils/row'
@@ -67,25 +63,6 @@ export function toServiceConnectionView(
     ),
     lastDiscoveryError: connection.lastDiscoveryError
   }
-}
-
-function publicDesiredValues(
-  definition: ServiceConfigurationDefinition | null,
-  stored: StoredServiceConfigurationValues
-): Record<
-  string,
-  ServiceConfigurationValue | { configured: boolean }
-> {
-  if (!definition) return {}
-  const defaults = defaultServiceConfigurationValues(definition)
-  return Object.fromEntries(
-    serviceConfigurationFields(definition).map(field => [
-      field.key,
-      field.type === 'secret'
-        ? { configured: Boolean(stored.secrets[field.key]) }
-        : stored.values[field.key] ?? defaults[field.key]!
-    ])
-  )
 }
 
 export function serviceTargetControlState(
@@ -213,81 +190,97 @@ type ServiceTargetResult
   = { ok: true, targetId: string, state: RedactedServiceConfigurationState }
     | { ok: false, targetId: string, error: string }
 
+type UpdateServiceConnection = (
+  tx: DatabaseTransaction,
+  current: PlatformServiceControlContext,
+  changedAt: Date
+) => Promise<PlatformServiceControlContext['connection']>
+
 /** Accept a network observation and its Target state changes under the same
  * context lock. Discovery may update the contract first, in this transaction. */
 export async function acceptServiceTargetResults(
   expected: PlatformServiceControlContext,
   operation: 'discovery' | 'configuration',
   results: readonly ServiceTargetResult[],
-  updateConnection?: (
-    tx: DatabaseTransaction,
-    current: PlatformServiceControlContext,
-    changedAt: Date
-  ) => Promise<PlatformServiceControlContext['connection']>
+  updateConnection?: UpdateServiceConnection
 ): Promise<{ status: 'synced' | 'partial' | 'failed', targets: PlatformServiceControlContext['targets'] }> {
-  return commitServiceControlContext(expected, operation, async (tx, current, changedAt) => {
-    const enabledIds = new Set(current.targets.filter(target => target.enabled).map(target => target.id))
-    const observedIds = new Set<string>()
-    for (const result of results) {
-      if (!enabledIds.has(result.targetId) || observedIds.has(result.targetId)) {
-        throw new Error('Target observation must belong to one enabled Target in the accepted context')
-      }
-      observedIds.add(result.targetId)
+  return commitServiceControlContext(expected, operation, (tx, current, changedAt) => (
+    writeServiceTargetResults(tx, current, changedAt, operation, results, updateConnection)
+  ))
+}
+
+/** Write under commitServiceControlContext's locks. Discovery also prepares
+ * its response in that transaction, so later reads cannot undo its success. */
+export async function writeServiceTargetResults(
+  tx: DatabaseTransaction,
+  current: PlatformServiceControlContext,
+  changedAt: Date,
+  operation: 'discovery' | 'configuration',
+  results: readonly ServiceTargetResult[],
+  updateConnection?: UpdateServiceConnection
+): Promise<{ status: 'synced' | 'partial' | 'failed', targets: PlatformServiceControlContext['targets'] }> {
+  const enabledIds = new Set(current.targets.filter(target => target.enabled).map(target => target.id))
+  const observedIds = new Set<string>()
+  for (const result of results) {
+    if (!enabledIds.has(result.targetId) || observedIds.has(result.targetId)) {
+      throw new Error('Target observation must belong to one enabled Target in the accepted context')
     }
-    const connection = updateConnection
-      ? await updateConnection(tx, current, changedAt)
-      : current.connection
-    let successful = 0
-    const acceptedTargets = new Map(current.targets.map(target => [target.id, target]))
-    for (const result of results) {
-      const state = result.ok ? result.state : null
-      const matches = state !== null
-        && connection.configurationHash !== null
-        && connection.configurationRevision > 0
-        && state.serviceId === connection.serviceId
-        && state.schemaSha256 === connection.configurationSchemaSha256
-        && state.revision === connection.configurationRevision
-        && state.configurationSha256 === connection.configurationHash
-      if (matches) successful += 1
-      const updated = firstRow(await tx.update(upstreamTargets).set({
-        ...(state ? {
-          configurationRevision: state.revision,
-          configurationHash: state.configurationSha256,
-          configurationState: state
-        } : {}),
-        configurationStatus: !result.ok ? 'error'
-          : !connection.configurationHash ? 'unknown'
-              : matches ? 'synced' : 'drifted',
-        lastError: !result.ok ? result.error
-          : operation === 'configuration' && !matches ? 'Service configuration ACK mismatch' : null,
-        lastConfigurationSyncAt: changedAt,
-        updatedAt: changedAt
-      }).where(and(
-        eq(upstreamTargets.id, result.targetId),
-        eq(upstreamTargets.upstreamServiceId, current.service.id)
-      )).returning())
-      if (!updated) throw new Error('Target disappeared during result acceptance')
-      acceptedTargets.set(updated.id, updated)
-    }
-    const status = successful > 0 && successful === enabledIds.size
-      ? 'synced'
-      : successful > 0 ? 'partial' : 'failed'
-    if (operation === 'configuration' && status === 'synced') {
-      await tx.update(upstreamServiceConnections).set({
-        lastConfigurationSyncAt: changedAt,
-        updatedAt: changedAt
-      }).where(eq(upstreamServiceConnections.upstreamServiceId, current.service.id))
-    }
-    return { status, targets: [...acceptedTargets.values()] }
-  })
+    observedIds.add(result.targetId)
+  }
+  const connection = updateConnection
+    ? await updateConnection(tx, current, changedAt)
+    : current.connection
+  let successful = 0
+  const acceptedTargets = new Map(current.targets.map(target => [target.id, target]))
+  for (const result of results) {
+    const state = result.ok ? result.state : null
+    const matches = state !== null
+      && connection.configurationHash !== null
+      && connection.configurationRevision > 0
+      && state.serviceId === connection.serviceId
+      && state.schemaSha256 === connection.configurationSchemaSha256
+      && state.revision === connection.configurationRevision
+      && state.configurationSha256 === connection.configurationHash
+    if (matches) successful += 1
+    const updated = firstRow(await tx.update(upstreamTargets).set({
+      ...(state ? {
+        configurationRevision: state.revision,
+        configurationHash: state.configurationSha256,
+        configurationState: state
+      } : {}),
+      configurationStatus: !result.ok ? 'error'
+        : !connection.configurationHash ? 'unknown'
+            : matches ? 'synced' : 'drifted',
+      lastError: !result.ok ? result.error
+        : operation === 'configuration' && !matches ? 'Service configuration ACK mismatch' : null,
+      lastConfigurationSyncAt: changedAt,
+      updatedAt: changedAt
+    }).where(and(
+      eq(upstreamTargets.id, result.targetId),
+      eq(upstreamTargets.upstreamServiceId, current.service.id)
+    )).returning())
+    if (!updated) throw new Error('Target disappeared during result acceptance')
+    acceptedTargets.set(updated.id, updated)
+  }
+  const status = successful > 0 && successful === enabledIds.size
+    ? 'synced'
+    : successful > 0 ? 'partial' : 'failed'
+  if (operation === 'configuration' && status === 'synced') {
+    await tx.update(upstreamServiceConnections).set({
+      lastConfigurationSyncAt: changedAt,
+      updatedAt: changedAt
+    }).where(eq(upstreamServiceConnections.upstreamServiceId, current.service.id))
+  }
+  return { status, targets: [...acceptedTargets.values()] }
 }
 
 export async function buildServiceControlView(
   context: PlatformServiceControlContext,
-  options: ServiceViewOptions = {}
+  options: ServiceViewOptions & { transaction?: DatabaseTransaction } = {}
 ): Promise<ServiceConfigurationView> {
+  const executor = options.transaction ?? db
   const document = context.service.openapiDocumentId
-    ? firstRow(await db.select({
+    ? firstRow(await executor.select({
         summary: openapiDocuments.parsedSummary
       }).from(openapiDocuments)
         .where(eq(
@@ -296,29 +289,45 @@ export async function buildServiceControlView(
         ))
         .limit(1))
     : null
-  const availability = options.checkAvailability === true
-    && context.service.status === 'active'
-    ? await resolveServiceAvailability(
-        context.connection.serviceDescription,
-        context.targets,
-        await upstreamServiceTokenService.getForControl(context.service.id)
-      )
-    : { overall: 'unknown' as const, targets: new Map() }
-  return {
-    connection: toServiceConnectionView(
-      context.connection,
-      availability.overall
-    ),
+  const view: ServiceConfigurationView = {
+    connection: toServiceConnectionView(context.connection),
     definition: context.connection.configurationSchema ?? null,
-    values: publicDesiredValues(
+    values: publicStoredServiceConfiguration(
       context.connection.configurationSchema ?? null,
       context.connection.configurationValues
     ),
-    targets: context.targets.map(target => serviceTargetControlState(
-      target,
-      availability.targets.get(target.id) ?? 'unknown'
-    )),
+    targets: context.targets.map(target => serviceTargetControlState(target, 'unknown')),
     endpoints: document ? readStoredServiceEndpoints(document.summary) : []
+  }
+  return options.checkAvailability === true
+    ? refreshServiceControlAvailability(context, view)
+    : view
+}
+
+/** Availability is a best-effort observation, not part of the saved contract.
+ * Preserve the committed view (including Endpoint audit facts) on read errors. */
+export async function refreshServiceControlAvailability(
+  context: PlatformServiceControlContext,
+  view: ServiceConfigurationView
+): Promise<ServiceConfigurationView> {
+  if (context.service.status !== 'active') return view
+  try {
+    const availability = await resolveServiceAvailability(
+      context.connection.serviceDescription,
+      context.targets,
+      await upstreamServiceTokenService.getForControl(context.service.id)
+    )
+    return {
+      ...view,
+      connection: { ...view.connection, availability: availability.overall },
+      targets: view.targets.map(target => ({
+        ...target, availability: availability.targets.get(target.id) ?? 'unknown'
+      }))
+    }
+  } catch {
+    // Token-load errors can contain secret data; log only the affected identity.
+    console.error('[service-control] availability unavailable', { upstreamId: context.service.id })
+    return view
   }
 }
 

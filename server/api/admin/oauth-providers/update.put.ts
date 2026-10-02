@@ -24,9 +24,6 @@ export default defineAdminEventHandler(async (event, admin) => {
   if (body.isEnabled !== undefined) patch.isEnabled = body.isEnabled
 
   const updated = await oauthProviderService.update(provider, patch)
-  if (!updated) {
-    throw createError({ statusCode: 500, message: 'update failed' })
-  }
 
   const changedFields = [
     patch.clientId !== undefined && patch.clientId.trim() !== current.clientId ? 'clientId' : null,

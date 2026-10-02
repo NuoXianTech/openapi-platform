@@ -1,5 +1,6 @@
 import { fileURLToPath } from 'node:url'
 import { defineConfig } from 'vitest/config'
+import { vueSetupPlugin } from './test/helpers/vue-setup-plugin.ts'
 
 const rootDir = fileURLToPath(new URL('.', import.meta.url))
 const appDir = fileURLToPath(new URL('./app', import.meta.url))
@@ -10,10 +11,14 @@ const aliases = {
   '@@': rootDir,
   '~': appDir,
   '@': appDir,
-  '#shared': sharedDir
+  '#shared': sharedDir,
+  '#components': fileURLToPath(new URL('./test/helpers/overlay-components.ts', import.meta.url))
 }
 
 export default defineConfig({
+  // App unit tests must execute Nuxt's client guards, not an undefined meta flag.
+  define: { 'import.meta.client': 'true', 'import.meta.server': 'false' },
+  plugins: [vueSetupPlugin()],
   test: {
     environment: 'node',
     include: ['test/unit/**/*.{test,spec}.ts'],

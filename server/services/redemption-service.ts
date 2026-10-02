@@ -1,11 +1,6 @@
-import { randomInt } from 'node:crypto'
 import { and, count, desc, eq, gte, ilike, isNull, lt, or, sql, type SQL } from 'drizzle-orm'
 import { creditTransactions, redemptionCodes, users } from '~~/server/db/schema'
-import {
-  buildRedemptionCodeRows,
-  insertRedemptionCodesUntilComplete,
-  normalizeRedemptionGeneration
-} from '~~/server/services/redemption-code-generation'
+import { generateRedemptionCodes } from '~~/server/services/redemption-code-generation'
 import { toIsoString } from '~~/server/utils/date'
 import { getSqlState } from '~~/server/utils/database-error'
 import { toNumber } from '~~/server/utils/number'
@@ -13,10 +8,8 @@ import { normalizePagination } from '~~/server/utils/pagination'
 import { firstRow } from '~~/server/utils/row'
 import { db, type DatabaseTransaction } from '~~/server/db/client'
 import {
-  createStoredSecretPreview,
   decryptStoredSecret,
-  digestStoredSecret,
-  encryptStoredSecret
+  digestStoredSecret
 } from '~~/server/utils/stored-secret'
 
 /**
@@ -29,20 +22,7 @@ import {
  *   4. 兑换发生在事务里：递增 usedCount + 加用户积分 + 写流水 + 写 record。
  */
 
-const CODE_ALPHABET = 'abcdefghijklmnopqrstuvwxyz0123456789'
-/** 兑换码固定 32 位小写字母加数字，不可在管理端自定义。 */
-const CODE_LENGTH = 32
-
 export type RedemptionStatus = 'enabled' | 'disabled' | 'used_up' | 'expired' | 'available'
-
-interface GenerateInput {
-  amount: number
-  count?: number // 一次生成多少张，默认 1，最多 100
-  maxUses?: number // 单张最大被使用次数，默认 1
-  expiresAt?: Date | null
-  note?: string | null
-  createdBy?: number | null
-}
 
 export interface ListFilters {
   batchId?: string
@@ -63,32 +43,6 @@ interface RedeemInput {
   ip?: string | null
 }
 
-function randomCode(length: number): string {
-  let out = ''
-  for (let i = 0; i < length; i++) {
-    out += CODE_ALPHABET[randomInt(CODE_ALPHABET.length)]
-  }
-  return out
-}
-
-function buildBatchId(): string {
-  // 形如 B-2026-05-01-XXXX
-  const d = new Date()
-  const yyyy = d.getUTCFullYear()
-  const mm = String(d.getUTCMonth() + 1).padStart(2, '0')
-  const dd = String(d.getUTCDate()).padStart(2, '0')
-  const tail = randomCode(4)
-  return `B-${yyyy}-${mm}-${dd}-${tail}`
-}
-
-function createCodeStrings(count: number): string[] {
-  const codeStrings = new Set<string>()
-  while (codeStrings.size < count) {
-    codeStrings.add(randomCode(CODE_LENGTH))
-  }
-  return Array.from(codeStrings)
-}
-
 /**
  * 摘要按小写明文计算，所以归一化必须转小写。大小写输入都能兑换同一张码，
  * 但 0.1.2 之前生成的大写码摘要对不上，属于本次破坏性变更的一部分。
@@ -103,59 +57,13 @@ type RedemptionCodeRecord = Omit<
   'codeDigest' | 'codeCiphertext'
 >
 
-function encodeRedemptionCode(code: string) {
-  return {
-    codeDigest: digestStoredSecret(code, 'redemption-code'),
-    codeCiphertext: encryptStoredSecret(code, 'redemption-code'),
-    codePreview: createStoredSecretPreview(code)
-  }
-}
-
 function presentRedemptionCodeRecord(row: StoredRedemptionCodeRecord): RedemptionCodeRecord {
   const { codeDigest: _codeDigest, codeCiphertext: _codeCiphertext, ...record } = row
   return record
 }
 
 export const redemptionService = {
-  /**
-   * 批量生成兑换码。返回所有生成的码（明文，仅生成时返回）。
-   * 同一批次共享 amount/maxUses/expiresAt/note。
-   */
-  async generate(input: GenerateInput) {
-    const normalized = normalizeRedemptionGeneration(input)
-    const batchId = buildBatchId()
-
-    const inserted = await insertRedemptionCodesUntilComplete<
-      typeof redemptionCodes.$inferInsert,
-      typeof redemptionCodes.$inferSelect
-    >({
-      requestedCount: normalized.count,
-      createRows: count => buildRedemptionCodeRows({
-        codes: createCodeStrings(count).map(encodeRedemptionCode),
-        amount: normalized.amount,
-        batchId,
-        note: normalized.note,
-        maxUses: normalized.maxUses,
-        expiresAt: normalized.expiresAt,
-        createdBy: normalized.createdBy
-      }),
-      insertRows: rows => db.insert(redemptionCodes).values(rows).onConflictDoNothing().returning()
-    })
-
-    return {
-      batchId,
-      generated: inserted.length,
-      requested: normalized.count,
-      codes: inserted.map((row: StoredRedemptionCodeRecord) => {
-        const code = decryptStoredSecret(row.codeCiphertext, 'redemption-code')
-        return { id: row.id, code, amount: row.amount }
-      }),
-      amount: normalized.amount,
-      maxUses: normalized.maxUses,
-      expiresAt: normalized.expiresAt,
-      note: normalized.note
-    }
-  },
+  generate: generateRedemptionCodes,
 
   async list(filters: ListFilters = {}) {
     const { limit, offset } = normalizePagination(filters)

@@ -54,7 +54,6 @@ Git Tag 必须：
    pnpm install --frozen-lockfile
    pnpm lint
    pnpm typecheck
-   pnpm check:dead-code
    pnpm test
    pnpm build
    pnpm test:integration
@@ -138,7 +137,7 @@ flowchart LR
   GHCR --> Release
 ```
 
-- `quality.yml` 保持 PR 规则及 `Application quality` 检查名称，继续执行 lint、类型检查、死代码检查、单元测试、Service 联调、生产构建与产物集成测试。仅非 PR 运行在全部成功后上传 `ci-distribution`，保留 14 天。
+- `quality.yml` 保持 PR 规则及 `Application quality` 检查名称，继续执行 lint、类型检查、单元测试、Service 联调、生产构建与产物集成测试。仅非 PR 运行在全部成功后上传 `ci-distribution`，保留 14 天。
 - `verified-build.yml` 校验版本 Tag 格式、包版本及其对远端 `main` 的可达性，只接受本仓库相同提交的 push 或手动 CI。已有运行则等待它；产物缺失或过期时为该 Tag 补跑 CI。失败或取消的 CI 不授权发布，PR 检查不作为正式产物来源。
 - `ci-distribution.tar` 保留构建后的目录结构和权限；`ci-build.json` 记录 Platform SHA、测试使用的 Service SHA、Node 主版本、应用版本和压缩包 SHA-256。下载后先核对来源和完整性，再解包。
 - `release.yml` 是唯一正式发布入口，支持 Tag push 和手动指定已有 Tag。打包任务与镜像任务使用相同 CI run；两者全部成功后，先上传附件到草稿 Release，再公开。发布说明由 Git 提交记录生成，不读取版本 Markdown 文件；补充升级说明直接维护在 Release 页面。

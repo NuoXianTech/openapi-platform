@@ -10,9 +10,11 @@ import {
 } from '~~/server/db/schema'
 import { createApplicationError } from '~~/server/errors/application-error'
 import {
-  buildServiceControlView,
   loadServiceControlContext,
   acceptServiceTargetResults,
+  commitServiceControlContext,
+  writeServiceTargetResults,
+  buildServiceControlView,
   safeServiceControlError,
   type PlatformServiceControlContext
 } from '~~/server/services/platform-service-control-context'
@@ -20,7 +22,6 @@ import {
   persistServiceOpenApi,
   readStoredServiceEndpoints
 } from '~~/server/services/platform-service-openapi-service'
-import { refreshPlatformRevision } from '~~/server/services/platform-endpoint-publication-service'
 import { platformEndpointService } from '~~/server/services/platform-endpoint-service'
 import { upstreamServiceTokenService } from '~~/server/services/upstream-service-token-service'
 import { canonicalJson } from '~~/server/utils/canonical-json'
@@ -29,8 +30,7 @@ import {
   UnsupportedServiceProtocolError,
   serviceControlClient
 } from '~~/server/utils/service-control-client'
-import { assertServiceConfigurationDefinition } from '~~/server/utils/service-configuration-values'
-import { hasReadyServiceTarget } from '~~/server/utils/service-upstream-readiness'
+import { readServiceTargetContract } from '~~/server/services/service-target-contract'
 
 interface DiscoveredTarget {
   targetId: string
@@ -61,10 +61,6 @@ interface DiscoveryFetchFailure {
 
 type DiscoveryFetchResult = DiscoveryFetchSuccess | DiscoveryFetchFailure
 
-const activeDiscoveries = new Map<
-  string,
-  ReturnType<typeof performPlatformServiceDiscovery>
->()
 const DISCOVERY_CONCURRENCY = 8
 
 async function allSettledBounded<TItem, TResult>(
@@ -161,55 +157,7 @@ async function fetchServiceSnapshot(
   const targetResults = await allSettledBounded(
     enabledTargets,
     async (target): Promise<DiscoveredTarget> => {
-      const description = await serviceControlClient.getDescription(
-        target.baseUrl,
-        token
-      )
-      const [definition, state] = await Promise.all([
-        serviceControlClient.getConfigurationDefinition(
-          target.baseUrl,
-          description.data.configuration.schema,
-          token
-        ),
-        serviceControlClient.getConfigurationState(
-          target.baseUrl,
-          description.data.configuration.state,
-          token
-        )
-      ])
-      const schemaSha256 = createHash('sha256')
-        .update(canonicalJson(definition.data))
-        .digest('hex')
-      assertServiceConfigurationDefinition(definition.data)
-      if (
-        description.headers.get('x-openapi-sha256')
-        !== description.data.openapiSha256
-      ) {
-        throw createApplicationError({
-          statusCode: 409,
-          message: 'Service description fingerprint mismatch',
-          data: { code: 'SERVICE_OPENAPI_HASH_MISMATCH' }
-        })
-      }
-      if (
-        schemaSha256 !== description.data.configuration.schemaSha256
-        || definition.headers.get('x-configuration-schema-sha256')
-        !== schemaSha256
-        || state.data.serviceId !== description.data.serviceId
-        || state.data.schemaSha256 !== schemaSha256
-      ) {
-        throw createApplicationError({
-          statusCode: 409,
-          message: 'Service configuration fingerprint mismatch',
-          data: { code: 'SERVICE_CONFIGURATION_HASH_MISMATCH' }
-        })
-      }
-      return {
-        targetId: target.id,
-        description: description.data,
-        definition: definition.data,
-        state: state.data
-      }
+      return { targetId: target.id, ...await readServiceTargetContract(target.baseUrl, token) }
     },
     DISCOVERY_CONCURRENCY
   )
@@ -329,65 +277,72 @@ async function commitServiceSnapshot(
   context: PlatformServiceControlContext,
   snapshot: DiscoveryFetchSuccess
 ) {
-  await acceptServiceTargetResults(context, 'discovery', [
-    ...snapshot.targets.map(item => ({ ok: true as const, targetId: item.targetId, state: item.state })),
-    ...[...snapshot.targetErrors].map(([targetId, error]) => ({ ok: false as const, targetId, error }))
-  ], async (tx, current, now) => {
-    const first = snapshot.targets[0]!
-    const schemaChanged = Boolean(
-      current.connection.configurationSchemaSha256
-      && current.connection.configurationSchemaSha256
-      !== snapshot.description.configuration.schemaSha256
-    )
-    const document = await persistServiceOpenApi({
-      upstreamServiceId: current.service.id,
-      description: snapshot.description,
-      document: snapshot.openapi.document,
-      reportedSha256: snapshot.openapi.reportedSha256,
-      sourceUrl: snapshot.openapi.sourceUrl,
-      transaction: tx
-    })
-    await platformEndpointService.synchronizeSupportRoutes({
-      upstream: current.service,
-      serviceName: snapshot.description.name,
-      endpoints: readStoredServiceEndpoints(document.parsedSummary),
-      transaction: tx
-    })
-
-    const firstTargetError = [...snapshot.targetErrors.values()][0]
-    const discoveryError = snapshot.targetErrors.size > 0
-      ? `${snapshot.targetErrors.size} Service target(s) could not be discovered: ${firstTargetError}`.slice(0, 500)
-      : null
-    const updatedConnection = firstRow(
-      await tx.update(upstreamServiceConnections).set({
-        serviceId: snapshot.description.serviceId,
+  return commitServiceControlContext(context, 'discovery', async (tx, current, changedAt) => {
+    await writeServiceTargetResults(tx, current, changedAt, 'discovery', [
+      ...snapshot.targets.map(item => ({ ok: true as const, targetId: item.targetId, state: item.state })),
+      ...[...snapshot.targetErrors].map(([targetId, error]) => ({ ok: false as const, targetId, error }))
+    ], async (tx, current, now) => {
+      const first = snapshot.targets[0]!
+      const schemaChanged = Boolean(
+        current.connection.configurationSchemaSha256
+        && current.connection.configurationSchemaSha256
+        !== snapshot.description.configuration.schemaSha256
+      )
+      const document = await persistServiceOpenApi({
+        upstreamServiceId: current.service.id,
+        description: snapshot.description,
+        document: snapshot.openapi.document,
+        reportedSha256: snapshot.openapi.reportedSha256,
+        sourceUrl: snapshot.openapi.sourceUrl,
+        transaction: tx
+      })
+      await platformEndpointService.synchronizeSupportRoutes({
+        upstream: current.service,
         serviceName: snapshot.description.name,
-        serviceVersion: snapshot.description.version,
-        serviceCommit: snapshot.description.commit,
-        serviceProtocol: snapshot.description.serviceProtocol,
-        serviceDescription: snapshot.description,
-        openapiSha256: snapshot.description.openapiSha256,
-        configurationSchemaSha256:
-          snapshot.description.configuration.schemaSha256,
-        configurationSchema: first.definition,
-        ...(schemaChanged ? { configurationHash: null } : {}),
-        lastDiscoveredAt: now,
-        lastDiscoveryError: discoveryError,
-        updatedAt: now
-      }).where(eq(
-        upstreamServiceConnections.upstreamServiceId,
-        current.service.id
-      )).returning()
-    )
-    if (!updatedConnection) {
-      throw new Error('Service connection disappeared during discovery')
-    }
+        endpoints: readStoredServiceEndpoints(document.parsedSummary),
+        transaction: tx
+      })
 
-    return upstreamServiceTokenService.promoteVerified(tx, updatedConnection)
+      const firstTargetError = [...snapshot.targetErrors.values()][0]
+      const discoveryError = snapshot.targetErrors.size > 0
+        ? `${snapshot.targetErrors.size} Service target(s) could not be discovered: ${firstTargetError}`.slice(0, 500)
+        : null
+      const updatedConnection = firstRow(
+        await tx.update(upstreamServiceConnections).set({
+          serviceId: snapshot.description.serviceId,
+          serviceName: snapshot.description.name,
+          serviceVersion: snapshot.description.version,
+          serviceCommit: snapshot.description.commit,
+          serviceProtocol: snapshot.description.serviceProtocol,
+          serviceDescription: snapshot.description,
+          openapiSha256: snapshot.description.openapiSha256,
+          configurationSchemaSha256:
+            snapshot.description.configuration.schemaSha256,
+          configurationSchema: first.definition,
+          ...(schemaChanged ? { configurationHash: null } : {}),
+          lastDiscoveredAt: now,
+          lastDiscoveryError: discoveryError,
+          updatedAt: now
+        }).where(eq(
+          upstreamServiceConnections.upstreamServiceId,
+          current.service.id
+        )).returning()
+      )
+      if (!updatedConnection) {
+        throw new Error('Service connection disappeared during discovery')
+      }
+
+      return upstreamServiceTokenService.promoteVerified(tx, updatedConnection)
+    })
+    // Read and decode the response while rollback is still possible. No fresh
+    // context or OpenAPI read is required after this transaction commits.
+    const committed = await loadServiceControlContext(context.service.id, { transaction: tx })
+    const view = await buildServiceControlView(committed, { transaction: tx })
+    return { context: committed, view }
   })
 }
 
-async function performPlatformServiceDiscovery(upstreamServiceId: string) {
+export async function discoverPlatformService(upstreamServiceId: string) {
   const context = await loadServiceControlContext(upstreamServiceId)
   if (!context.targets.some(target => target.enabled)) {
     throw createApplicationError({
@@ -411,7 +366,7 @@ async function performPlatformServiceDiscovery(upstreamServiceId: string) {
     throw snapshot.error
   }
   try {
-    await commitServiceSnapshot(context, snapshot)
+    return await commitServiceSnapshot(context, snapshot)
   } catch (error) {
     await recordDiscoveryFailure(context, {
       ok: false,
@@ -420,38 +375,4 @@ async function performPlatformServiceDiscovery(upstreamServiceId: string) {
     })
     throw error
   }
-
-  const refreshed = await loadServiceControlContext(upstreamServiceId)
-  const published = hasReadyServiceTarget(
-    refreshed.targets,
-    refreshed.connection
-  )
-    ? (await refreshPlatformRevision(null)).revision
-    : null
-  return {
-    ...await buildServiceControlView(
-      refreshed,
-      { checkAvailability: true }
-    ),
-    // Distinct from connection.configurationRevision: this is the routing
-    // snapshot sequence published by this discovery.
-    routingRevision: published
-  }
-}
-
-async function runPlatformServiceDiscovery(upstreamServiceId: string) {
-  try {
-    return await performPlatformServiceDiscovery(upstreamServiceId)
-  } finally {
-    activeDiscoveries.delete(upstreamServiceId)
-  }
-}
-
-export function discoverPlatformService(upstreamServiceId: string) {
-  const active = activeDiscoveries.get(upstreamServiceId)
-  if (active) return active
-
-  const discovery = runPlatformServiceDiscovery(upstreamServiceId)
-  activeDiscoveries.set(upstreamServiceId, discovery)
-  return discovery
 }

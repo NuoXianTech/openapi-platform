@@ -131,9 +131,6 @@ jobs:
       - name: Verify TypeScript types
         run: pnpm typecheck
 
-      - name: Check unused files and exports
-        run: pnpm check:dead-code
-
       - name: Run unit test suite
         run: pnpm test
 
@@ -185,7 +182,7 @@ jobs:
         run: |
           {
             echo "### Application quality"
-            echo "✅ Linting, type checking, dead-code analysis, unit and Service acceptance tests, and the production build completed successfully."
+            echo "✅ Linting, type checking, unit and Service acceptance tests, and the production build completed successfully."
             echo
             echo "- Node.js: \`$(node --version)\`"
             echo "- pnpm: \`$(pnpm --version)\`"

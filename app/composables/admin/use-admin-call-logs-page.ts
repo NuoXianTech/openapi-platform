@@ -141,7 +141,6 @@ export function useAdminCallLogsPage(options: UseAdminCallLogsPageOptions = {}) 
   )
   const cleanup = useAdminLogCleanup({
     endpoint: '/api/admin/logs/cleanup',
-    total: list.total,
     applyFilters: keywordApply.applyNow,
     refresh: list.refresh,
     buildFilters: () => buildAdminCallLogRequestFilters(listState.filters)

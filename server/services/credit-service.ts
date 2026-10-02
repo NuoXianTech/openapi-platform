@@ -7,6 +7,7 @@ import { APP_TIME_ZONE, addLocalDays, getLocalDayStart, toLocalDateKey } from '~
 import { toNumber } from '~~/server/utils/number'
 import { normalizePagination } from '~~/server/utils/pagination'
 import { firstRow } from '~~/server/utils/row'
+import { withDistributedLease } from '~~/server/utils/distributed-lease'
 import type { CreditReason } from '#shared/types/credit-reason'
 import type { UserCreditConsumptionDailyRow, UserCreditSummary } from '#shared/types/user-credits'
 import type { CreditReservationStatus } from '#shared/types/admin-credits'
@@ -36,6 +37,10 @@ interface ListUserTransactionsFilters {
   limit?: number
   offset?: number
 }
+
+const BATCH_SIZE = 20
+const WORKER_LEASE_TTL_MS = 300_000
+const STALE_ACTIVE_RESERVATION_MS = 10 * 60_000
 
 const RESERVATION_RETRY_DELAY_MS = 60_000
 const RESERVATION_MAX_ATTEMPTS = 5
@@ -291,7 +296,7 @@ async function forceReleaseCreditReservation(id: number) {
   return releaseReservation(id, undefined, { includeDeadLetter: true })
 }
 
-async function claimDueReservations(limit: number) {
+async function listDueReservations(limit: number) {
   const max = Math.max(Math.trunc(limit), 1)
   return db.select({
     id: apiCreditReservations.id,
@@ -355,6 +360,60 @@ async function releaseExpiredReservations(cutoff: Date, limit = 100) {
     await tx.delete(apiCreditReservations).where(inArray(apiCreditReservations.id, rows.map(row => row.id)))
     return rows.length
   })
+}
+
+async function processReservations(): Promise<void> {
+  try {
+    await releaseExpiredReservations(
+      new Date(Date.now() - STALE_ACTIVE_RESERVATION_MS)
+    )
+  } catch (error) {
+    console.error('[credit-reservations] failed to release stale active reservations', {
+      error: (error as Error).message
+    })
+  }
+
+  let dueRows: Awaited<ReturnType<typeof listDueReservations>>
+  try {
+    dueRows = await listDueReservations(BATCH_SIZE)
+  } catch (error) {
+    console.error('[credit-reservations] failed to load pending reservations', {
+      error: (error as Error).message
+    })
+    return
+  }
+
+  for (const row of dueRows) {
+    try {
+      await finalizeReservation({ reservationId: row.id })
+    } catch (error) {
+      const message = (error as Error).message || 'settlement retry failed'
+      console.warn('[credit-reservations] settlement retry failed', {
+        reservationId: row.id,
+        attempts: row.attempts + 1,
+        error: message
+      })
+      await markReservationAttempt(row.id, message).catch((markError) => {
+        console.error('[credit-reservations] failed to record retry attempt', {
+          reservationId: row.id,
+          error: (markError as Error).message
+        })
+      })
+    }
+  }
+}
+
+async function recoverReservations(): Promise<void> {
+  try {
+    await withDistributedLease({
+      key: 'credit-reservations-retry',
+      ttlMs: WORKER_LEASE_TTL_MS
+    }, processReservations)
+  } catch (error) {
+    console.error('[credit-reservations] worker coordination unavailable; scan skipped', {
+      error: error instanceof Error ? error.message : String(error)
+    })
+  }
 }
 
 async function getBalance(userId: number): Promise<number> {
@@ -483,9 +542,7 @@ export const creditService = {
   markReservationPending,
   linkApiCall,
   finalizeReservation,
-  claimDueReservations,
-  markReservationAttempt,
-  releaseExpiredReservations,
+  recoverReservations,
   retryCreditReservation,
   forceFinalizeCreditReservation,
   forceReleaseCreditReservation,

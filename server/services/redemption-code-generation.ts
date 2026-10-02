@@ -1,117 +1,83 @@
+import { randomInt } from 'node:crypto'
+import { db, type DatabaseTransaction } from '~~/server/db/client'
+import { redemptionCodes } from '~~/server/db/schema'
+import { createApplicationError } from '~~/server/errors/application-error'
 import { clampInteger, toInteger } from '~~/server/utils/number'
+import {
+  createStoredSecretPreview,
+  decryptStoredSecret,
+  digestStoredSecret,
+  encryptStoredSecret
+} from '~~/server/utils/stored-secret'
 
 interface RedemptionGenerationInput {
   amount: number
   count?: number
   maxUses?: number
-  expiresAt?: Date | null
+  expiresAt?: Date | string | null
   note?: string | null
   createdBy?: number | null
 }
 
-interface NormalizedRedemptionGeneration {
-  amount: number
-  count: number
-  maxUses: number
-  expiresAt: Date | null
-  note: string | null
-  createdBy: number | null
+const CODE_ALPHABET = 'abcdefghijklmnopqrstuvwxyz0123456789'
+const CODE_LENGTH = 32
+const MAX_ATTEMPTS = 5
+
+function randomCode(length: number): string {
+  return Array.from({ length }, () => CODE_ALPHABET[randomInt(CODE_ALPHABET.length)]).join('')
 }
 
-interface EncodedRedemptionCode {
-  codeDigest: string
-  codeCiphertext: string
-  codePreview: string
-}
-
-interface RedemptionCodeRow extends EncodedRedemptionCode {
-  amount: number
-  batchId: string
-  note: string | null
-  maxUses: number
-  usedCount: number
-  expiresAt: Date | null
-  isEnabled: boolean
-  createdBy: number | null
-}
-
-interface BuildRedemptionCodeRowsInput {
-  codes: EncodedRedemptionCode[]
-  amount: number
-  batchId: string
-  note: string | null
-  maxUses: number
-  expiresAt: Date | null
-  createdBy: number | null
-}
-
-interface InsertRedemptionCodesUntilCompleteInput<TInput, TInserted> {
-  requestedCount: number
-  maxAttempts?: number
-  createRows: (count: number) => TInput[]
-  insertRows: (rows: TInput[]) => Promise<TInserted[]>
-}
-
-const DEFAULT_COUNT = 1
-const MAX_COUNT = 100
-const DEFAULT_MAX_USES = 1
-const MAX_NOTE_LENGTH = 500
-const DEFAULT_MAX_ATTEMPTS = 5
-
-function normalizeNote(note: string | null | undefined): string | null {
-  const normalizedNote = (note || '').trim().slice(0, MAX_NOTE_LENGTH)
-  return normalizedNote || null
-}
-
-function normalizeDate(value: Date | null | undefined): Date | null {
-  return value && !Number.isNaN(value.getTime()) ? value : null
-}
-
-export function normalizeRedemptionGeneration(
-  input: RedemptionGenerationInput
-): NormalizedRedemptionGeneration {
-  return {
-    amount: Math.max(toInteger(input.amount, 1), 1),
-    count: clampInteger(input.count, 1, MAX_COUNT, DEFAULT_COUNT),
-    maxUses: Math.max(toInteger(input.maxUses, DEFAULT_MAX_USES), 1),
-    note: normalizeNote(input.note),
-    expiresAt: normalizeDate(input.expiresAt),
-    createdBy: input.createdBy ?? null
+function requireFutureExpiry(value: Date | string | null | undefined): Date | null {
+  if (value === null || value === undefined) return null
+  const date = new Date(value)
+  if (!Number.isFinite(date.getTime()) || date.getTime() <= Date.now()) {
+    throw createApplicationError({
+      statusCode: 400,
+      message: '兑换码过期时间必须是有效的未来时间',
+      data: { code: 'REDEMPTION_EXPIRY_INVALID' }
+    })
   }
+  return date
 }
 
-export function buildRedemptionCodeRows(input: BuildRedemptionCodeRowsInput): RedemptionCodeRow[] {
-  return input.codes.map(code => ({
-    ...code,
-    amount: input.amount,
-    batchId: input.batchId,
-    note: input.note,
-    maxUses: input.maxUses,
-    usedCount: 0,
-    expiresAt: input.expiresAt,
-    isEnabled: true,
-    createdBy: input.createdBy
-  }))
-}
+/** Issue a complete batch or none. Expiry and retry semantics belong to this
+ * operation, so HTTP callers cannot silently turn invalid expiry into permanence. */
+export async function generateRedemptionCodes(input: RedemptionGenerationInput) {
+  const amount = Math.max(toInteger(input.amount, 1), 1)
+  const count = clampInteger(input.count, 1, 100, 1)
+  const maxUses = Math.max(toInteger(input.maxUses, 1), 1)
+  const note = (input.note || '').trim().slice(0, 500) || null
+  const expiresAt = requireFutureExpiry(input.expiresAt)
+  const batchId = `B-${new Date().toISOString().slice(0, 10)}-${randomCode(4)}`
 
-export async function insertRedemptionCodesUntilComplete<TInput, TInserted>(
-  input: InsertRedemptionCodesUntilCompleteInput<TInput, TInserted>
-): Promise<TInserted[]> {
-  const requestedCount = Math.max(toInteger(input.requestedCount, 0), 0)
-  const maxAttempts = Math.max(toInteger(input.maxAttempts, DEFAULT_MAX_ATTEMPTS), 1)
-  const inserted: TInserted[] = []
+  return db.transaction(async (tx: DatabaseTransaction) => {
+    const inserted: Array<typeof redemptionCodes.$inferSelect> = []
+    for (let attempt = 0; attempt < MAX_ATTEMPTS && inserted.length < count; attempt++) {
+      const rows = Array.from({ length: count - inserted.length }, () => {
+        const code = randomCode(CODE_LENGTH)
+        return {
+          codeDigest: digestStoredSecret(code, 'redemption-code'),
+          codeCiphertext: encryptStoredSecret(code, 'redemption-code'),
+          codePreview: createStoredSecretPreview(code),
+          amount, batchId, note, maxUses, expiresAt,
+          usedCount: 0, isEnabled: true, createdBy: input.createdBy ?? null
+        }
+      })
+      // Both existing and intra-batch collisions consume this bounded retry budget.
+      inserted.push(...await tx.insert(redemptionCodes).values(rows).onConflictDoNothing({
+        target: redemptionCodes.codeDigest
+      }).returning())
+    }
+    if (inserted.length !== count) throw new Error('Redemption code generation conflicts too often')
 
-  for (let attempt = 0; attempt < maxAttempts && inserted.length < requestedCount; attempt++) {
-    const missingCount = requestedCount - inserted.length
-    const rows = input.createRows(missingCount)
-    const rowsInserted = await input.insertRows(rows)
-
-    inserted.push(...rowsInserted.slice(0, missingCount))
-  }
-
-  if (inserted.length < requestedCount) {
-    throw new Error('Redemption code generation conflicts too often')
-  }
-
-  return inserted
+    // Construct the complete response before committing; decoding failures and an
+    // expiry crossed while waiting for the transaction must also roll back the batch.
+    const codes = inserted.map(row => ({
+      id: row.id,
+      code: decryptStoredSecret(row.codeCiphertext, 'redemption-code'),
+      amount: row.amount
+    }))
+    requireFutureExpiry(expiresAt)
+    return { batchId, generated: inserted.length, requested: count, codes, amount, maxUses, expiresAt, note }
+  })
 }

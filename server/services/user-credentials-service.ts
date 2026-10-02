@@ -1,4 +1,4 @@
-import { and, eq, sql } from 'drizzle-orm'
+import { and, eq, isNull, sql } from 'drizzle-orm'
 import { db } from '~~/server/db/client'
 import { users } from '~~/server/db/schema'
 import { createApplicationError } from '~~/server/errors/application-error'
@@ -8,6 +8,7 @@ import { getSqlState } from '~~/server/utils/database-error'
 import { hashPassword, verifyPassword } from '~~/server/utils/password'
 import { firstRow } from '~~/server/utils/row'
 import { verifyVerificationToken } from '~~/server/utils/verification-token'
+import { banMessage, isBanActive } from '~~/server/utils/ban'
 
 type CredentialUser = typeof users.$inferSelect
 
@@ -37,6 +38,68 @@ function invalidLink(message: string) {
 }
 
 export const userCredentialsService = {
+  async completeAdminProfile(input: {
+    userId: number
+    expectedTokenVersion: number
+    username?: string
+    email?: string
+    password: string
+  }) {
+    const current = await requireUser(input.userId)
+    const conflict = () => createApplicationError({ statusCode: 409, message: '账号凭据已变更，请重新登录后重试' })
+    if (current.tokenVersion !== input.expectedTokenVersion) throw conflict()
+    if (current.role !== 'admin' || !current.isActive) {
+      throw createApplicationError({ statusCode: 403, message: 'Forbidden' })
+    }
+    if (isBanActive(current)) throw createApplicationError({ statusCode: 403, message: banMessage(current) })
+
+    // Blank identity fields keep the observed values; only the password must rotate.
+    const username = input.username?.trim() || current.username
+    const email = input.email?.trim().toLowerCase() || current.email
+    async function checkIdentity() {
+      const emailOwner = firstRow(await db.select({ id: users.id }).from(users)
+        .where(eq(sql`lower(${users.email})`, email.toLowerCase())).limit(1))
+      if (emailOwner && emailOwner.id !== current.id) {
+        throw createApplicationError({ statusCode: 409, message: '该邮箱已被注册' })
+      }
+      const usernameOwner = await userService.findByUsername(username)
+      if (usernameOwner && usernameOwner.id !== current.id) {
+        throw createApplicationError({ statusCode: 409, message: '该用户名已被占用' })
+      }
+    }
+    await checkIdentity()
+    const passwordHash = await hashPassword(input.password)
+    try {
+      const updated = firstRow(await db.update(users).set({
+        username, email, passwordHash,
+        tokenVersion: sql`${users.tokenVersion} + 1`,
+        updatedAt: new Date()
+      }).where(and(
+        observedCredentials(current),
+        eq(users.username, current.username),
+        eq(users.role, current.role),
+        eq(users.isActive, current.isActive),
+        eq(users.isBanned, current.isBanned),
+        current.bannedUntil ? eq(users.bannedUntil, current.bannedUntil) : isNull(users.bannedUntil)
+      )).returning())
+      if (!updated) throw conflict()
+      return {
+        updated,
+        detail: {
+          previous: { username: current.username, email: current.email },
+          patch: { usernameChanged: username !== current.username, emailChanged: email !== current.email, passwordChanged: true }
+        }
+      }
+    } catch (error) {
+      if (getSqlState(error) === '23505') {
+        // Also resolve uniqueness races which happened after the friendly precheck.
+        await checkIdentity()
+        throw conflict()
+      }
+      throw error
+    }
+  },
+
   async resetPassword(input: { userId: number, token: string, newPassword: string }) {
     const settings = await systemSettingsService.getSettings()
     if (!settings.passwordResetEnabled) {

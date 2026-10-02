@@ -10,11 +10,8 @@ import {
   upstreamServices
 } from '~~/server/db/schema'
 import { createApplicationError } from '~~/server/errors/application-error'
-import { platformRouteService } from '~~/server/services/platform-route-service'
-import {
-  applyPlatformMutation,
-  routeMutationFromBinding
-} from '~~/server/services/platform-endpoint-publication-service'
+import { platformRouteService, routeMutationFromBinding } from '~~/server/services/platform-route-service'
+import { applyPlatformMutation } from '~~/server/services/routing-revision-service'
 import type {
   HttpMethod,
   PublicationStatus,

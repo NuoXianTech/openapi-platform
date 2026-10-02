@@ -44,7 +44,7 @@ vi.stubGlobal('useRuntimeConfig', () => ({
 const { platformProductService } = await import('~~/server/services/platform-product-service')
 const { apiCatalogService } = await import('~~/server/services/api-catalog-service')
 const { platformEndpointService } = await import('~~/server/services/platform-endpoint-service')
-const { applyPlatformRevision, refreshPlatformRevision, applyPlatformMutation } = await import('~~/server/services/platform-endpoint-publication-service')
+const { applyPlatformRevision, refreshPlatformRevision, applyPlatformMutation } = await import('~~/server/services/routing-revision-service')
 const { platformRouteService } = await import('~~/server/services/platform-route-service')
 const { platformUpstreamService } = await import('~~/server/services/platform-upstream-service')
 const { platformRuntimeService } = await import('~~/server/services/platform-runtime-service')
@@ -248,7 +248,7 @@ describe('routing revision service', () => {
     await platformRuntimeService.updateDefaultDomain('api.example.test', null)
     await refreshPlatformRevision(null)
     expect((await currentPayload()).appliedRoutes).toEqual([])
-    await expect(routingRuntimeService.resolve('GET', '/v1/staged', 'api.example.test')).resolves.toBeNull()
+    await expect(routingRuntimeService.resolve('GET', '/v1/staged', 'api.example.test').then(result => result.match)).resolves.toBeNull()
     const applied = await applyPlatformRevision(null)
     expect((await currentPayload()).routes.map(route => route.id)).toContain(staged.route.id)
     expect((await applyPlatformRevision(null)).revision.id).toBe(applied.revision.id)
@@ -436,7 +436,7 @@ describe('routing revision service', () => {
   it('allows an existing disabled upstream binding but rejects a new one', async () => {
     const disabled = await createRoutingGraph({ productSlug: 'disabled-upstream' })
     const active = await createRoutingGraph({ productSlug: 'active-upstream' })
-    await platformUpstreamService.update(disabled.upstream.id, { status: 'disabled' })
+    await platformUpstreamService.updateAndPublish(disabled.upstream.id, { status: 'disabled' }, null)
 
     await expect(platformRouteService.update(
       disabled.route.id,
@@ -484,7 +484,7 @@ describe('routing revision service', () => {
       'GET',
       '/v1/proxy-smoke/42',
       'api.example.test'
-    )).resolves.toMatchObject({
+    ).then(result => result.match)).resolves.toMatchObject({
       revisionId: firstRevision.id,
       route: { id: graph.route.id },
       params: { id: '42' }
@@ -510,7 +510,7 @@ describe('routing revision service', () => {
       'GET',
       '/v1/revision-two-only',
       'api.example.test'
-    )).resolves.toMatchObject({ revisionId: secondRevision.id })
+    ).then(result => result.match)).resolves.toMatchObject({ revisionId: secondRevision.id })
 
     const activated = await routingRevisionService.activate(firstRevision.id)
     expect(activated.id).toBe(firstRevision.id)
@@ -527,7 +527,7 @@ describe('routing revision service', () => {
       'GET',
       '/v1/revision-two-only',
       'api.example.test'
-    )).resolves.toBeNull()
+    ).then(result => result.match)).resolves.toBeNull()
   })
 
   it('restores the snapshotted default domain when activating a revision', async () => {
@@ -556,12 +556,12 @@ describe('routing revision service', () => {
       'GET',
       '/v1/revision-domain',
       'first.example.test'
-    )).resolves.toMatchObject({ route: { id: graph.route.id } })
+    ).then(result => result.match)).resolves.toMatchObject({ route: { id: graph.route.id } })
     await expect(routingRuntimeService.resolve(
       'GET',
       '/v1/revision-domain',
       'second.example.test'
-    )).resolves.toBeNull()
+    ).then(result => result.match)).resolves.toBeNull()
   })
 
   it('reuses the active revision when the runtime configuration is unchanged', async () => {
@@ -698,10 +698,65 @@ describe('routing revision service', () => {
       .rejects.toMatchObject({ data: { code: 'PRODUCT_STILL_PUBLISHED' } })
     await expect(platformProductService.removeVersion(graph.product.versions[0]!.id))
       .rejects.toMatchObject({ data: { code: 'VERSION_STILL_PUBLISHED' } })
-    await expect(platformUpstreamService.remove(graph.upstream.id))
+    await expect(platformUpstreamService.removeAndPublish(graph.upstream.id, null))
       .rejects.toMatchObject({ data: { code: 'UPSTREAM_STILL_PUBLISHED' } })
-    await expect(platformUpstreamService.removeTarget(graph.upstream.targets[0]!.id))
-      .rejects.toMatchObject({ data: { code: 'TARGET_STILL_PUBLISHED' } })
+    await expect(platformUpstreamService.removeTargetAndPublish(graph.upstream.targets[0]!.id, null))
+      .rejects.toMatchObject({ data: { code: 'UPSTREAM_LAST_TARGET_REQUIRED' } })
+  })
+
+
+  it.each(['disable', 'remove'] as const)('commits a published Target %s with its replacement runtime snapshot', async (operation) => {
+    const graph = await createRoutingGraph({ productSlug: 'target-mutation' })
+    const originalTarget = graph.upstream.targets[0]!
+    const created = await platformUpstreamService.createTargetAndPublish(graph.upstream.id, {
+      baseUrl: 'http://127.0.0.1:8081', weight: 1, enabled: true
+    }, null)
+    const [verified] = await database.select().from(schema.upstreamTargets)
+      .where(eq(schema.upstreamTargets.id, originalTarget.id))
+    await database.update(schema.upstreamTargets).set({
+      configurationRevision: verified!.configurationRevision,
+      configurationHash: verified!.configurationHash,
+      configurationState: verified!.configurationState
+    }).where(eq(schema.upstreamTargets.id, created.target.id))
+    const before = await routingRevisionService.publish(null)
+    const request = () => routingRuntimeService.resolve('GET', '/v1/proxy-smoke/42', 'localhost')
+    expect((await request()).match?.upstream.targets).toHaveLength(2)
+
+    const changed = operation === 'disable'
+      ? await platformUpstreamService.updateTargetAndPublish(originalTarget.id, { enabled: false }, null)
+      : await platformUpstreamService.removeTargetAndPublish(originalTarget.id, null)
+
+    expect(changed.revision?.id).not.toBe(before.id)
+    const runtime = await request()
+    expect(runtime.match?.revisionId).toBe(changed.revision?.id)
+    expect(runtime.match?.upstream.targets.map(target => target.id)).toEqual([created.target.id])
+    const stored = await database.select().from(schema.upstreamTargets)
+      .where(eq(schema.upstreamTargets.id, originalTarget.id))
+    if (operation === 'remove') expect(stored).toHaveLength(0)
+    else {
+      expect(stored[0]?.enabled).toBe(false)
+      const reenabled = await platformUpstreamService.updateTargetAndPublish(originalTarget.id, { enabled: true }, null)
+      expect(reenabled.revision).toBeNull()
+      expect(reenabled.target.configurationState).toBeNull()
+      expect((await request()).match?.upstream.targets.map(target => target.id)).toEqual([created.target.id])
+    }
+  })
+
+  it('keeps unverified creation and address edits out of the active snapshot through complete mutations', async () => {
+    const graph = await createRoutingGraph({ productSlug: 'unverified-mutations' })
+    const before = await routingRevisionService.publish(null)
+    const created = await platformUpstreamService.createTargetAndPublish(graph.upstream.id, {
+      baseUrl: 'http://127.0.0.1:8081', weight: 1, enabled: true
+    }, null)
+    const changed = await platformUpstreamService.updateTargetAndPublish(graph.upstream.targets[0]!.id, {
+      baseUrl: 'http://127.0.0.1:8082'
+    }, null)
+    expect(created.revision).toBeNull()
+    expect(changed.revision).toBeNull()
+    expect(changed.target.configurationState).toBeNull()
+    const runtime = await routingRuntimeService.resolve('GET', '/v1/proxy-smoke/42', 'localhost')
+    expect(runtime.match?.revisionId).toBe(before.id)
+    expect(runtime.match?.upstream.targets).toEqual(before.configPayload.upstreams[0]!.targets)
   })
 
   it('excludes routes whose API version is not published', async () => {
@@ -772,14 +827,14 @@ describe('routing revision service', () => {
       'GET',
       '/v1/items/special',
       'api.example.test'
-    )).resolves.toMatchObject({ route: { id: exactGraph.route.id } })
+    ).then(result => result.match)).resolves.toMatchObject({ route: { id: exactGraph.route.id } })
     // The host-specific Route declines other domains, so the fallback shape
     // takes the same path with `special` captured as the parameter.
     await expect(routingRuntimeService.resolve(
       'GET',
       '/v1/items/special',
       'other.example.test'
-    )).resolves.toMatchObject({
+    ).then(result => result.match)).resolves.toMatchObject({
       route: { id: fallbackGraph.route.id },
       params: { id: 'special' }
     })
@@ -787,7 +842,7 @@ describe('routing revision service', () => {
       'GET',
       '/v1/items/42',
       'other.example.test'
-    )).resolves.toMatchObject({ route: { id: fallbackGraph.route.id } })
+    ).then(result => result.match)).resolves.toMatchObject({ route: { id: fallbackGraph.route.id } })
   })
 
   it('confines Routes without their own Host to the default domain', async () => {
@@ -802,7 +857,7 @@ describe('routing revision service', () => {
       'GET',
       '/v1/default-domain',
       'anything.example.test'
-    )).resolves.toMatchObject({ route: { id: graph.route.id } })
+    ).then(result => result.match)).resolves.toMatchObject({ route: { id: graph.route.id } })
 
     await platformRuntimeService.updateDefaultDomain('api.example.test', null)
 
@@ -810,12 +865,12 @@ describe('routing revision service', () => {
       'GET',
       '/v1/default-domain',
       'api.example.test'
-    )).resolves.toMatchObject({ route: { id: graph.route.id } })
+    ).then(result => result.match)).resolves.toMatchObject({ route: { id: graph.route.id } })
     await expect(routingRuntimeService.resolve(
       'GET',
       '/v1/default-domain',
       'anything.example.test'
-    )).resolves.toBeNull()
+    ).then(result => result.match)).resolves.toBeNull()
   })
 
   it('publishes discovered Service endpoints and applies governance changes automatically', async () => {

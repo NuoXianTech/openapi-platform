@@ -12,7 +12,6 @@
 pnpm install --frozen-lockfile
 pnpm typecheck
 pnpm lint
-pnpm check:dead-code
 pnpm test
 pnpm build
 pnpm test:integration

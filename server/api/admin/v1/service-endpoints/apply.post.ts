@@ -1,4 +1,4 @@
-import { applyPlatformRevision } from '~~/server/services/platform-endpoint-publication-service'
+import { applyPlatformRevision } from '~~/server/services/routing-revision-service'
 import { addRequestOperationLog } from '~~/server/utils/request-operation-log'
 import { defineAdminEventHandler } from '~~/server/utils/auth'
 

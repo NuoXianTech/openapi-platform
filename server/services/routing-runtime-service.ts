@@ -218,34 +218,29 @@ function candidateOutranks(left: ResolvedCandidate, right: ResolvedCandidate): b
   return left.route.definition.id.localeCompare(right.route.definition.id) < 0
 }
 
+export interface RoutingResolution {
+  match: ResolvedDynamicRoute | null
+  allowedMethods: string[]
+}
+
 export const routingRuntimeService = {
-  async resolveAllowedMethods(pathname: string, requestHost: string): Promise<string[]> {
+  /** Match and method availability must describe the same verified Revision,
+   * even when publication invalidates the cache while this read is in flight. */
+  async resolve(method: string, pathname: string, requestHost: string): Promise<RoutingResolution> {
     const runtime = await getCompiledRuntime()
-    if (!runtime) return []
-    const methods = new Set<string>()
-
-    for (const route of runtime.routes) {
-      if (routeHostSpecificity(route, runtime.defaultDomain, requestHost) < 0) continue
-      if (!matchRoutePath(route.parsedPath, pathname)) continue
-      methods.add(route.definition.method)
-      if (route.definition.method === 'GET') methods.add('HEAD')
-    }
-
-    return HTTP_METHOD_ORDER.filter(method => methods.has(method))
-  },
-
-  async resolve(method: string, pathname: string, requestHost: string): Promise<ResolvedDynamicRoute | null> {
-    const runtime = await getCompiledRuntime()
-    if (!runtime) return null
+    if (!runtime) return { match: null, allowedMethods: [] }
     const normalizedMethod = method.toUpperCase()
+    const methods = new Set<string>()
     let best: ResolvedCandidate | null = null
 
     for (const route of runtime.routes) {
-      if (route.definition.method !== normalizedMethod && !(normalizedMethod === 'HEAD' && route.definition.method === 'GET')) continue
       const hostSpecificity = routeHostSpecificity(route, runtime.defaultDomain, requestHost)
       if (hostSpecificity < 0) continue
       const match = matchRoutePath(route.parsedPath, pathname)
       if (!match) continue
+      methods.add(route.definition.method)
+      if (route.definition.method === 'GET') methods.add('HEAD')
+      if (route.definition.method !== normalizedMethod && !(normalizedMethod === 'HEAD' && route.definition.method === 'GET')) continue
       const candidate: ResolvedCandidate = {
         route,
         params: match.params,
@@ -254,12 +249,14 @@ export const routingRuntimeService = {
       }
       if (!best || candidateOutranks(candidate, best)) best = candidate
     }
-    if (!best) return null
     return {
-      revisionId: runtime.revisionId,
-      route: best.route.definition,
-      upstream: runtime.upstreams.get(best.route.definition.upstreamServiceId)!,
-      params: best.params
+      match: best ? {
+        revisionId: runtime.revisionId,
+        route: best.route.definition,
+        upstream: runtime.upstreams.get(best.route.definition.upstreamServiceId)!,
+        params: best.params
+      } : null,
+      allowedMethods: HTTP_METHOD_ORDER.filter(method => methods.has(method))
     }
   }
 }

@@ -3,7 +3,7 @@ import { db, type DatabaseTransaction } from '~~/server/db/client'
 import { apiProducts, apiRoutes, apiVersions } from '~~/server/db/schema'
 import { createApplicationError } from '~~/server/errors/application-error'
 import { routingReferenceService } from '~~/server/services/routing-reference-service'
-import { applyPlatformMutation } from '~~/server/services/platform-endpoint-publication-service'
+import { applyPlatformMutation } from '~~/server/services/routing-revision-service'
 import { getSqlState } from '~~/server/utils/database-error'
 import { firstRow } from '~~/server/utils/row'
 

@@ -3,7 +3,7 @@ import { db, type DatabaseTransaction } from '~~/server/db/client'
 import { platformRuntime } from '~~/server/db/schema'
 import { normalizeRouteHost } from '~~/server/utils/route-pattern'
 import { firstRow } from '~~/server/utils/row'
-import { applyPlatformMutation } from '~~/server/services/platform-endpoint-publication-service'
+import { applyPlatformMutation } from '~~/server/services/routing-revision-service'
 
 export const platformRuntimeService = {
   /** 平台只有一行运行时配置，启动时补齐即可。 */

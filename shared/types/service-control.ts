@@ -94,9 +94,14 @@ export interface ServiceConfigurationSyncResult {
   values: ServiceConfigurationView['values']
 }
 
-export interface ServiceConfigurationSyncOutcome
-  extends ServiceConfigurationSyncResult {
+export interface ServiceControlRoutingOutcome {
   /** Runtime snapshot published as a result of this sync, if any. */
   routingRevision: RoutingRevisionRef | null
   routingStatus: 'applied' | 'pending' | 'skipped'
 }
+
+export interface ServiceConfigurationSyncOutcome
+  extends ServiceConfigurationSyncResult, ServiceControlRoutingOutcome {}
+
+export interface ServiceDiscoveryOutcome
+  extends ServiceConfigurationView, ServiceControlRoutingOutcome {}

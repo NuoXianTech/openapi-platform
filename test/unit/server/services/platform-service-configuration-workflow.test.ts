@@ -1,4 +1,6 @@
+import { createHash } from 'node:crypto'
 import { resolve } from 'node:path'
+import type { H3Event } from 'h3'
 import { PGlite } from '@electric-sql/pglite'
 import { eq } from 'drizzle-orm'
 import { drizzle } from 'drizzle-orm/pglite'
@@ -7,20 +9,28 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } 
 import type { ServiceDescription } from '#shared/types/service-control'
 import * as schema from '~~/server/db/schema'
 import { calculateServiceConfigurationHash } from '~~/server/utils/service-configuration-values'
+import { canonicalJson } from '~~/server/utils/canonical-json'
+import * as availability from '~~/server/services/service-availability-service'
 import { isServiceTargetReady } from '~~/server/utils/service-upstream-readiness'
 
-const context = vi.hoisted(() => ({ database: null as unknown }))
+const context = vi.hoisted(() => ({ database: null as unknown, upstreamId: '', audit: vi.fn() }))
+vi.mock('~~/server/utils/auth', () => ({ defineAdminEventHandler: (handler: (event: H3Event, admin: { id: number, username: string }) => Promise<unknown>) => (event: H3Event) => handler(event, { id: 1, username: 'admin' }) }))
+vi.mock('~~/server/utils/router-param', () => ({ readUuidRouterParam: () => context.upstreamId }))
+vi.mock('~~/server/utils/request-operation-log', () => ({ addRequestOperationLog: context.audit }))
 vi.mock('~~/server/db/client', () => ({ get db() { return context.database } }))
-vi.mock('~~/server/services/platform-endpoint-publication-service', async (original) => ({
-  ...await original<typeof import('~~/server/services/platform-endpoint-publication-service')>(),
+vi.mock('~~/server/services/routing-revision-service', async (original) => ({
+  ...await original<typeof import('~~/server/services/routing-revision-service')>(),
   refreshPlatformRevision: vi.fn(async () => ({ revision: { id: 'published', sequence: 1 } }))
 }))
 const { platformUpstreamService } = await import('~~/server/services/platform-upstream-service')
-const { synchronizePlatformServiceConfiguration, updatePlatformServiceConfiguration } = await import('~~/server/services/platform-service-configuration-service')
+const { platformRuntimeService } = await import('~~/server/services/platform-runtime-service')
+const { platformServiceControlService } = await import('~~/server/services/platform-service-control-service')
+const { synchronizeConfiguration: synchronizePlatformServiceConfiguration, updateConfiguration: updatePlatformServiceConfiguration, discover: discoverPlatformService } = platformServiceControlService
 const { serviceControlClient } = await import('~~/server/utils/service-control-client')
-const { refreshPlatformRevision } = await import('~~/server/services/platform-endpoint-publication-service')
-const { discoverPlatformService } = await import('~~/server/services/platform-service-discovery-service')
-const { acceptServiceTargetResults, loadServiceControlContext } = await import('~~/server/services/platform-service-control-context')
+const { upstreamServiceTokenService } = await import('~~/server/services/upstream-service-token-service')
+const { refreshPlatformRevision } = await import('~~/server/services/routing-revision-service')
+const { acceptServiceTargetResults, loadServiceControlContext, getServiceControlView } = await import('~~/server/services/platform-service-control-context')
+const { default: discoverHandler } = await import('~~/server/api/admin/v1/upstreams/[id]/discover.post')
 let client: PGlite
 let database: ReturnType<typeof drizzle<typeof schema>>
 const schemaHash = 'a'.repeat(64)
@@ -40,8 +50,10 @@ beforeAll(async () => {
 })
 beforeEach(async () => {
   vi.clearAllMocks()
+  context.database = database
   vi.stubGlobal('useRuntimeConfig', () => ({ apiKeySecret: '0123456789abcdef0123456789abcdef' }))
   await client.exec('TRUNCATE TABLE platform_runtime, routing_revisions, api_products, upstream_services CASCADE;')
+  await platformRuntimeService.ensureDefault()
 })
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals() })
 afterAll(async () => client.close())
@@ -72,7 +84,133 @@ function response(revision = 1): Awaited<ReturnType<typeof serviceControlClient.
   }
 }
 
+async function discoveryFixture() {
+  const upstream = await configuredUpstream()
+  const original = await loadServiceControlContext(upstream.id)
+  const definition = { schemaVersion: 1 as const, groups: [] }
+  const document = { openapi: '3.1.0', info: { title: 'Workflow', version: '2' }, paths: {
+    '/v1/example': { get: { summary: 'Example', responses: { 200: { description: 'OK' } } } }
+  } }
+  const fingerprint = (value: unknown) => createHash('sha256').update(canonicalJson(value)).digest('hex')
+  const description = { ...original.connection.serviceDescription!, version: '2', openapiSha256: fingerprint(document),
+    configuration: { ...original.connection.serviceDescription!.configuration, schemaSha256: fingerprint(definition) } }
+  const state = { ...response().data, schemaSha256: fingerprint(definition) }
+  await platformUpstreamService.updateServiceToken(upstream.id, 'replacement-service-token-with-at-least-32-characters')
+  const getDescription = vi.spyOn(serviceControlClient, 'getDescription').mockResolvedValue({
+    data: description, headers: new Headers({ 'x-openapi-sha256': description.openapiSha256 }), url: 'http://127.0.0.1:8080/description'
+  })
+  vi.spyOn(serviceControlClient, 'getConfigurationDefinition').mockResolvedValue({
+    data: definition, headers: new Headers({ 'x-configuration-schema-sha256': fingerprint(definition) }), url: 'http://127.0.0.1:8080/schema'
+  })
+  vi.spyOn(serviceControlClient, 'getConfigurationState').mockResolvedValue({ data: state, headers: new Headers(), url: 'http://127.0.0.1:8080/config' })
+  vi.spyOn(serviceControlClient, 'getOpenAPI').mockResolvedValue({ data: document, headers: new Headers({ 'x-openapi-sha256': description.openapiSha256 }), url: 'http://127.0.0.1:8080/openapi.json' })
+  vi.spyOn(availability, 'resolveServiceAvailability').mockResolvedValue({ overall: 'online', targets: new Map() })
+  return { upstream, original, description, getDescription }
+}
+
 describe('configuration result acceptance', () => {
+  it('preserves discovered contract and verified Token when publication fails, then retries through the control interface', async () => {
+    const { upstream, original, description, getDescription } = await discoveryFixture()
+    vi.mocked(refreshPlatformRevision).mockRejectedValueOnce(new Error('publication unavailable'))
+    const first = discoverPlatformService(upstream.id)
+    expect(discoverPlatformService(upstream.id)).toBe(first)
+    context.upstreamId = upstream.id
+    const audited = discoverHandler({} as H3Event)
+    const result = await first
+    expect(await audited).toEqual(result)
+    expect(context.audit).toHaveBeenCalledExactlyOnceWith(expect.anything(), expect.objectContaining({
+      action: 'admin.platform.service.discover', resourceId: upstream.id,
+      detail: expect.objectContaining({ routingStatus: 'pending', routingRevision: null, openapiSha256: description.openapiSha256 })
+    }))
+    expect(result).toMatchObject({ routingStatus: 'pending', routingRevision: null,
+      connection: { serviceVersion: '2', openapiSha256: description.openapiSha256, lastDiscoveryError: null } })
+    const saved = await loadServiceControlContext(upstream.id)
+    expect(saved.connection.pendingServiceTokenCiphertext).toBeNull()
+    expect(saved.connection.serviceTokenCiphertext).not.toBe(original.connection.serviceTokenCiphertext)
+    expect(saved.service.openapiDocumentId).toBeTruthy()
+    expect(getDescription).toHaveBeenCalledOnce()
+    const retry = await discoverPlatformService(upstream.id)
+    expect(retry.routingStatus).toBe('applied')
+    expect((await loadServiceControlContext(upstream.id)).service.openapiDocumentId).toBe(saved.service.openapiDocumentId)
+    expect(getDescription).toHaveBeenCalledTimes(2)
+  })
+
+  it.each(['token', 'probe'] as const)('keeps discovery and audit successful when the post-commit %s observation fails', async (failure) => {
+    const { upstream, original, description } = await discoveryFixture()
+    const log = vi.spyOn(console, 'error').mockImplementation(() => undefined)
+    const secretError = new Error('read failed with secret-token-must-not-leak')
+    if (failure === 'token') vi.spyOn(upstreamServiceTokenService, 'getForControl').mockRejectedValueOnce(secretError)
+    else vi.mocked(availability.resolveServiceAvailability).mockRejectedValueOnce(secretError)
+    context.upstreamId = upstream.id
+    const result = await discoverHandler({} as H3Event)
+    expect(result).toMatchObject({
+      routingStatus: 'applied',
+      connection: { serviceVersion: '2', availability: 'unknown', lastDiscoveryError: null },
+      targets: [expect.objectContaining({ availability: 'unknown' })],
+      endpoints: [expect.objectContaining({ path: '/v1/example' })]
+    })
+    expect(context.audit).toHaveBeenCalledExactlyOnceWith(expect.anything(), expect.objectContaining({
+      action: 'admin.platform.service.discover', resourceId: upstream.id,
+      detail: expect.objectContaining({ endpointCount: 1, openapiSha256: description.openapiSha256, routingStatus: 'applied' })
+    }))
+    const saved = await loadServiceControlContext(upstream.id)
+    expect(saved.service.openapiDocumentId).toBeTruthy()
+    expect(saved.connection.pendingServiceTokenCiphertext).toBeNull()
+    expect(saved.connection.serviceTokenCiphertext).not.toBe(original.connection.serviceTokenCiphertext)
+    expect(log).toHaveBeenCalledExactlyOnceWith('[service-control] availability unavailable', { upstreamId: upstream.id })
+    expect(JSON.stringify(result)).not.toContain('secret-token-must-not-leak')
+  })
+
+  it('uses the committed view without reloading the contract after publication', async () => {
+    const { upstream } = await discoveryFixture()
+    const postCommitRead = vi.fn(() => { throw new Error('database unavailable after commit') })
+    vi.spyOn(upstreamServiceTokenService, 'getForControl').mockResolvedValue('verified-test-token-with-at-least-32-characters')
+    vi.mocked(refreshPlatformRevision).mockImplementationOnce(async () => {
+      context.database = new Proxy(database, {
+        get(target, property, receiver) {
+          return property === 'select' ? postCommitRead : Reflect.get(target, property, receiver)
+        }
+      })
+      return { revision: { id: 'published', sequence: 1 } } as Awaited<ReturnType<typeof refreshPlatformRevision>>
+    })
+    context.upstreamId = upstream.id
+    const result = await discoverHandler({} as H3Event)
+    expect(result.endpoints).toEqual([expect.objectContaining({ path: '/v1/example' })])
+    expect(result.connection).toMatchObject({ serviceVersion: '2', availability: 'online' })
+    expect(postCommitRead).not.toHaveBeenCalled()
+    expect(context.audit).toHaveBeenCalledOnce()
+  })
+
+  it('rolls back discovery and Token promotion when its response cannot be prepared inside the transaction', async () => {
+    const { upstream, original } = await discoveryFixture()
+    const pending = await loadServiceControlContext(upstream.id)
+    const projectionRead = vi.fn(() => { throw new Error('OpenAPI summary unavailable') })
+    const transaction = database.transaction.bind(database)
+    vi.spyOn(database, 'transaction').mockImplementation(callback => transaction(async tx => callback(new Proxy(tx, {
+      get(target, property, receiver) {
+        if (property === 'select') return new Proxy(target.select, {
+          apply(select, thisArg, args) {
+            if (args[0]?.summary === schema.openapiDocuments.parsedSummary) return projectionRead()
+            return Reflect.apply(select, thisArg, args)
+          }
+        })
+        return Reflect.get(target, property, receiver)
+      }
+    }))))
+    context.upstreamId = upstream.id
+    await expect(discoverHandler({} as H3Event)).rejects.toThrow('OpenAPI summary unavailable')
+    expect(projectionRead).toHaveBeenCalledOnce()
+    expect(refreshPlatformRevision).not.toHaveBeenCalled()
+    expect(context.audit).not.toHaveBeenCalled()
+    const saved = await loadServiceControlContext(upstream.id)
+    expect(saved.service.openapiDocumentId).toBeNull()
+    expect(saved.connection.serviceVersion).toBe(original.connection.serviceVersion)
+    expect(saved.connection.serviceTokenCiphertext).toBe(original.connection.serviceTokenCiphertext)
+    expect(saved.connection.pendingServiceTokenCiphertext).toBe(pending.connection.pendingServiceTokenCiphertext)
+    expect(saved.targets).toEqual(pending.targets)
+    expect(await database.select().from(schema.openapiDocuments)).toEqual([])
+  })
+
   it('returns normalized saved values without exposing secret plaintext', async () => {
     const upstream = await configuredUpstream()
     await database.update(schema.upstreamServiceConnections).set({
@@ -90,6 +228,23 @@ describe('configuration result acceptance', () => {
     })
     expect(result).toMatchObject({ status: 'synced', values: { enabled: false, secret: { configured: true } } })
     expect(JSON.stringify(result)).not.toContain('must-not-leak')
+
+    const saved = await loadServiceControlContext(upstream.id)
+    expect((await getServiceControlView(upstream.id)).values).toEqual(result.values)
+    const synchronized = await synchronizePlatformServiceConfiguration(upstream.id)
+    expect(synchronized).toMatchObject({ revision: 2, values: result.values, configurationHash: result.configurationHash })
+    expect((await loadServiceControlContext(upstream.id)).connection.configurationValues).toEqual(saved.connection.configurationValues)
+    const preserved = await updatePlatformServiceConfiguration(upstream.id, {
+      expectedRevision: 2, values: {}, secrets: {}
+    })
+    expect(preserved.values).toEqual(result.values)
+    expect(preserved.configurationHash).toBe(result.configurationHash)
+    const cleared = await updatePlatformServiceConfiguration(upstream.id, {
+      expectedRevision: 3, values: {}, secrets: { secret: null }
+    })
+    expect(cleared.values.secret).toEqual({ configured: false })
+    expect((await getServiceControlView(upstream.id)).values).toEqual(cleared.values)
+    expect((await loadServiceControlContext(upstream.id)).connection.configurationValues.secrets).toEqual({})
   })
 
   it('preserves saved configuration on publication failure and retries without advancing its revision', async () => {
@@ -107,8 +262,8 @@ describe('configuration result acceptance', () => {
 
   it.each(['discovery', 'configuration'] as const)('accepts mixed %s observations with one timestamp and preserves failed Target facts', async (operation) => {
     const upstream = await configuredUpstream()
-    const { target: drifted } = await platformUpstreamService.createTarget(upstream.id, { baseUrl: 'http://127.0.0.1:9090', weight: 1, enabled: true })
-    const { target: failed } = await platformUpstreamService.createTarget(upstream.id, { baseUrl: 'http://127.0.0.1:9091', weight: 1, enabled: true })
+    const { target: drifted } = await platformUpstreamService.createTargetAndPublish(upstream.id, { baseUrl: 'http://127.0.0.1:9090', weight: 1, enabled: true }, null)
+    const { target: failed } = await platformUpstreamService.createTargetAndPublish(upstream.id, { baseUrl: 'http://127.0.0.1:9091', weight: 1, enabled: true }, null)
     await database.update(schema.upstreamTargets).set({
       configurationRevision: 1, configurationHash: hash, configurationState: response().data
     }).where(eq(schema.upstreamTargets.id, failed.id))
@@ -176,7 +331,7 @@ describe('configuration result acceptance', () => {
     const pending = discoverPlatformService(upstream.id)
     const rejected = expect(pending).rejects.toMatchObject({ data: { code: 'SERVICE_DISCOVERY_FAILED' } })
     await started.promise
-    if (changed) await platformUpstreamService.updateTarget(upstream.targets[0]!.id, { baseUrl: 'http://127.0.0.1:9090' })
+    if (changed) await platformUpstreamService.updateTargetAndPublish(upstream.targets[0]!.id, { baseUrl: 'http://127.0.0.1:9090' }, null)
     resume.resolve(undefined)
     await rejected
     const [target] = await database.select().from(schema.upstreamTargets).where(eq(schema.upstreamTargets.id, upstream.targets[0]!.id))
@@ -193,15 +348,15 @@ describe('configuration result acceptance', () => {
     const pending = synchronizePlatformServiceConfiguration(upstream.id)
     const rejected = expect(pending).rejects.toMatchObject({ data: { code: 'SERVICE_CONFIGURATION_REVISION_CONFLICT' } })
     await started.promise
-    if (change === 'address') await platformUpstreamService.updateTarget(target.id, { baseUrl: 'http://127.0.0.1:9090' })
+    if (change === 'address') await platformUpstreamService.updateTargetAndPublish(target.id, { baseUrl: 'http://127.0.0.1:9090' }, null)
     if (change === 'reenable') {
       vi.spyOn(Date, 'now').mockReturnValue(0)
-      await platformUpstreamService.updateTarget(target.id, { enabled: false })
-      await platformUpstreamService.updateTarget(target.id, { enabled: true })
+      await platformUpstreamService.updateTargetAndPublish(target.id, { enabled: false }, null)
+      await platformUpstreamService.updateTargetAndPublish(target.id, { enabled: true }, null)
     }
     if (change === 'token') await platformUpstreamService.updateServiceToken(upstream.id, 'replacement-test-token-with-at-least-32-characters')
     if (change === 'configuration') await database.update(schema.upstreamServiceConnections).set({ configurationRevision: 2 }).where(eq(schema.upstreamServiceConnections.upstreamServiceId, upstream.id))
-    if (change === 'membership') await platformUpstreamService.createTarget(upstream.id, { baseUrl: 'http://127.0.0.1:9090', weight: 1, enabled: true })
+    if (change === 'membership') await platformUpstreamService.createTargetAndPublish(upstream.id, { baseUrl: 'http://127.0.0.1:9090', weight: 1, enabled: true }, null)
     ack.resolve(response())
     await rejected
     const [current] = await database.select().from(schema.upstreamTargets).where(eq(schema.upstreamTargets.id, target.id))
@@ -220,7 +375,7 @@ describe('configuration result acceptance', () => {
 
   it('publishes successful Targets when another unchanged Target fails', async () => {
     const upstream = await configuredUpstream()
-    await platformUpstreamService.createTarget(upstream.id, { baseUrl: 'http://127.0.0.1:9090', weight: 1, enabled: true })
+    await platformUpstreamService.createTargetAndPublish(upstream.id, { baseUrl: 'http://127.0.0.1:9090', weight: 1, enabled: true }, null)
     vi.spyOn(serviceControlClient, 'updateConfiguration').mockImplementation(async (url) => {
       if (url.includes('9090')) throw new Error('offline')
       return response()

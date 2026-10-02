@@ -1,7 +1,7 @@
 import type { H3Event } from 'h3'
 import { getHeader, getQuery, sendRedirect } from 'h3'
 import { buildCallbackUrl, oauthProviderService } from '~~/server/services/oauth-provider-service'
-import { oauthAccountService } from '~~/server/services/oauth-account-service'
+import { oauthAccountService, OauthBindingError } from '~~/server/services/oauth-account-service'
 import { systemSettingsService } from '~~/server/services/system-settings-service'
 import { userService } from '~~/server/services/user-service'
 import { loginLogService } from '~~/server/services/login-log-service'
@@ -91,19 +91,7 @@ export async function handleOauthCallback(event: H3Event, provider: SupportedOau
         return redirectError(event, 'login_required', 'bind')
       }
 
-      const existing = await oauthAccountService.findByProviderUserId(provider, profile.providerUserId)
-      if (existing && existing.userId !== authUser.id) {
-        return redirectError(event, 'already_bound_by_other', 'bind')
-      }
-
-      // (userId, provider) 唯一：若该用户已绑定同 provider 的另一个账号，明确拒绝
-      // （否则下面 upsert 的 INSERT 分支会撞唯一约束抛 500）
-      const sameProvider = await oauthAccountService.findByUserAndProvider(authUser.id, provider)
-      if (sameProvider && sameProvider.providerUserId !== profile.providerUserId) {
-        return redirectError(event, 'already_bound_same_provider', 'bind')
-      }
-
-      const linkedAccount = await oauthAccountService.upsertAccount({
+      const linkedAccount = await oauthAccountService.bindAccount({
         userId: authUser.id,
         provider,
         providerUserId: profile.providerUserId,
@@ -118,7 +106,7 @@ export async function handleOauthCallback(event: H3Event, provider: SupportedOau
         actor: authUser.username,
         action: 'user.oauth.bind',
         resourceType: 'oauth-account',
-        resourceId: linkedAccount?.id ?? provider,
+        resourceId: linkedAccount.id,
         detail: { provider }
       })
 
@@ -151,7 +139,7 @@ export async function handleOauthCallback(event: H3Event, provider: SupportedOau
         await loginLogService.record({ userId: user.id, username: user.username, method, success: false, failureReason: 'not_active', ip, userAgent })
         return redirectError(event, 'account_inactive')
       }
-      await oauthAccountService.upsertAccount({
+      await oauthAccountService.bindAccount({
         userId: user.id,
         provider,
         providerUserId: profile.providerUserId,
@@ -176,6 +164,9 @@ export async function handleOauthCallback(event: H3Event, provider: SupportedOau
     })
     return sendRedirect(event, '/oauth/complete', 302)
   } catch (err: unknown) {
+    if (consumed.mode === 'bind' && err instanceof OauthBindingError) {
+      return redirectError(event, err.reason, 'bind')
+    }
     console.error('[oauth callback] failed', err)
     return redirectError(event, 'callback_failed', consumed.mode)
   }

@@ -1,16 +1,19 @@
-import type { AuthUser, LoginInput, RegisterInput } from '#shared/types/auth'
+import { computed } from 'vue'
+import type { AuthUser, LoginInput, RegisterInput, UserProfile } from '#shared/types/auth'
 import type { SupportedLocale } from '#shared/config/locale-defaults'
 
 // 登录态新鲜期：超过这个时长后，下一次 fetchMe()（中间件导航 / 插件定时器）会重新打 /api/auth/me，
 // 用来在长会话里捕获后端封禁、踢人、session 失效等服务端状态变化。
 const AUTH_FRESH_FOR_MS = 5 * 60 * 1000
 
-// 客户端模块作用域：dedup 并发的 fetchMe 调用，并记录上次成功拉取时间。
-// 不放进 useState 是因为：Promise 不可序列化、SSR 时间戳 hydrate 到客户端后会被当作"刚拉过"导致跳过首次校验。
-// 服务端不能复用这俩变量（Node 进程内 module-scope 会跨请求串号），中间件本身串行调用一次也不需要 dedup。
+// 这些模块变量只管理客户端读取和身份轮次，不进入 useState 或 SSR payload。
+// 服务端只使用下方 event.context 中的请求级状态，不跨请求复用缓存或在途读取。
 let clientInflight: Promise<AuthUser | null> | null = null
 let clientFetchedAt = 0
-let clientStateVersion = 0
+let clientReadVersion = 0
+// Identity changes invalidate writes; ordinary read invalidation must not cancel login.
+let clientIdentityVersion = 0
+let clientPendingIdentity: number | null = null
 let clientFetchController: AbortController | null = null
 
 // SSR 阶段的 user 存在 event.context 上（请求级，跨请求隔离），不进 nuxt payload；
@@ -74,7 +77,7 @@ export function useAuth() {
   })
 
   const runFetch = async () => {
-    const requestVersion = clientStateVersion
+    const requestVersion = clientReadVersion
     const controller = import.meta.client ? new AbortController() : null
     if (controller) clientFetchController = controller
     loading.value = true
@@ -85,20 +88,22 @@ export function useAuth() {
         headers: serverCookieHeaders,
         signal: controller?.signal
       })
-      if (import.meta.client && requestVersion !== clientStateVersion) return user.value
+      if (import.meta.client && (requestVersion !== clientReadVersion || clientPendingIdentity !== null)) return user.value
+      if (import.meta.client && user.value?.id !== res?.id) clientIdentityVersion += 1
       user.value = res ?? null
       if (import.meta.client) clientFetchedAt = Date.now()
       return user.value
     } catch (error) {
-      if (import.meta.client && requestVersion !== clientStateVersion) return user.value
+      if (import.meta.client && (requestVersion !== clientReadVersion || clientPendingIdentity !== null)) return user.value
       if (isAuthFailure(error)) {
+        if (import.meta.client) clientIdentityVersion += 1
         user.value = null
         if (import.meta.client) clientFetchedAt = Date.now()
         return null
       }
       throw error
     } finally {
-      if (!import.meta.client || requestVersion === clientStateVersion) loading.value = false
+      if (!import.meta.client || requestVersion === clientReadVersion) loading.value = false
       if (clientFetchController === controller) clientFetchController = null
     }
   }
@@ -106,6 +111,9 @@ export function useAuth() {
   const fetchMe = async (force = false) => {
     // 服务端：每次请求都重新评估登录态（中间件串行调用一次），dedup/TTL 都靠客户端兜
     if (import.meta.server) return runFetch()
+    // A forced read promises a snapshot requested after the caller's mutation.
+    // It cannot join a request which was already in flight before that mutation.
+    if (force) invalidateClientFetch()
     const fresh = clientFetchedAt > 0 && Date.now() - clientFetchedAt < AUTH_FRESH_FOR_MS
     if (!force && fresh) return user.value
     if (clientInflight) return clientInflight
@@ -119,15 +127,20 @@ export function useAuth() {
   }
 
   const login = async (payload: LoginInput) => {
-    const requestVersion = invalidateClientFetch()
-    const res = await $fetch<AuthUser>('/api/auth/login', {
-      method: 'POST',
-      body: payload
-    })
-    if (import.meta.client && requestVersion !== clientStateVersion) return res
-    user.value = res
-    if (import.meta.client) clientFetchedAt = Date.now()
-    return res
+    const identityVersion = beginIdentityChange()
+    if (import.meta.client) clientPendingIdentity = identityVersion
+    try {
+      const res = await $fetch<AuthUser>('/api/auth/login', {
+        method: 'POST', body: payload
+      })
+      if (import.meta.client && identityVersion !== clientIdentityVersion) return res
+      beginIdentityChange()
+      user.value = res
+      if (import.meta.client) clientFetchedAt = Date.now()
+      return res
+    } finally {
+      if (import.meta.client && clientPendingIdentity === identityVersion) clientPendingIdentity = null
+    }
   }
 
   const register = (payload: RegisterInput) => $fetch('/api/auth/register', {
@@ -136,22 +149,60 @@ export function useAuth() {
   })
 
   const logout = async () => {
-    const requestVersion = invalidateClientFetch()
-    await $fetch('/api/auth/logout', { method: 'POST' })
-    if (import.meta.client && requestVersion !== clientStateVersion) return
-    user.value = null
-    if (import.meta.client) clientFetchedAt = Date.now()
+    const identityVersion = beginIdentityChange()
+    if (import.meta.client) clientPendingIdentity = identityVersion
+    try {
+      await $fetch('/api/auth/logout', { method: 'POST' })
+      if (import.meta.client && identityVersion !== clientIdentityVersion) return
+      beginIdentityChange()
+      user.value = null
+      if (import.meta.client) clientFetchedAt = Date.now()
+    } finally {
+      if (import.meta.client && clientPendingIdentity === identityVersion) clientPendingIdentity = null
+    }
   }
 
-  function invalidateClientFetch(): number {
-    if (import.meta.server) return clientStateVersion
-    clientStateVersion += 1
+  function invalidateClientFetch(): void {
+    if (import.meta.server) return
+    clientReadVersion += 1
     clientFetchedAt = 0
     clientFetchController?.abort()
     clientFetchController = null
     clientInflight = null
     loading.value = false
-    return clientStateVersion
+  }
+
+  function beginIdentityChange(): number {
+    if (import.meta.server) return clientIdentityVersion
+    clientIdentityVersion += 1
+    invalidateClientFetch()
+    return clientIdentityVersion
+  }
+
+  function captureIdentity() {
+    const id = user.value?.id
+    const version = clientIdentityVersion
+    return () => id !== undefined && user.value?.id === id
+      && (!import.meta.client || (version === clientIdentityVersion && clientPendingIdentity === null))
+  }
+
+  const updateProfile = async (displayName: string): Promise<UserProfile | undefined> => {
+    const isCurrent = captureIdentity()
+    if (!isCurrent()) return
+    invalidateClientFetch()
+    try {
+      const saved = await $fetch<UserProfile>('/api/user/profile', {
+        method: 'PUT', body: { displayName: displayName.trim() }
+      })
+      if (!isCurrent() || saved.id !== user.value?.id) return
+      invalidateClientFetch()
+      // The mutation already returns the committed profile. Update only the
+      // changed field; unrelated preferences may have been saved concurrently.
+      user.value = { ...user.value!, displayName: saved.displayName }
+      return saved
+    } catch (error) {
+      if (isCurrent()) throw error
+    }
   }
 
   function isAuthFailure(error: unknown): boolean {
@@ -164,14 +215,20 @@ export function useAuth() {
   }
 
   const updateLocalePreference = async (locale: SupportedLocale) => {
-    const result = await $fetch('/api/user/preferences', {
-      method: 'PUT',
-      body: { locale }
-    })
-    if (user.value) {
-      user.value = { ...user.value, locale: result.locale }
+    const isCurrent = captureIdentity()
+    if (!isCurrent()) return
+    invalidateClientFetch()
+    try {
+      const result = await $fetch('/api/user/preferences', {
+        method: 'PUT', body: { locale }
+      })
+      if (!isCurrent()) return
+      invalidateClientFetch()
+      user.value = { ...user.value!, locale: result.locale }
+      return result.locale
+    } catch (error) {
+      if (isCurrent()) throw error
     }
-    return result.locale
   }
 
   return {
@@ -181,6 +238,7 @@ export function useAuth() {
     login,
     register,
     logout,
+    updateProfile,
     updateLocalePreference
   }
 }
