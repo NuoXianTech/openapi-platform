@@ -111,7 +111,6 @@ export function useAdminOperationLogList(options: { immediate?: boolean } = {}) 
   )
   const cleanup = useAdminLogCleanup({
     endpoint: '/api/admin/operation-logs/cleanup',
-    total: list.total,
     applyFilters: keywordApply.applyNow,
     refresh: list.refresh,
     buildFilters: () => buildAdminOperationLogRequestFilters(list.filters)

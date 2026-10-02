@@ -12,6 +12,9 @@ import { createApplicationError } from '~~/server/errors/application-error'
 import {
   loadServiceControlContext,
   acceptServiceTargetResults,
+  commitServiceControlContext,
+  writeServiceTargetResults,
+  buildServiceControlView,
   safeServiceControlError,
   type PlatformServiceControlContext
 } from '~~/server/services/platform-service-control-context'
@@ -274,61 +277,68 @@ async function commitServiceSnapshot(
   context: PlatformServiceControlContext,
   snapshot: DiscoveryFetchSuccess
 ) {
-  await acceptServiceTargetResults(context, 'discovery', [
-    ...snapshot.targets.map(item => ({ ok: true as const, targetId: item.targetId, state: item.state })),
-    ...[...snapshot.targetErrors].map(([targetId, error]) => ({ ok: false as const, targetId, error }))
-  ], async (tx, current, now) => {
-    const first = snapshot.targets[0]!
-    const schemaChanged = Boolean(
-      current.connection.configurationSchemaSha256
-      && current.connection.configurationSchemaSha256
-      !== snapshot.description.configuration.schemaSha256
-    )
-    const document = await persistServiceOpenApi({
-      upstreamServiceId: current.service.id,
-      description: snapshot.description,
-      document: snapshot.openapi.document,
-      reportedSha256: snapshot.openapi.reportedSha256,
-      sourceUrl: snapshot.openapi.sourceUrl,
-      transaction: tx
-    })
-    await platformEndpointService.synchronizeSupportRoutes({
-      upstream: current.service,
-      serviceName: snapshot.description.name,
-      endpoints: readStoredServiceEndpoints(document.parsedSummary),
-      transaction: tx
-    })
-
-    const firstTargetError = [...snapshot.targetErrors.values()][0]
-    const discoveryError = snapshot.targetErrors.size > 0
-      ? `${snapshot.targetErrors.size} Service target(s) could not be discovered: ${firstTargetError}`.slice(0, 500)
-      : null
-    const updatedConnection = firstRow(
-      await tx.update(upstreamServiceConnections).set({
-        serviceId: snapshot.description.serviceId,
+  return commitServiceControlContext(context, 'discovery', async (tx, current, changedAt) => {
+    await writeServiceTargetResults(tx, current, changedAt, 'discovery', [
+      ...snapshot.targets.map(item => ({ ok: true as const, targetId: item.targetId, state: item.state })),
+      ...[...snapshot.targetErrors].map(([targetId, error]) => ({ ok: false as const, targetId, error }))
+    ], async (tx, current, now) => {
+      const first = snapshot.targets[0]!
+      const schemaChanged = Boolean(
+        current.connection.configurationSchemaSha256
+        && current.connection.configurationSchemaSha256
+        !== snapshot.description.configuration.schemaSha256
+      )
+      const document = await persistServiceOpenApi({
+        upstreamServiceId: current.service.id,
+        description: snapshot.description,
+        document: snapshot.openapi.document,
+        reportedSha256: snapshot.openapi.reportedSha256,
+        sourceUrl: snapshot.openapi.sourceUrl,
+        transaction: tx
+      })
+      await platformEndpointService.synchronizeSupportRoutes({
+        upstream: current.service,
         serviceName: snapshot.description.name,
-        serviceVersion: snapshot.description.version,
-        serviceCommit: snapshot.description.commit,
-        serviceProtocol: snapshot.description.serviceProtocol,
-        serviceDescription: snapshot.description,
-        openapiSha256: snapshot.description.openapiSha256,
-        configurationSchemaSha256:
-          snapshot.description.configuration.schemaSha256,
-        configurationSchema: first.definition,
-        ...(schemaChanged ? { configurationHash: null } : {}),
-        lastDiscoveredAt: now,
-        lastDiscoveryError: discoveryError,
-        updatedAt: now
-      }).where(eq(
-        upstreamServiceConnections.upstreamServiceId,
-        current.service.id
-      )).returning()
-    )
-    if (!updatedConnection) {
-      throw new Error('Service connection disappeared during discovery')
-    }
+        endpoints: readStoredServiceEndpoints(document.parsedSummary),
+        transaction: tx
+      })
 
-    return upstreamServiceTokenService.promoteVerified(tx, updatedConnection)
+      const firstTargetError = [...snapshot.targetErrors.values()][0]
+      const discoveryError = snapshot.targetErrors.size > 0
+        ? `${snapshot.targetErrors.size} Service target(s) could not be discovered: ${firstTargetError}`.slice(0, 500)
+        : null
+      const updatedConnection = firstRow(
+        await tx.update(upstreamServiceConnections).set({
+          serviceId: snapshot.description.serviceId,
+          serviceName: snapshot.description.name,
+          serviceVersion: snapshot.description.version,
+          serviceCommit: snapshot.description.commit,
+          serviceProtocol: snapshot.description.serviceProtocol,
+          serviceDescription: snapshot.description,
+          openapiSha256: snapshot.description.openapiSha256,
+          configurationSchemaSha256:
+            snapshot.description.configuration.schemaSha256,
+          configurationSchema: first.definition,
+          ...(schemaChanged ? { configurationHash: null } : {}),
+          lastDiscoveredAt: now,
+          lastDiscoveryError: discoveryError,
+          updatedAt: now
+        }).where(eq(
+          upstreamServiceConnections.upstreamServiceId,
+          current.service.id
+        )).returning()
+      )
+      if (!updatedConnection) {
+        throw new Error('Service connection disappeared during discovery')
+      }
+
+      return upstreamServiceTokenService.promoteVerified(tx, updatedConnection)
+    })
+    // Read and decode the response while rollback is still possible. No fresh
+    // context or OpenAPI read is required after this transaction commits.
+    const committed = await loadServiceControlContext(context.service.id, { transaction: tx })
+    const view = await buildServiceControlView(committed, { transaction: tx })
+    return { context: committed, view }
   })
 }
 
@@ -356,7 +366,7 @@ export async function discoverPlatformService(upstreamServiceId: string) {
     throw snapshot.error
   }
   try {
-    await commitServiceSnapshot(context, snapshot)
+    return await commitServiceSnapshot(context, snapshot)
   } catch (error) {
     await recordDiscoveryFailure(context, {
       ok: false,
@@ -365,6 +375,4 @@ export async function discoverPlatformService(upstreamServiceId: string) {
     })
     throw error
   }
-
-  return loadServiceControlContext(upstreamServiceId)
 }

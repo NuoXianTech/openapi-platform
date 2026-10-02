@@ -75,7 +75,6 @@ export function useAdminLoginLogList(options: { immediate?: boolean } = {}) {
   )
   const cleanup = useAdminLogCleanup({
     endpoint: '/api/admin/login-logs/cleanup',
-    total: list.total,
     applyFilters: keywordApply.applyNow,
     refresh: list.refresh,
     buildFilters: () => buildAdminLoginLogRequestFilters(list.filters)

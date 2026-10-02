@@ -1,5 +1,5 @@
 import type { ServiceControlRoutingOutcome, ServiceDiscoveryOutcome, ServiceConfigurationSyncOutcome } from '#shared/types/service-control'
-import { buildServiceControlView, getServiceControlView } from '~~/server/services/platform-service-control-context'
+import { refreshServiceControlAvailability, getServiceControlView } from '~~/server/services/platform-service-control-context'
 import { refreshPlatformRevision } from '~~/server/services/routing-revision-service'
 import { hasReadyServiceTarget } from '~~/server/utils/service-upstream-readiness'
 import {
@@ -27,9 +27,9 @@ async function completeRouting(upstreamId: string, publish: boolean): Promise<Se
 }
 
 async function discover(upstreamId: string): Promise<ServiceDiscoveryOutcome> {
-  const context = await discoverPlatformService(upstreamId)
+  const { context, view } = await discoverPlatformService(upstreamId)
   const routing = await completeRouting(upstreamId, hasReadyServiceTarget(context.targets, context.connection))
-  return { ...await buildServiceControlView(context, { checkAvailability: true }), ...routing }
+  return { ...await refreshServiceControlAvailability(context, view), ...routing }
 }
 
 export const platformServiceControlService = {
