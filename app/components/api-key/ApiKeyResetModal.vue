@@ -1,15 +1,17 @@
 <script setup lang="ts">
-import { ref, watch } from 'vue'
+import { onScopeDispose, ref, watch } from 'vue'
 import { parseFetchError } from '~/utils/client-error'
 import type { ApiKeyItem, CreatedApiKeyItem } from '#shared/types/api'
 
-const props = defineProps<{
+const props = withDefaults(defineProps<{
+  open?: boolean
   target: ApiKeyItem | null
   onReset: (id: number) => Promise<CreatedApiKeyItem | undefined>
-}>()
+}>(), { open: true })
 
 const emit = defineEmits<{
   saved: []
+  'update:open': [value: boolean]
 }>()
 
 const toast = useToast()
@@ -17,27 +19,47 @@ const { t } = useI18n()
 const { copyText } = useCopyFeedback()
 const loading = ref(false)
 const result = ref<CreatedApiKeyItem | null>(null)
+let generation = 0
+let disposed = false
+let closed = false
+
+function invalidate() {
+  generation += 1
+  loading.value = false
+  result.value = null
+}
+
+function updateOpen(open: boolean) {
+  closed = !open
+  if (!open) invalidate()
+  emit('update:open', open)
+}
 
 watch(
-  () => props.target,
+  () => [props.open, props.target] as const,
   () => {
-    loading.value = false
-    result.value = null
-  }
+    closed = !props.open
+    invalidate()
+  },
+  { flush: 'sync' }
 )
+onScopeDispose(() => { disposed = true; invalidate() })
 
 async function confirmReset() {
-  if (!props.target) return
+  if (!props.target || !props.open || closed || disposed || loading.value || result.value) return
+  const version = generation
+  const isCurrent = () => !disposed && !closed && props.open && generation === version
   loading.value = true
   try {
     const next = await props.onReset(props.target.id)
-    result.value = next || null
+    if (!isCurrent() || !next) return
+    result.value = next
     emit('saved')
     toast.add({ title: t('common.apiKeys.reset.success'), color: 'success' })
   } catch (err) {
-    toast.add({ title: parseFetchError(err, t('common.apiKeys.reset.failed')), color: 'error' })
+    if (isCurrent()) toast.add({ title: parseFetchError(err, t('common.apiKeys.reset.failed')), color: 'error' })
   } finally {
-    loading.value = false
+    if (isCurrent()) loading.value = false
   }
 }
 
@@ -48,8 +70,10 @@ async function copy(text: string) {
 
 <template>
   <UModal
+    :open="open"
     :title="result ? $t('common.apiKeys.reset.saveNewTitle') : $t('common.apiKeys.reset.confirmTitle')"
     :ui="{ content: 'sm:max-w-md' }"
+    @update:open="updateOpen"
   >
     <template #body>
       <UAlert

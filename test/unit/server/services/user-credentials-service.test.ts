@@ -34,6 +34,67 @@ async function token(purpose: 'reset_password' | 'change_email', email = 'user@e
 }
 
 describe('credential consumption through the production schema', () => {
+  describe('administrator profile completion', () => {
+    const input = { userId: 1, expectedTokenVersion: 0, password: 'new-password' }
+    beforeEach(async () => { await fixture.client.exec("UPDATE users SET role = 'admin' WHERE id = 1") })
+
+    it('keeps blank identity fields and returns the committed version and audit detail', async () => {
+      const result = await userCredentialsService.completeAdminProfile({ ...input, username: ' ', email: '' })
+      expect(result.updated).toMatchObject({ username: 'user', email: 'user@example.com', passwordHash: 'hash:new-password', tokenVersion: 1 })
+      expect(result.detail).toEqual({
+        previous: { username: 'user', email: 'user@example.com' },
+        patch: { usernameChanged: false, emailChanged: false, passwordChanged: true }
+      })
+    })
+
+    it('allows only one completion from the same authenticated version', async () => {
+      let arrived = 0
+      let release!: () => void
+      const barrier = new Promise<void>(resolve => { release = resolve })
+      context.hash.mockImplementation(async () => {
+        if (++arrived === 2) release()
+        await barrier
+        return 'new-hash'
+      })
+      const results = await Promise.allSettled([
+        userCredentialsService.completeAdminProfile(input),
+        userCredentialsService.completeAdminProfile(input)
+      ])
+      expect(results.filter(result => result.status === 'fulfilled')).toHaveLength(1)
+      expect(results.find(result => result.status === 'rejected')).toMatchObject({ reason: { statusCode: 409 } })
+      await expect(userCredentialsService.completeAdminProfile(input)).rejects.toMatchObject({ statusCode: 409 })
+      expect(await userService.getById(1)).toMatchObject({ tokenVersion: 1 })
+    })
+
+    it.each([
+      "password_hash = 'other-password'", "email = 'changed@example.com'", "username = 'renamed'",
+      'token_version = 1', "role = 'user'", 'is_active = false', 'is_banned = true'
+    ])('does not overwrite a concurrent change to %s during hashing', async (patch) => {
+      context.hash.mockImplementationOnce(async () => {
+        await fixture.client.exec(`UPDATE users SET ${patch} WHERE id = 1`)
+        return 'stale-hash'
+      })
+      await expect(userCredentialsService.completeAdminProfile(input)).rejects.toMatchObject({ statusCode: 409 })
+      expect((await userService.getById(1))?.passwordHash).not.toBe('stale-hash')
+    })
+
+    it.each(['username', 'email'] as const)('maps a concurrent %s uniqueness conflict without changing credentials', async (field) => {
+      context.hash.mockImplementationOnce(async () => {
+        await userService.addUser({ username: 'occupied', email: 'occupied@example.com', passwordHash: 'hash' })
+        return 'stale-hash'
+      })
+      await expect(userCredentialsService.completeAdminProfile({ ...input, [field]: field === 'username' ? 'occupied' : 'occupied@example.com' }))
+        .rejects.toMatchObject({ statusCode: 409, message: field === 'username' ? '该用户名已被占用' : '该邮箱已被注册' })
+      expect(await userService.getById(1)).toMatchObject({ tokenVersion: 0, passwordHash: 'old-hash' })
+    })
+
+    it.each(["role = 'user'", 'is_active = false', 'is_banned = true'])('rejects an unauthorized administrator with %s', async (patch) => {
+      await fixture.client.exec(`UPDATE users SET ${patch} WHERE id = 1`)
+      await expect(userCredentialsService.completeAdminProfile(input)).rejects.toMatchObject({ statusCode: 403 })
+      expect(context.hash).not.toHaveBeenCalled()
+    })
+  })
+
   it('accepts only one concurrent reset with the same token', async () => {
     const resetToken = await token('reset_password')
     let arrived = 0

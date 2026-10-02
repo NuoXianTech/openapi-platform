@@ -1,3 +1,5 @@
+import { computed, reactive } from 'vue'
+import { defaultCustomExpiry, expiryToFormInput, findCidrLineErrors, parseCidrLines, expiryToIso } from '~/utils/api-key'
 import type { ApiKeyFormModel, ApiKeyItem, ApiKeyPayload } from '#shared/types/api'
 
 /**
@@ -80,7 +82,7 @@ export function useApiKeyForm() {
       name: form.name.trim() || t('common.apiKeys.defaultName'),
       expiresAt: expiryToIso(form.expiryPreset, form.expiresAtCustom),
       totalQuota: form.unlimitedQuota ? null : Number(form.totalQuota),
-      scopes: form.scopesMode === 'all' ? null : form.scopesSelected,
+      scopes: form.scopesMode === 'all' ? null : [...form.scopesSelected],
       ipWhitelist: ipList.length === 0 ? null : ipList
     }
   }
