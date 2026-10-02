@@ -16,6 +16,8 @@ const aliases = {
 }
 
 export default defineConfig({
+  // App unit tests must execute Nuxt's client guards, not an undefined meta flag.
+  define: { 'import.meta.client': 'true', 'import.meta.server': 'false' },
   plugins: [vueSetupPlugin()],
   test: {
     environment: 'node',

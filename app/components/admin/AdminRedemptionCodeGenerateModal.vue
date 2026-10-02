@@ -49,8 +49,7 @@ async function submit() {
     toast.add({ title: t('admin.credits.redemptionCodes.generate.validation.positiveAmount'), color: 'warning' })
     return
   }
-  // The API silently drops a past expiry and issues a code that never expires,
-  // so reject it here instead of quietly generating the wrong thing.
+  // Give immediate feedback; issuance also validates expiry before committing.
   const parsedExpiry = form.expiresAt ? new Date(form.expiresAt) : null
   if (parsedExpiry && (Number.isNaN(parsedExpiry.getTime()) || parsedExpiry.getTime() <= Date.now())) {
     toast.add({
@@ -70,8 +69,11 @@ async function submit() {
       note: form.note.trim() || null
     })
   } catch (err: unknown) {
+    const code = (err as { data?: { data?: { code?: string } } } | null)?.data?.data?.code
     toast.add({
-      title: parseFetchError(err, t('admin.credits.redemptionCodes.generate.failed')),
+      title: code === 'REDEMPTION_EXPIRY_INVALID'
+        ? t('admin.credits.redemptionCodes.generate.validation.futureExpiry')
+        : parseFetchError(err, t('admin.credits.redemptionCodes.generate.failed')),
       color: 'error'
     })
   } finally {

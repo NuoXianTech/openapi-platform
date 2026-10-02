@@ -1,44 +1,57 @@
 import { isSupportedLocale, type SupportedLocale } from '#shared/config/locale-defaults'
 import type { UserProfileData } from '~/types/user-settings'
+import { onScopeDispose, watch } from 'vue'
+import { usePrivateResource } from '~/composables/dashboard/use-private-resource'
 
 export function useUserProfileSettings() {
   const toast = useToast()
   const { t, locale, setLocale } = useI18n()
-  const { fetchMe, updateLocalePreference } = useAuth()
+  const { user, updateProfile: saveProfile, updateLocalePreference } = useAuth()
 
-  const profile = ref<UserProfileData | null>(null)
-  const isProfileLoading = ref(false)
+  const resource = usePrivateResource<UserProfileData | null>({
+    path: '/api/user/profile', defaultData: () => null, immediate: false
+  })
+  const { data: profile, loading: isProfileLoading } = resource
+  let disposed = false
+  let generation = 0
+  watch(() => user.value?.id, () => {
+    generation += 1
+    resource.invalidate()
+    profile.value = null
+  }, { flush: 'sync' })
+  onScopeDispose(() => { disposed = true; generation += 1 })
 
   async function loadProfile(): Promise<void> {
-    isProfileLoading.value = true
-    try {
-      profile.value = await $fetch<UserProfileData>('/api/user/profile')
-    } catch {
-      profile.value = null
-    } finally {
-      isProfileLoading.value = false
-    }
+    await resource.refresh()
   }
 
   async function updateProfile(displayName: string): Promise<void> {
-    await $fetch('/api/user/profile', {
-      method: 'PUT',
-      body: { displayName: displayName.trim() }
-    })
+    if (disposed) return
+    const version = generation
+    resource.invalidate()
+    const saved = await saveProfile(displayName)
+    if (!saved || disposed || version !== generation) return
+    resource.invalidate()
+    profile.value = saved
     toast.add({ title: t('user.settings.profile.updated'), color: 'success' })
-    await Promise.all([loadProfile(), fetchMe(true)])
   }
 
   async function updateLanguagePreference(nextLocale: SupportedLocale): Promise<void> {
+    if (disposed) return
+    const version = generation
     const previousLocale = locale.value
     await setLocale(nextLocale)
+    if (disposed || version !== generation) return
     try {
       const savedLocale = await updateLocalePreference(nextLocale)
+      if (savedLocale === undefined || disposed || version !== generation) return
+      resource.invalidate()
       if (profile.value) {
         profile.value = { ...profile.value, locale: savedLocale }
       }
       toast.add({ title: t('user.settings.language.updated'), color: 'success' })
     } catch (error) {
+      if (disposed || version !== generation) return
       if (isSupportedLocale(previousLocale)) {
         await setLocale(previousLocale)
       }
