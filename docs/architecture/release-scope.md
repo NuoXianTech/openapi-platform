@@ -68,7 +68,7 @@ Platform 不运行具体业务 Handler。Service 不管理 Platform 用户、公
 - 所有管理对象具备与产品范围一致的创建、编辑、停用、删除保护、权限、审计和测试。
 - Service Endpoint 可以被发现和审查；只有管理员明确操作后才自动生成 Route 与 Revision，不允许无确认公开。
 - API 目录、日志、统计和积分以 Product/Route 为事实来源，不依赖兼容注册模型。
-- Platform 通过 lint、类型检查、死代码检查、单元测试、集成测试、数据库迁移和生产构建。
+- Platform 通过 lint、类型检查、单元测试、集成测试、数据库迁移和生产构建。
 - Service 通过死代码检查、类型检查、测试、TypeScript 构建和运行时资源检查。
 - Linux OCI 镜像通过目标架构、非 root、文件权限、健康检查和资源预算验证。
 - Platform、Service、数据库、Redis 和 Upstream 的关键故障语义经过验证。

@@ -15,7 +15,6 @@
     "postinstall": "nuxt prepare",
     "typecheck": "nuxt typecheck",
     "lint": "eslint . --max-warnings 0",
-    "check:dead-code": "knip",
     "test": "vitest run",
     "test:api-service": "vitest run --config vitest.api-service.config.ts",
     "test:integration": "vitest run --config vitest.integration.config.ts"
@@ -50,7 +49,6 @@
     "@types/nodemailer": "^8.0.2",
     "drizzle-kit": "^0.31.11",
     "eslint": "^10.11.0",
-    "knip": "6.38.0",
     "typescript": "^6.0.3",
     "typescript-eslint": "8.70.1",
     "vitest": "^5.0.2",

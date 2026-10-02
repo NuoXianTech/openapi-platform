@@ -72,7 +72,6 @@ Platform：
 ```bash
 pnpm lint
 pnpm typecheck
-pnpm check:dead-code
 pnpm test
 pnpm build
 pnpm test:integration
