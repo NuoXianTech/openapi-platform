@@ -136,10 +136,10 @@ onBeforeUnmount(() => clearTimeout(sampleTimer))
         </h1>
         <p class="home-hero__description">{{ siteDescription || $t('public.home.defaultDescription') }}</p>
         <div class="home-hero__actions">
-          <UButton :to="primaryAction.to" size="lg" trailing-icon="i-lucide-arrow-up-right" class="design-marketing-cta home-hero__button">
+          <UButton :to="primaryAction.to" size="sm" trailing-icon="i-lucide-arrow-up-right" class="design-marketing-cta home-hero__button">
             {{ primaryAction.label }}
           </UButton>
-          <UButton to="/docs" color="neutral" variant="outline" size="lg" class="design-marketing-cta home-hero__button home-hero__button--secondary">
+          <UButton to="/docs" color="neutral" variant="outline" size="sm" class="design-marketing-cta home-hero__button home-hero__button--secondary">
             {{ $t('public.navigation.catalog') }}
           </UButton>
         </div>
@@ -295,12 +295,14 @@ onBeforeUnmount(() => clearTimeout(sampleTimer))
 .home-hero__actions {
   display: flex;
   flex-wrap: wrap;
-  gap: 12px;
-  margin-top: 28px;
+  gap: 8px;
+  margin-top: 24px;
 }
 
 .home-hero__button {
-  min-width: 144px;
+  min-width: 0;
+  min-height: 40px;
+  font: var(--design-type-button-md);
 }
 
 .home-hero__button--secondary {
@@ -483,18 +485,14 @@ onBeforeUnmount(() => clearTimeout(sampleTimer))
     margin-top: 20px;
     font: var(--design-type-body-md);
   }
-  .home-hero__actions {
-    flex-direction: column;
-    margin-top: 24px;
-  }
-  .home-hero__button {
-    width: 100%;
-    min-width: 0;
-  }
   .request-demo__header { padding-inline: 16px; }
   .request-demo__filename { display: none; }
   .request-demo__request,
   .request-demo__response { padding: 16px; }
   .request-demo pre { height: 200px; }
+}
+
+@media (width <= 640px), (pointer: coarse) {
+  .home-hero__button { min-height: 44px; }
 }
 </style>

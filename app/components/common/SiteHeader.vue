@@ -135,8 +135,12 @@ async function handleLocaleChange(nextLocale: SupportedLocale): Promise<void> {
               <UDropdownMenu
                 :items="languageItems"
                 :portal="false"
-                :content="{ align: 'end' }"
-                :ui="{ content: 'site-header__language-menu w-40', item: 'min-h-11 rounded-md text-sm' }"
+                :content="{ side: 'bottom', align: 'center', sideOffset: 12, collisionPadding: 12 }"
+                :ui="{
+                  content: 'site-header__language-menu w-40',
+                  viewport: 'min-h-0 overscroll-contain',
+                  item: 'min-h-8 items-center rounded-md px-2 py-1 text-sm'
+                }"
               >
                 <UButton
                   color="neutral"
@@ -327,22 +331,25 @@ async function handleLocaleChange(nextLocale: SupportedLocale): Promise<void> {
   min-height: 44px;
   align-items: center;
   padding: 8px 12px;
-  border-radius: 999px;
+  border-radius: 6px;
+  background: transparent;
   color: var(--ui-text-toned);
   font-size: 14px;
   line-height: 20px;
   white-space: nowrap;
-  transition: color 160ms ease, background-color 160ms ease;
+  transition: color 160ms ease;
 }
 
 .site-header__nav-link:hover,
 .site-header__nav-link.is-active {
   color: var(--ui-text-highlighted);
-  background: var(--ui-bg-muted);
 }
 
 .site-header__nav-link.is-active {
   font-weight: 500;
+  text-decoration-line: underline;
+  text-decoration-thickness: 2px;
+  text-underline-offset: 6px;
 }
 
 .site-header__actions {
@@ -378,14 +385,23 @@ async function handleLocaleChange(nextLocale: SupportedLocale): Promise<void> {
   color: var(--ui-text-toned);
   background: transparent;
   box-shadow: none;
+  transition: color 160ms ease;
 }
 
 .site-header__tool:hover,
+.site-header__tool:active,
 .site-header__tool[data-state="open"],
 .site-header__language:hover,
+.site-header__language:active,
 .site-header__language.is-active {
   color: var(--ui-text-highlighted);
-  background: var(--ui-bg-muted);
+  background: transparent;
+}
+
+.site-header__language.is-active {
+  text-decoration-line: underline;
+  text-decoration-thickness: 2px;
+  text-underline-offset: 6px;
 }
 
 .site-header__language-dropdown {
@@ -409,17 +425,21 @@ async function handleLocaleChange(nextLocale: SupportedLocale): Promise<void> {
 
 .site-header__account {
   display: flex;
+  align-items: center;
   gap: 8px;
 }
 
 .site-header__account-button {
+  position: relative;
+  isolation: isolate;
   min-width: 44px;
   min-height: 44px;
   flex: 1;
   justify-content: center;
-  padding: 0 6px;
-  border: 1px solid transparent;
+  padding: 0 14px;
+  border: 0;
   border-radius: 6px;
+  background: transparent;
   font-size: 14px;
   font-weight: 500;
   line-height: 20px;
@@ -428,22 +448,35 @@ async function handleLocaleChange(nextLocale: SupportedLocale): Promise<void> {
 }
 
 .site-header__account-button--secondary {
-  border-color: var(--ui-border);
-  color: var(--ui-text-highlighted);
-  background: var(--ui-bg-elevated);
+  padding-inline: 12px;
+  color: var(--ui-text-toned);
 }
 
 .site-header__account-button--secondary:hover {
-  background: var(--ui-bg-muted);
+  color: var(--ui-text-highlighted);
+  background: transparent;
 }
 
 .site-header__account-button--primary {
-  border-color: var(--ui-primary);
   color: var(--ui-bg);
+}
+
+/* Keep the full hit area while letting desktop account actions look compact. */
+.site-header__account-button--primary::before {
+  position: absolute;
+  z-index: -1;
+  inset: 0;
+  border-radius: inherit;
   background: var(--ui-primary);
+  content: '';
+  pointer-events: none;
 }
 
 .site-header__account-button--primary:hover {
+  background: transparent;
+}
+
+.site-header__account-button--primary:hover::before {
   background: color-mix(in srgb, var(--ui-primary) 88%, var(--ui-bg));
 }
 
@@ -453,10 +486,17 @@ async function handleLocaleChange(nextLocale: SupportedLocale): Promise<void> {
 }
 
 .site-header :deep(.site-header__language-menu) {
+  max-height: min(264px, var(--reka-dropdown-menu-content-available-height));
   border: 1px solid var(--ui-border);
   border-radius: 12px;
   background: var(--ui-bg-elevated);
   box-shadow: 0 2px 2px rgb(0 0 0 / 4%), 0 8px 16px -4px rgb(0 0 0 / 8%);
+}
+
+@media (pointer: coarse) {
+  .site-header :deep(.site-header__language-menu [data-slot="item"]) {
+    min-height: 44px;
+  }
 }
 
 @media (min-width: 640px) {
@@ -506,5 +546,9 @@ async function handleLocaleChange(nextLocale: SupportedLocale): Promise<void> {
   .site-header__languages { display: none; }
 
   .site-header__account-button { flex: 0 0 auto; }
+}
+
+@media (min-width: 1024px) and (pointer: fine) {
+  .site-header__account-button--primary::before { inset-block: 4px; }
 }
 </style>
