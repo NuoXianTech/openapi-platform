@@ -351,7 +351,7 @@ export async function discoverPlatformService(upstreamServiceId: string) {
       data: { code: 'SERVICE_HAS_NO_TARGETS' }
     })
   }
-  const token = upstreamServiceTokenService.forVerification(context.connection)
+  const token = upstreamServiceTokenService.forControlContext(context.connection)
   if (!token) {
     throw createApplicationError({
       statusCode: 409,

@@ -12,6 +12,7 @@ import { calculateServiceConfigurationHash } from '~~/server/utils/service-confi
 import { canonicalJson } from '~~/server/utils/canonical-json'
 import * as availability from '~~/server/services/service-availability-service'
 import { isServiceTargetReady } from '~~/server/utils/service-upstream-readiness'
+import { encryptStoredSecret } from '~~/server/utils/stored-secret'
 
 const context = vi.hoisted(() => ({ database: null as unknown, upstreamId: '', audit: vi.fn() }))
 vi.mock('~~/server/utils/auth', () => ({ defineAdminEventHandler: (handler: (event: H3Event, admin: { id: number, username: string }) => Promise<unknown>) => (event: H3Event) => handler(event, { id: 1, username: 'admin' }) }))
@@ -109,6 +110,89 @@ async function discoveryFixture() {
 }
 
 describe('configuration result acceptance', () => {
+  it('saves above the highest enabled Target revision and reuses that revision on synchronization', async () => {
+    const upstream = await configuredUpstream()
+    await database.update(schema.upstreamTargets).set({ configurationRevision: 7 })
+      .where(eq(schema.upstreamTargets.id, upstream.targets[0]!.id))
+    const { target: disabled } = await platformUpstreamService.createTargetAndPublish(upstream.id, {
+      baseUrl: 'http://127.0.0.1:9090', weight: 1, enabled: false
+    }, null)
+    await database.update(schema.upstreamTargets).set({ configurationRevision: 20 })
+      .where(eq(schema.upstreamTargets.id, disabled.id))
+    const update = vi.spyOn(serviceControlClient, 'updateConfiguration')
+      .mockImplementation(async (_url, _path, _token, input) => response(input.revision))
+
+    expect(await updatePlatformServiceConfiguration(upstream.id, { expectedRevision: 1, values: {}, secrets: {} }))
+      .toMatchObject({ revision: 8, status: 'synced' })
+    expect(await synchronizePlatformServiceConfiguration(upstream.id)).toMatchObject({ revision: 8, status: 'synced' })
+    expect(update.mock.calls.map(call => [call[0], call[3].revision]))
+      .toEqual([[upstream.targets[0]!.baseUrl, 8], [upstream.targets[0]!.baseUrl, 8]])
+    const saved = await loadServiceControlContext(upstream.id)
+    expect(saved.connection.configurationRevision).toBe(8)
+    expect(saved.targets.find(target => target.id === disabled.id)?.configurationRevision).toBe(20)
+  })
+
+  it('advances synchronization above a Target that already observed a newer configuration', async () => {
+    const upstream = await configuredUpstream()
+    await database.update(schema.upstreamTargets).set({ configurationRevision: 5, configurationHash: 'other' })
+      .where(eq(schema.upstreamTargets.id, upstream.targets[0]!.id))
+    const update = vi.spyOn(serviceControlClient, 'updateConfiguration')
+      .mockImplementation(async (_url, _path, _token, input) => response(input.revision))
+
+    const result = await synchronizePlatformServiceConfiguration(upstream.id)
+    expect(result).toMatchObject({ revision: 6, status: 'synced' })
+    expect(update.mock.calls[0]?.[3].revision).toBe(6)
+    const saved = await loadServiceControlContext(upstream.id)
+    expect(saved.connection.configurationRevision).toBe(6)
+    expect(saved.targets[0]).toMatchObject({ configurationRevision: 6, configurationHash: hash, configurationStatus: 'synced' })
+  })
+
+  it('synchronizes with the observed credential after rotation by another instance', async () => {
+    const upstream = await configuredUpstream()
+    let expectedToken = 'configuration-test-token-with-at-least-32-characters'
+    const update = vi.spyOn(serviceControlClient, 'updateConfiguration').mockImplementation(async (_url, _path, token) => {
+      if (token !== expectedToken) throw new Error('stale credential')
+      return response()
+    })
+    expect((await synchronizePlatformServiceConfiguration(upstream.id)).status).toBe('synced')
+    expectedToken = 'externally-rotated-token-with-at-least-32-characters'
+    await database.update(schema.upstreamServiceConnections).set({
+      pendingServiceTokenCiphertext: encryptStoredSecret(expectedToken, 'service-token')
+    }).where(eq(schema.upstreamServiceConnections.upstreamServiceId, upstream.id))
+
+    const result = await synchronizePlatformServiceConfiguration(upstream.id)
+    expect(result.status).toBe('synced')
+    expect(update.mock.calls[1]?.[2]).toBe(expectedToken)
+    expect((await loadServiceControlContext(upstream.id)).targets[0]?.configurationStatus).toBe('synced')
+  })
+
+  it.each(['token', 'probe'] as const)('keeps the upstream list readable when an availability %s observation fails', async (failure) => {
+    const upstream = await configuredUpstream()
+    const log = vi.spyOn(console, 'error').mockImplementation(() => undefined)
+    const secretError = new Error('observation failed with secret-must-not-leak')
+    if (failure === 'token') vi.spyOn(upstreamServiceTokenService, 'forControlContext').mockImplementation(() => { throw secretError })
+    else vi.spyOn(availability, 'resolveServiceAvailability').mockRejectedValue(secretError)
+    const result = await platformUpstreamService.list({ checkAvailability: true })
+    expect(result).toMatchObject([{ id: upstream.id, connection: { availability: 'unknown', serviceId: 'workflow' } }])
+    expect(result[0]?.targets).toHaveLength(1)
+    expect(JSON.stringify(result)).not.toContain('secret-must-not-leak')
+    expect(log).toHaveBeenCalledExactlyOnceWith('[service-control] availability unavailable', { upstreamId: upstream.id })
+  })
+
+  it.each(['undiscovered', 'disabled', 'no-targets'] as const)('skips credential access and probes for %s upstreams in both lists and details', async (state) => {
+    const upstream = await configuredUpstream()
+    if (state === 'undiscovered') await database.update(schema.upstreamServiceConnections).set({ serviceDescription: null })
+      .where(eq(schema.upstreamServiceConnections.upstreamServiceId, upstream.id))
+    if (state === 'disabled') await platformUpstreamService.updateAndPublish(upstream.id, { status: 'disabled' }, null)
+    if (state === 'no-targets') await platformUpstreamService.updateTargetAndPublish(upstream.targets[0]!.id, { enabled: false }, null)
+    const token = vi.spyOn(upstreamServiceTokenService, 'forControlContext')
+    const probe = vi.spyOn(availability, 'resolveServiceAvailability')
+    expect((await platformUpstreamService.list({ checkAvailability: true }))[0]?.connection.availability).toBe('unknown')
+    expect((await getServiceControlView(upstream.id, { checkAvailability: true })).connection.availability).toBe('unknown')
+    expect(token).not.toHaveBeenCalled()
+    expect(probe).not.toHaveBeenCalled()
+  })
+
   it('preserves discovered contract and verified Token when publication fails, then retries through the control interface', async () => {
     const { upstream, original, description, getDescription } = await discoveryFixture()
     vi.mocked(refreshPlatformRevision).mockRejectedValueOnce(new Error('publication unavailable'))
@@ -139,8 +223,12 @@ describe('configuration result acceptance', () => {
     const { upstream, original, description } = await discoveryFixture()
     const log = vi.spyOn(console, 'error').mockImplementation(() => undefined)
     const secretError = new Error('read failed with secret-token-must-not-leak')
-    if (failure === 'token') vi.spyOn(upstreamServiceTokenService, 'getForControl').mockRejectedValueOnce(secretError)
-    else vi.mocked(availability.resolveServiceAvailability).mockRejectedValueOnce(secretError)
+    if (failure === 'token') {
+      const forContext = upstreamServiceTokenService.forControlContext
+      vi.spyOn(upstreamServiceTokenService, 'forControlContext')
+        .mockImplementationOnce(forContext)
+        .mockImplementationOnce(() => { throw secretError })
+    } else vi.mocked(availability.resolveServiceAvailability).mockRejectedValueOnce(secretError)
     context.upstreamId = upstream.id
     const result = await discoverHandler({} as H3Event)
     expect(result).toMatchObject({
@@ -164,7 +252,6 @@ describe('configuration result acceptance', () => {
   it('uses the committed view without reloading the contract after publication', async () => {
     const { upstream } = await discoveryFixture()
     const postCommitRead = vi.fn(() => { throw new Error('database unavailable after commit') })
-    vi.spyOn(upstreamServiceTokenService, 'getForControl').mockResolvedValue('verified-test-token-with-at-least-32-characters')
     vi.mocked(refreshPlatformRevision).mockImplementationOnce(async () => {
       context.database = new Proxy(database, {
         get(target, property, receiver) {

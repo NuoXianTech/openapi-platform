@@ -48,6 +48,7 @@ describe('dynamic gateway target selection', () => {
     resetGatewayTargetHealth()
   })
   afterEach(() => {
+    vi.useRealTimers()
     vi.restoreAllMocks()
     vi.unstubAllGlobals()
     resetGatewayTargetHealth()
@@ -196,6 +197,7 @@ describe('dynamic gateway target selection', () => {
   })
 
   it('fails over to a healthy target when the first attempt times out', async () => {
+    vi.useFakeTimers()
     const route = match('attempt-timeout-test', 'round_robin', [1, 1], 4_000)
     const [first, second] = route.upstream.targets
     // The first target hangs past its attempt slice; the second answers.
@@ -210,7 +212,9 @@ describe('dynamic gateway target selection', () => {
       .mockResolvedValueOnce(new Response('recovered'))
     vi.stubGlobal('fetch', request)
 
-    const response = await proxyFor(route)(new Request('http://gateway.invalid'))
+    const pending = proxyFor(route)(new Request('http://gateway.invalid'))
+    await vi.advanceTimersByTimeAsync(2_000)
+    const response = await pending
 
     await expect(response.text()).resolves.toBe('recovered')
     // Two calls means failover actually happened: before this fix the shared

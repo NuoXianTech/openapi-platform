@@ -68,7 +68,7 @@ function incrementConfigurationRevision(revision: number): number {
   return revision + 1
 }
 
-export function nextServiceConfigurationRevision(
+function nextServiceConfigurationRevision(
   currentRevision: number,
   targets: readonly ConfigurationRevisionTarget[]
 ): number {
@@ -84,7 +84,7 @@ export function nextServiceConfigurationRevision(
   return incrementConfigurationRevision(highestRevision)
 }
 
-export function serviceConfigurationSynchronizationRevision(
+function serviceConfigurationSynchronizationRevision(
   currentRevision: number,
   configurationHash: string,
   targets: readonly ConfigurationRevisionTarget[]
@@ -147,7 +147,7 @@ async function pushConfiguration(
       data: { code: 'SERVICE_HAS_NO_TARGETS' }
     })
   }
-  const token = await upstreamServiceTokenService.getForControl(context.service.id)
+  const token = upstreamServiceTokenService.forControlContext(context.connection)
   if (!token) {
     throw createApplicationError({
       statusCode: 409,

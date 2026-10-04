@@ -32,6 +32,38 @@ afterEach(() => {
 })
 
 describe('service availability service', () => {
+  it('shares the probe budget across upstream reads and releases failed probes for queued work', async () => {
+    let active = 0
+    let peak = 0
+    const saturated = Promise.withResolvers<undefined>()
+    const release = Promise.withResolvers<undefined>()
+    const request = vi.fn(async (input: string | URL | Request) => {
+      active += 1
+      peak = Math.max(peak, active)
+      if (active === 16) saturated.resolve(undefined)
+      try {
+        await release.promise
+        if (new URL(input.toString()).port === '9000') throw new Error('offline')
+        return new Response(null, { status: 200 })
+      } finally {
+        active -= 1
+      }
+    })
+    vi.stubGlobal('fetch', request)
+    const targets = Array.from({ length: 40 }, (_, index) => ({
+      id: `target-${index}`, baseUrl: `http://127.0.0.1:${9000 + index}`, enabled: true
+    }))
+    const pending = Promise.all(targets.map(target => resolveServiceAvailability(description, [target], 'service-token')))
+    await saturated.promise
+    release.resolve(undefined)
+    const results = await pending
+    expect(peak).toBeLessThanOrEqual(16)
+    expect(peak).toBeGreaterThan(1)
+    expect(results.map(result => result.overall)).toEqual(['offline', ...Array<string>(39).fill('online')])
+    expect(active).toBe(0)
+    expect(request).toHaveBeenCalledTimes(79)
+  })
+
   it('returns unknown without a discovered contract or enabled Target', async () => {
     const request = vi.fn()
     vi.stubGlobal('fetch', request)
@@ -80,8 +112,9 @@ describe('service availability service', () => {
   })
 
   it('deduplicates concurrent Target readiness requests', async () => {
+    const release = Promise.withResolvers<undefined>()
     const request = vi.fn(async () => {
-      await new Promise(resolve => setTimeout(resolve, 10))
+      await release.promise
       return new Response(null, { status: 200 })
     })
     vi.stubGlobal('fetch', request)
@@ -101,6 +134,7 @@ describe('service availability service', () => {
       targets,
       'service-token'
     )
+    release.resolve(undefined)
 
     await expect(Promise.all([first, second]))
       .resolves.toEqual([

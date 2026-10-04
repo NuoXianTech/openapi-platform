@@ -8,8 +8,7 @@ import {
   apiRoutes
 } from '~~/server/db/schema'
 import { createApplicationError } from '~~/server/errors/application-error'
-import { toServiceConnectionView } from '~~/server/services/platform-service-control-context'
-import { resolveServiceAvailability } from '~~/server/services/service-availability-service'
+import { resolveServiceControlAvailability, toServiceConnectionView } from '~~/server/services/platform-service-control-context'
 import { getSqlState } from '~~/server/utils/database-error'
 import { firstRow } from '~~/server/utils/row'
 import { upstreamServiceTokenService } from '~~/server/services/upstream-service-token-service'
@@ -77,7 +76,10 @@ async function assertCanDisableLastTarget(
       eq(apiRoutes.state, 'active'),
       isNull(apiRoutes.deletedAt)
     )))
-  if (Number(activeRoutes?.value ?? 0) === 0) return
+  // A pending Route disable does not retire its live traffic. The publication
+  // transaction holds the runtime lock while both sources are checked.
+  if (Number(activeRoutes?.value ?? 0) === 0
+    && !await routingReferenceService.hasUpstream(serviceId, tx)) return
 
   const enabledTargets = await tx.select()
     .from(upstreamTargets)
@@ -292,15 +294,11 @@ export const platformUpstreamService = {
     }
     return Promise.all(Array.from(result.values()).map(async (item) => {
       const { connectionRecord, ...upstream } = item
-      const availability = options.checkAvailability !== true
-        || upstream.status !== 'active'
-        || !connectionRecord.serviceDescription
-        ? 'unknown'
-        : (await resolveServiceAvailability(
-            connectionRecord.serviceDescription,
-            upstream.targets,
-            await upstreamServiceTokenService.getForControl(upstream.id)
-          )).overall
+      const availability = options.checkAvailability === true
+        ? (await resolveServiceControlAvailability({
+            service: upstream, connection: connectionRecord, targets: upstream.targets
+          })).overall
+        : 'unknown'
       return {
         ...upstream,
         connection: toServiceConnectionView(connectionRecord, availability)

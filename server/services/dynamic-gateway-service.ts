@@ -67,7 +67,7 @@ interface DynamicGatewayResult {
 const UPSTREAM_ERROR_CODE_PATTERN = /^[A-Z][A-Z0-9_]{0,79}$/
 const UPSTREAM_RETRY_AFTER_SECONDS = 1
 
-export function createUpstreamHeaders(event: H3Event, match: ResolvedDynamicRoute, serviceToken: string): Headers {
+function createUpstreamHeaders(event: H3Event, match: ResolvedDynamicRoute, serviceToken: string): Headers {
   const headers = new Headers(getProxyRequestHeaders(event))
   for (const name of Array.from(headers.keys())) {
     const normalized = name.toLowerCase()

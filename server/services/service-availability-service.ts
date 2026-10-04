@@ -22,6 +22,24 @@ interface ServiceAvailabilitySnapshot {
 }
 
 const pendingAvailabilityRequests = new Map<string, Promise<boolean>>()
+let activeProbes = 0
+const waitingProbes: Array<() => void> = []
+
+// Lists probe many Upstreams concurrently. The budget belongs to the process,
+// not a single caller; a completed probe transfers its slot to the next waiter.
+async function acquireProbe(): Promise<void> {
+  if (activeProbes < AVAILABILITY_PROBE_CONCURRENCY) {
+    activeProbes += 1
+    return
+  }
+  await new Promise<void>((resolve) => { waitingProbes.push(resolve) })
+}
+
+function releaseProbe(): void {
+  const next = waitingProbes.shift()
+  if (next) next()
+  else activeProbes -= 1
+}
 
 async function requestTargetAvailability(
   baseUrl: string,
@@ -29,6 +47,7 @@ async function requestTargetAvailability(
   controlPath: string,
   serviceToken: string
 ): Promise<boolean> {
+  await acquireProbe()
   try {
     const readinessUrl = buildServiceControlUrl(baseUrl, readinessPath)
     const requestOptions = {
@@ -56,6 +75,8 @@ async function requestTargetAvailability(
     return authenticated
   } catch {
     return false
+  } finally {
+    releaseProbe()
   }
 }
 
