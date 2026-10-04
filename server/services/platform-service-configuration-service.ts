@@ -68,7 +68,7 @@ function incrementConfigurationRevision(revision: number): number {
   return revision + 1
 }
 
-export function nextServiceConfigurationRevision(
+function nextServiceConfigurationRevision(
   currentRevision: number,
   targets: readonly ConfigurationRevisionTarget[]
 ): number {
@@ -84,7 +84,7 @@ export function nextServiceConfigurationRevision(
   return incrementConfigurationRevision(highestRevision)
 }
 
-export function serviceConfigurationSynchronizationRevision(
+function serviceConfigurationSynchronizationRevision(
   currentRevision: number,
   configurationHash: string,
   targets: readonly ConfigurationRevisionTarget[]

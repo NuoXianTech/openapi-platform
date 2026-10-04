@@ -21,51 +21,20 @@ function labelKeyFor(action: string): string {
 }
 
 describe('audit action registry', () => {
-  it.each(LOCALES)('%s defines a label for every operation-log action', (locale) => {
+  it.each(LOCALES)('%s labels exactly the registered operation-log actions', (locale) => {
     const labels = readActionLabels(locale)
-    const missing = Object.keys(OPERATION_LOG_ACTIONS).filter(action => !(labelKeyFor(action) in labels))
-    expect(missing).toEqual([])
+    expect(Object.keys(labels).sort()).toEqual(Object.keys(OPERATION_LOG_ACTIONS).map(labelKeyFor).sort())
+    const loginLabels = new Set(Object.keys(LOGIN_LOG_ACTIONS).map(labelKeyFor))
+    expect(Object.keys(labels).filter(key => loginLabels.has(key))).toEqual([])
   })
 
-  it.each(LOCALES)('%s has no label for an unregistered action', (locale) => {
-    const labels = readActionLabels(locale)
-    const registered = new Set(Object.keys(OPERATION_LOG_ACTIONS).map(labelKeyFor))
-    const stale = Object.keys(labels).filter(key => !registered.has(key))
-    expect(stale).toEqual([])
-  })
-
-  it('does not give login actions operation-log labels', () => {
-    // 登录日志页面按 detail.method 渲染登录方式，不走 actionLabels。
-    // 给登录动作加标签只会制造永不被读取的死翻译。
-    for (const locale of LOCALES) {
-      const labels = readActionLabels(locale)
-      const loginLabels = Object.keys(LOGIN_LOG_ACTIONS).filter(action => labelKeyFor(action) in labels)
-      expect(loginLabels).toEqual([])
-    }
-  })
-
-  it('covers both surfaces in the unified registry', () => {
-    // 写入内核只认 AUDIT_ACTIONS；两个展示面加起来必须等于它，否则会出现
-    // 「能写入但没有任何页面能展示」或「注册了却不在写入类型里」的动作码。
+  it('registers every action exactly once and reserves the login namespace for login logs', () => {
+    // Array equality also catches duplicates across the two display groups.
     expect(Object.keys(AUDIT_ACTIONS).sort()).toEqual(
       [...Object.keys(OPERATION_LOG_ACTIONS), ...Object.keys(LOGIN_LOG_ACTIONS)].sort()
     )
-  })
-
-  it('keeps the two surfaces disjoint', () => {
-    const operationKeys = new Set(Object.keys(OPERATION_LOG_ACTIONS))
-    const overlap = Object.keys(LOGIN_LOG_ACTIONS).filter(action => operationKeys.has(action))
-    expect(overlap).toEqual([])
-  })
-
-  it('namespaces every login action under the login prefix', () => {
-    const misnamed = Object.keys(LOGIN_LOG_ACTIONS).filter(action => !action.startsWith(LOGIN_ACTION_PREFIX))
-    expect(misnamed).toEqual([])
-  })
-
-  it('keeps login actions out of the operation-log surface so they stay on their own page', () => {
-    const leaked = Object.keys(OPERATION_LOG_ACTIONS).filter(action => action.startsWith(LOGIN_ACTION_PREFIX))
-    expect(leaked).toEqual([])
+    expect(Object.keys(AUDIT_ACTIONS).filter(action => action.startsWith(LOGIN_ACTION_PREFIX)).sort())
+      .toEqual(Object.keys(LOGIN_LOG_ACTIONS).sort())
   })
 
   it('treats secret disclosure as a gate and credential changes as durable', () => {

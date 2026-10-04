@@ -110,6 +110,43 @@ async function discoveryFixture() {
 }
 
 describe('configuration result acceptance', () => {
+  it('saves above the highest enabled Target revision and reuses that revision on synchronization', async () => {
+    const upstream = await configuredUpstream()
+    await database.update(schema.upstreamTargets).set({ configurationRevision: 7 })
+      .where(eq(schema.upstreamTargets.id, upstream.targets[0]!.id))
+    const { target: disabled } = await platformUpstreamService.createTargetAndPublish(upstream.id, {
+      baseUrl: 'http://127.0.0.1:9090', weight: 1, enabled: false
+    }, null)
+    await database.update(schema.upstreamTargets).set({ configurationRevision: 20 })
+      .where(eq(schema.upstreamTargets.id, disabled.id))
+    const update = vi.spyOn(serviceControlClient, 'updateConfiguration')
+      .mockImplementation(async (_url, _path, _token, input) => response(input.revision))
+
+    expect(await updatePlatformServiceConfiguration(upstream.id, { expectedRevision: 1, values: {}, secrets: {} }))
+      .toMatchObject({ revision: 8, status: 'synced' })
+    expect(await synchronizePlatformServiceConfiguration(upstream.id)).toMatchObject({ revision: 8, status: 'synced' })
+    expect(update.mock.calls.map(call => [call[0], call[3].revision]))
+      .toEqual([[upstream.targets[0]!.baseUrl, 8], [upstream.targets[0]!.baseUrl, 8]])
+    const saved = await loadServiceControlContext(upstream.id)
+    expect(saved.connection.configurationRevision).toBe(8)
+    expect(saved.targets.find(target => target.id === disabled.id)?.configurationRevision).toBe(20)
+  })
+
+  it('advances synchronization above a Target that already observed a newer configuration', async () => {
+    const upstream = await configuredUpstream()
+    await database.update(schema.upstreamTargets).set({ configurationRevision: 5, configurationHash: 'other' })
+      .where(eq(schema.upstreamTargets.id, upstream.targets[0]!.id))
+    const update = vi.spyOn(serviceControlClient, 'updateConfiguration')
+      .mockImplementation(async (_url, _path, _token, input) => response(input.revision))
+
+    const result = await synchronizePlatformServiceConfiguration(upstream.id)
+    expect(result).toMatchObject({ revision: 6, status: 'synced' })
+    expect(update.mock.calls[0]?.[3].revision).toBe(6)
+    const saved = await loadServiceControlContext(upstream.id)
+    expect(saved.connection.configurationRevision).toBe(6)
+    expect(saved.targets[0]).toMatchObject({ configurationRevision: 6, configurationHash: hash, configurationStatus: 'synced' })
+  })
+
   it('synchronizes with the observed credential after rotation by another instance', async () => {
     const upstream = await configuredUpstream()
     let expectedToken = 'configuration-test-token-with-at-least-32-characters'

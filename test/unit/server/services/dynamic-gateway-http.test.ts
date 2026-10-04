@@ -8,7 +8,7 @@ import type { ResolvedDynamicRoute } from '~~/server/services/routing-runtime-se
 
 const mocks = vi.hoisted(() => ({
   authorize: vi.fn(), resolve: vi.fn(), mark: vi.fn(), release: vi.fn(),
-  record: vi.fn(), addCall: vi.fn(), link: vi.fn(), finalize: vi.fn(), usage: vi.fn()
+  record: vi.fn(), addCall: vi.fn(), link: vi.fn(), finalize: vi.fn(), usage: vi.fn(), token: vi.fn()
 }))
 vi.mock('~~/server/services/dynamic-gateway-access-service', () => ({ dynamicGatewayAccessService: { authorize: mocks.authorize } }))
 vi.mock('~~/server/services/routing-runtime-service', async (original) => ({
@@ -23,7 +23,7 @@ vi.mock('~~/server/services/api-call-service', () => ({ apiCallService: {
   addCallAndUpsertDailyStat: mocks.record, addCall: mocks.addCall
 } }))
 vi.mock('~~/server/services/api-key-service', () => ({ apiKeyService: { recordUsage: mocks.usage } }))
-vi.mock('~~/server/services/upstream-service-token-service', () => ({ upstreamServiceTokenService: { get: async () => 'review-service-token' } }))
+vi.mock('~~/server/services/upstream-service-token-service', () => ({ upstreamServiceTokenService: { get: mocks.token } }))
 vi.mock('~~/server/utils/redis', () => ({ getRedisClient: () => null, getRedisConfig: () => ({ keyPrefix: 'test:' }) }))
 const { dynamicGatewayService } = await import('~~/server/services/dynamic-gateway-service')
 const { closeSafeFetchTransports } = await import('~~/server/utils/safe-fetch')
@@ -89,6 +89,7 @@ beforeEach(() => {
   vi.clearAllMocks()
   Object.assign(match, structuredClone(originalMatch))
   mocks.resolve.mockResolvedValue({ match, allowedMethods: ['GET', 'HEAD'] })
+  mocks.token.mockResolvedValue('review-service-token')
   mocks.mark.mockImplementation(() => {
     expect(lastEvent.node.res.headersSent).toBe(false)
     return Promise.resolve(true)
@@ -124,6 +125,56 @@ afterAll(async () => {
 })
 
 describe('gateway over HTTP', () => {
+  it('rejects a missing Service credential before dispatching and releases the reservation', async () => {
+    mocks.token.mockResolvedValue('')
+    const received = vi.fn()
+    upstreamHandler = received
+    const response = await fetch(url)
+    expect(response.status).toBe(503)
+    expect(await response.json()).toMatchObject({ code: 'UPSTREAM_AUTH_UNAVAILABLE' })
+    expect(received).not.toHaveBeenCalled()
+    expect(mocks.release).toHaveBeenCalledExactlyOnceWith(11, 7)
+    expect(mocks.mark).not.toHaveBeenCalled()
+  })
+
+  it('replaces caller credentials and forwarding metadata on the actual upstream request', async () => {
+    let received: IncomingMessage['headers'] | undefined
+    upstreamHandler = (req, res) => { received = req.headers; res.end('ok') }
+    const response = await fetch(url, { headers: {
+      'authorization': 'Bearer caller-token',
+      'cookie': 'session=private',
+      'x-api-key': 'private-api-key',
+      'forwarded': 'for=attacker',
+      'x-forwarded-for': '198.51.100.7',
+      'x-forwarded-host': 'attacker.example',
+      'x-real-ip': '198.51.100.8',
+      'x-openapi-route-id': 'forged-route',
+      'x-business-header': 'keep-me'
+    } })
+    expect(await response.text()).toBe('ok')
+    expect(received).toMatchObject({
+      'authorization': 'Service review-service-token',
+      'x-forwarded-host': new URL(url).host,
+      'x-forwarded-for': '127.0.0.1',
+      'x-forwarded-proto': 'http',
+      'x-openapi-route-id': match.route.id,
+      'x-business-header': 'keep-me'
+    })
+    for (const header of ['cookie', 'x-api-key', 'forwarded', 'x-real-ip']) expect(received?.[header]).toBeUndefined()
+  })
+
+  it('forwards the public protocol supplied by the trusted request context', async () => {
+    const authorize = mocks.authorize.getMockImplementation()!
+    mocks.authorize.mockImplementationOnce((event: H3Event) => {
+      event.context.publicRequestProtocol = 'https'
+      return authorize(event)
+    })
+    let protocol: string | string[] | undefined
+    upstreamHandler = (req, res) => { protocol = req.headers['x-forwarded-proto']; res.end('ok') }
+    expect(await (await fetch(url)).text()).toBe('ok')
+    expect(protocol).toBe('https')
+  })
+
   it.each([
     ['POST', ['GET', 'HEAD'], 405],
     ['OPTIONS', ['GET', 'HEAD'], 204],
@@ -303,6 +354,10 @@ describe('gateway over HTTP', () => {
     await rejected
     await vi.waitFor(() => expect(mocks.release).toHaveBeenCalledOnce())
     expect(mocks.mark).not.toHaveBeenCalled()
+    await gatewayCallService.release(lastEvent)
+    expect(mocks.release).toHaveBeenCalledExactlyOnceWith(11, 7)
+    expect(lastEvent.node.res.statusCode).toBe(499)
+    expect(lastEvent.context.apiFailure).toMatchObject({ errorCode: 'CLIENT_DISCONNECTED' })
   })
 
   it('releases failed calls without creating a settlement intent', async () => {
