@@ -25,23 +25,18 @@ function normalizeToken(value: string): string {
 }
 
 // Plaintext is kept only in bounded process-local snapshots, never Redis.
-function tokenCache(includePending: boolean) {
-  return createLocalSnapshot<string, string>({
-    ttlMs: TOKEN_CACHE_TTL_MS,
-    maxEntries: MAX_TOKEN_CACHE_ENTRIES,
-    async load(id) {
-      const connection = firstRow(await db.select({
-        active: upstreamServiceConnections.serviceTokenCiphertext,
-        pending: upstreamServiceConnections.pendingServiceTokenCiphertext
-      }).from(upstreamServiceConnections)
-        .where(eq(upstreamServiceConnections.upstreamServiceId, id)).limit(1))
-      const ciphertext = includePending ? connection?.pending ?? connection?.active : connection?.active
-      return ciphertext ? decryptStoredSecret(ciphertext, 'service-token') : ''
-    }
-  })
-}
-const activeTokens = tokenCache(false)
-const controlTokens = tokenCache(true)
+const activeTokens = createLocalSnapshot<string, string>({
+  ttlMs: TOKEN_CACHE_TTL_MS,
+  maxEntries: MAX_TOKEN_CACHE_ENTRIES,
+  async load(id) {
+    const connection = firstRow(await db.select({
+      active: upstreamServiceConnections.serviceTokenCiphertext
+    }).from(upstreamServiceConnections)
+      .where(eq(upstreamServiceConnections.upstreamServiceId, id)).limit(1))
+    const ciphertext = connection?.active
+    return ciphertext ? decryptStoredSecret(ciphertext, 'service-token') : ''
+  }
+})
 
 function invalidateAfterCommit(tx: DatabaseTransaction, id: string): void {
   afterCommit(tx, () => upstreamServiceTokenService.invalidate(id))
@@ -78,9 +73,9 @@ export const upstreamServiceTokenService = {
     return connection
   },
 
-  /** Discovery must verify this exact observed credential, even when another
-   * instance staged it more recently than the control cache TTL. */
-  forVerification(connection: Pick<ServiceConnection, 'serviceTokenCiphertext' | 'pendingServiceTokenCiphertext'>): string {
+  /** Every control request uses the credential from the same observation as
+   * its contract, configuration and Targets. Only live traffic uses a cache. */
+  forControlContext(connection: Pick<ServiceConnection, 'serviceTokenCiphertext' | 'pendingServiceTokenCiphertext'>): string {
     const ciphertext = connection.pendingServiceTokenCiphertext ?? connection.serviceTokenCiphertext
     return ciphertext ? decryptStoredSecret(ciphertext, 'service-token') : ''
   },
@@ -113,17 +108,11 @@ export const upstreamServiceTokenService = {
     return activeTokens.get(id)
   },
 
-  getForControl(id: string): Promise<string> {
-    return controlTokens.get(id)
-  },
-
   invalidate(id: string): void {
     activeTokens.invalidate(id)
-    controlTokens.invalidate(id)
   },
 
   clearCache(): void {
     activeTokens.clear()
-    controlTokens.clear()
   }
 }

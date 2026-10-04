@@ -32,6 +32,7 @@ const { upstreamServiceTokenService } = await import(
   '~~/server/services/upstream-service-token-service'
 )
 const revisionCompiler = await import('~~/server/services/routing-revision-compiler')
+const { routingRevisionService } = await import('~~/server/services/routing-revision-service')
 const { loadServiceControlContext, commitServiceControlContext } = await import('~~/server/services/platform-service-control-context')
 
 let client: PGlite
@@ -63,6 +64,14 @@ afterEach(() => vi.restoreAllMocks())
 
 it('reads and probes only the requested Upstream, exposing no stored credentials', async () => {
   const target = await createConfiguredTarget()
+  await database.update(schema.upstreamServiceConnections).set({
+    serviceDescription: {
+      schemaVersion: 1, serviceId: 'openapi-service', name: 'Test Service', version: '1', commit: 'test',
+      serviceProtocol: 'openapi-service/v1', health: '/healthz', readiness: '/readyz',
+      openapi: '/openapi.json', openapiSha256: 'a'.repeat(64),
+      configuration: { schema: '/schema', state: '/state', update: '/config', schemaSha256: 'b'.repeat(64) }
+    }
+  }).where(eq(schema.upstreamServiceConnections.upstreamServiceId, target.upstreamServiceId))
   const unrelated = await platformUpstreamService.create({
     slug: 'unrelated', name: 'Unrelated', loadBalancing: 'round_robin',
     serviceToken: 'unrelated-secret-token-at-least-32-characters',
@@ -135,6 +144,26 @@ async function createActiveRoute(upstreamServiceId: string) {
 }
 
 describe('Platform upstream target state', () => {
+  it.each(['disable', 'remove'] as const)('protects the live last Target from %s until the pending Route disable is applied', async (operation) => {
+    const target = await createConfiguredTarget()
+    await createActiveRoute(target.upstreamServiceId)
+    const published = await routingRevisionService.publish(null)
+    expect(published.configPayload.routes).toHaveLength(1)
+    await database.update(schema.apiRoutes).set({ state: 'disabled' })
+      .where(eq(schema.apiRoutes.upstreamServiceId, target.upstreamServiceId))
+    const mutate = () => operation === 'disable'
+      ? platformUpstreamService.updateTargetAndPublish(target.id, { enabled: false }, null)
+      : platformUpstreamService.removeTargetAndPublish(target.id, null)
+
+    await expect(mutate()).rejects.toMatchObject({ data: { code: 'UPSTREAM_LAST_TARGET_REQUIRED' } })
+    expect((await platformRuntimeService.get()).activeRevisionId).toBe(published.id)
+    expect(await database.query.upstreamTargets.findFirst({ where: eq(schema.upstreamTargets.id, target.id) }))
+      .toMatchObject({ enabled: true })
+
+    expect((await routingRevisionService.publish(null)).configPayload.routes).toHaveLength(0)
+    await expect(mutate()).resolves.toBeDefined()
+  })
+
   it.each(['update', 'remove'] as const)('preserves Target health when %s is rolled back by publication failure', async (operation) => {
     const target = await createConfiguredTarget()
     const reset = vi.spyOn(gatewayTargetHealth, 'reset')
@@ -185,7 +214,7 @@ describe('Platform upstream target state', () => {
     })
     expect(invalidate).toHaveBeenCalledExactlyOnceWith(id)
     await expect(upstreamServiceTokenService.get(id)).resolves.toBe(replacement)
-    await expect(upstreamServiceTokenService.getForControl(id)).resolves.toBe(replacement)
+    expect(upstreamServiceTokenService.forControlContext((await loadServiceControlContext(id)).connection)).toBe(replacement)
     expect((await loadServiceControlContext(id)).connection.pendingServiceTokenCiphertext).toBeNull()
   })
 
@@ -204,20 +233,20 @@ describe('Platform upstream target state', () => {
     expect(invalidate).not.toHaveBeenCalled()
     expect((await loadServiceControlContext(id)).connection).toEqual(expected.connection)
     await expect(upstreamServiceTokenService.get(id)).resolves.toBe(original)
-    await expect(upstreamServiceTokenService.getForControl(id)).resolves.toBe(replacement)
+    expect(upstreamServiceTokenService.forControlContext((await loadServiceControlContext(id)).connection)).toBe(replacement)
   })
 
-  it('verifies the observed Token rather than a control cache predating another instance rotation', async () => {
+  it('uses the observed control Token while live traffic keeps the verified Token', async () => {
     const target = await createConfiguredTarget()
     const id = target.upstreamServiceId
-    const cached = await upstreamServiceTokenService.getForControl(id)
+    const cached = await upstreamServiceTokenService.get(id)
     const replacement = 'externally-staged-token-with-at-least-32-characters'
     await database.update(schema.upstreamServiceConnections).set({
       pendingServiceTokenCiphertext: encryptStoredSecret(replacement, 'service-token')
     }).where(eq(schema.upstreamServiceConnections.upstreamServiceId, id))
     const observed = await loadServiceControlContext(id)
-    await expect(upstreamServiceTokenService.getForControl(id)).resolves.toBe(cached)
-    expect(upstreamServiceTokenService.forVerification(observed.connection)).toBe(replacement)
+    await expect(upstreamServiceTokenService.get(id)).resolves.toBe(cached)
+    expect(upstreamServiceTokenService.forControlContext(observed.connection)).toBe(replacement)
   })
 
   it('cannot promote a stale pending credential over a newer rotation', async () => {
@@ -229,17 +258,17 @@ describe('Platform upstream target state', () => {
     await platformUpstreamService.updateServiceToken(id, replacement)
     await expect(withCommittedTransaction(tx => upstreamServiceTokenService.promoteVerified(tx, old.connection)))
       .rejects.toMatchObject({ data: { code: 'SERVICE_DISCOVERY_CONFLICT' } })
-    await expect(upstreamServiceTokenService.getForControl(id)).resolves.toBe(replacement)
+    expect(upstreamServiceTokenService.forControlContext((await loadServiceControlContext(id)).connection)).toBe(replacement)
   })
 
   it('commits metadata and a pending Token together while preserving the live credential', async () => {
     const target = await createConfiguredTarget()
     const id = target.upstreamServiceId
-    const original = await upstreamServiceTokenService.getForControl(id)
+    const original = await upstreamServiceTokenService.get(id)
     const replacement = 'replacement-service-token-with-at-least-32-characters'
     const updated = await platformUpstreamService.updateAndPublish(id, { name: 'Updated together', serviceToken: replacement }, null)
     expect(updated.upstream.name).toBe('Updated together')
-    await expect(upstreamServiceTokenService.getForControl(id)).resolves.toBe(replacement)
+    expect(upstreamServiceTokenService.forControlContext((await loadServiceControlContext(id)).connection)).toBe(replacement)
     await expect(upstreamServiceTokenService.get(id)).resolves.toBe(original)
   })
 
@@ -289,8 +318,8 @@ describe('Platform upstream target state', () => {
     expect(after.pendingServiceTokenCiphertext).toBeTruthy()
     await expect(upstreamServiceTokenService.get(upstream.id))
       .resolves.toBe('verified-service-token-with-at-least-32-characters')
-    await expect(upstreamServiceTokenService.getForControl(upstream.id))
-      .resolves.toBe('replacement-service-token-with-at-least-32-characters')
+    expect(upstreamServiceTokenService.forControlContext(after))
+      .toBe('replacement-service-token-with-at-least-32-characters')
   })
 
   it('rejects an absent Service Token before writing upstream records', async () => {

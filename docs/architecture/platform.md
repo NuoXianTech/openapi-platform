@@ -217,10 +217,17 @@ Route 支持：
 - 新增、修改地址或重新启用的 Target 在完成发现前不会进入新的 Routing Revision；存在 Platform 期望配置时，还必须同步到对应 Revision 和哈希。
 
 Service Token 的初始化、暂存、验证后提升、活动读取与控制读取统一由
-`upstream-service-token-service.ts` 管理。发现直接使用其已加载控制上下文中的确切凭证，
-避免其他实例刚暂存 Token 时，本进程尚未过期的控制缓存让发现验证旧凭证。
+`upstream-service-token-service.ts` 管理。发现、配置同步和可用性探测通过
+`forControlContext` 使用已加载连接中的确切凭证，与契约、期望配置和 Target 保持同一观察上下文；
+控制读取不再维护独立 Token 缓存或额外查询连接。Gateway 活动凭证仍使用有界本地缓存。
 提升仍在发现指纹校验后的事务内执行，并校验待提升密文没有变化。
 凭证写入登记提交后的本地缓存失效，事务回滚不会改变缓存可见值。
+
+列表、详情和提交后反馈共用 `platform-service-control-context.ts` 的可用性读取规则：
+未发现、已停用或没有启用 Target 时不读取凭证、不探测；凭证读取失败或探测流程意外抛错时将可用性降为
+`unknown`，保留已加载的管理资料及已提交结果，日志不包含原始凭证错误。
+`service-availability-service.ts` 在进程范围内限制最多 16 个并行 Target 探测，跨列表调用共用预算；
+同地址、探针路径与 Token 的在途请求合并，等待名额期间不消耗网络超时，成功与失败均释放名额。
 
 ### 7.2 Target 选择
 
@@ -234,6 +241,8 @@ Target 支持内网地址、容器名、HTTP 与 HTTPS，公网 HTTP 会被拒�
 Target 更新和删除通过 `committed-transaction.ts` 将健康状态清除登记到最外层事务。
 管理调用与行为测试使用 `platform-upstream-service.ts` 的完整变更入口；底层写入、发布判断
 和 Target 删除保护均为私有步骤，不再向调用方提供可选事务或跳过发布保护的写入方式。
+最后一个就绪 Target 的停用和删除同时检查期望 Route 与活动 Routing Revision 引用；
+仅保存 Route 停用草稿不能绕过运行中的引用保护，必须先应用停用变更。
 无需发布的变更等待自身提交，带发布的变更等待 Target 与 Routing Revision 一并提交；
 提交失败不清除本地或 Redis 健康状态。登记提交后动作的内部写入必须使用
 `withCommittedTransaction` 所拥有的事务，不能把普通外部事务当作已经提交。
@@ -353,7 +362,7 @@ OAuth 配置的单项和批量保存只映射明确提交的字段；省略 Secr
 但不能回填新条目，也不能清除新条目的加载状态。各领域仍负责 TTL、校验和故障回退。
 代理配置保存后立即替换本地快照，迟到的旧读取不能覆盖它，显式环境配置仍优先。
 Routing Runtime 保留最后验证成功的时间，重试、失效或缓存命中都不能延长 60 秒回退上限。
-Token 明文只进入有容量上限的进程内缓存，不进入 Redis；跨实例常规读取仍受 5 秒 TTL 约束。
+活动 Token 明文只进入有容量上限的进程内缓存，不进入 Redis；Gateway 跨实例读取仍受 5 秒 TTL 约束。
 
 公开内容缓存由 `shared-cache.ts` 统一处理加载合并和失效。失效会分离本进程的旧加载；
 Redis 通过原子读和条件写校验随机版本标记，其他实例已开始的加载也不能回填失效后的缓存。

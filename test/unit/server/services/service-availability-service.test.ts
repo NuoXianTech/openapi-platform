@@ -32,6 +32,32 @@ afterEach(() => {
 })
 
 describe('service availability service', () => {
+  it('shares the probe budget across upstream reads and releases failed probes for queued work', async () => {
+    let active = 0
+    let peak = 0
+    const request = vi.fn(async (input: string | URL | Request) => {
+      active += 1
+      peak = Math.max(peak, active)
+      try {
+        await new Promise(resolve => setTimeout(resolve, 5))
+        if (new URL(input.toString()).port === '9000') throw new Error('offline')
+        return new Response(null, { status: 200 })
+      } finally {
+        active -= 1
+      }
+    })
+    vi.stubGlobal('fetch', request)
+    const targets = Array.from({ length: 40 }, (_, index) => ({
+      id: `target-${index}`, baseUrl: `http://127.0.0.1:${9000 + index}`, enabled: true
+    }))
+    const results = await Promise.all(targets.map(target => resolveServiceAvailability(description, [target], 'service-token')))
+    expect(peak).toBeLessThanOrEqual(16)
+    expect(peak).toBeGreaterThan(1)
+    expect(results.map(result => result.overall)).toEqual(['offline', ...Array<string>(39).fill('online')])
+    expect(active).toBe(0)
+    expect(request).toHaveBeenCalledTimes(79)
+  })
+
   it('returns unknown without a discovered contract or enabled Target', async () => {
     const request = vi.fn()
     vi.stubGlobal('fetch', request)

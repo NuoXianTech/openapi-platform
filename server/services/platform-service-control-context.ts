@@ -304,30 +304,41 @@ export async function buildServiceControlView(
     : view
 }
 
-/** Availability is a best-effort observation, not part of the saved contract.
- * Preserve the committed view (including Endpoint audit facts) on read errors. */
+/** One best-effort observation policy for lists, details and committed writes.
+ * The credential belongs to this context; probing never performs another read. */
+export async function resolveServiceControlAvailability(context: PlatformServiceControlContext) {
+  const unknown = {
+    overall: 'unknown' as const,
+    targets: new Map(context.targets.map(target => [target.id, 'unknown' as const]))
+  }
+  if (context.service.status !== 'active'
+    || !context.connection.serviceDescription
+    || !context.targets.some(target => target.enabled)) return unknown
+  try {
+    return await resolveServiceAvailability(
+      context.connection.serviceDescription,
+      context.targets,
+      upstreamServiceTokenService.forControlContext(context.connection)
+    )
+  } catch {
+    // Credential errors can contain secret data; log only the affected identity.
+    console.error('[service-control] availability unavailable', { upstreamId: context.service.id })
+    return unknown
+  }
+}
+
+/** Preserve the committed view (including Endpoint audit facts) on probe errors. */
 export async function refreshServiceControlAvailability(
   context: PlatformServiceControlContext,
   view: ServiceConfigurationView
 ): Promise<ServiceConfigurationView> {
-  if (context.service.status !== 'active') return view
-  try {
-    const availability = await resolveServiceAvailability(
-      context.connection.serviceDescription,
-      context.targets,
-      await upstreamServiceTokenService.getForControl(context.service.id)
-    )
-    return {
-      ...view,
-      connection: { ...view.connection, availability: availability.overall },
-      targets: view.targets.map(target => ({
-        ...target, availability: availability.targets.get(target.id) ?? 'unknown'
-      }))
-    }
-  } catch {
-    // Token-load errors can contain secret data; log only the affected identity.
-    console.error('[service-control] availability unavailable', { upstreamId: context.service.id })
-    return view
+  const availability = await resolveServiceControlAvailability(context)
+  return {
+    ...view,
+    connection: { ...view.connection, availability: availability.overall },
+    targets: view.targets.map(target => ({
+      ...target, availability: availability.targets.get(target.id) ?? 'unknown'
+    }))
   }
 }
 
