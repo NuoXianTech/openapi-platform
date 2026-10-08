@@ -101,7 +101,6 @@ app.component('UTheme',Theme)
 app.component('UApp',{inheritAttrs:false,setup:(_props,{slots})=>()=>Vue.h('div',[slots.default?.(),Vue.h(Probe,{id:'overlay-outlet'})])})
 app.component('NuxtLayout',{setup:(_props,{slots})=>()=>slots.default?.()})
 app.component('CommonPageOutlet',{setup:()=>()=>route.meta.appTheme==='auth'?Vue.h(AuthShell,{showBrand:false},{default:()=>Vue.h(Probe,{id:'page'})}):Vue.h(Probe,{id:'page'})})
-app.component('NuxtLoadingIndicator',{inheritAttrs:false,render:()=>null})
 app.config.warnHandler=message=>{throw Error(message)}
 app.mount(root)
 for(const [path,layout,appTheme,expected] of [

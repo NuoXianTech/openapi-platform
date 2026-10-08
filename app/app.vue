@@ -42,10 +42,6 @@ if (import.meta.client) {
       :locale="uiLocale"
       :toaster="{ position: 'bottom-right', max: 3, progress: false }"
     >
-      <NuxtLoadingIndicator
-        color="#18181b"
-        :height="3"
-      />
       <NuxtLayout>
         <CommonPageOutlet />
       </NuxtLayout>
