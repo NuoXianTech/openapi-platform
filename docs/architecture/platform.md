@@ -114,7 +114,7 @@ Product / Version 的编辑上下文、保存、删除确认和列表刷新由
 刷新不覆盖未提交的域名草稿，保存成功也不清除请求期间继续输入的内容。
 这两类管理模块均区分变更结果和刷新错误，卸载后不再使用旧请求结果或确认回调发起后续操作。
 
-Product、Routing Revision 和 Target 的确认动作共用
+Product、Routing Revision、Upstream 和 Target 的确认动作共用
 `app/composables/use-confirmed-operation.ts`，集中处理重复点击、失败重试、完成后不可重放和作用域失效。
 Target 操作还绑定当前 Upstream 上下文，切换详情后旧确认回调和保存结果失效。
 领域模块继续负责操作准入、文案和成功后的资源刷新。
@@ -312,6 +312,14 @@ Target 状态共用一次读取范围及一次探测集合。详情不会为补�
 确认期间保留操作占用，变更失败时确认弹窗保持打开供重试；保存结果决定编辑弹窗是否关闭。
 刷新失败与变更失败分别处理，已成功的变更不会因刷新失败而再次提交。
 详情页将 Target 操作状态纳入 Service 控制操作的禁用规则。
+
+Upstream 列表由 `app/composables/admin/use-admin-upstream-management.ts` 协调删除、启停、
+编辑入口和刷新，页面只绑定列表与操作状态。删除和启停复用同一确认与操作生命周期，
+固定确认时的 Upstream 标识和目标状态，保留 `UPSTREAM_STILL_PUBLISHED` 的本地化反馈。
+确认、写入和后续刷新期间，Upstream 与 Target 操作互斥，编辑弹窗也阻止列表发起其他变更。
+失败写入可在原确认中重试；刷新失败只报告读取错误，不重放已完成的写入。
+取消或页面卸载使保留的确认回调失效，卸载后不再接纳迟到的反馈和刷新。
+测试通过这个管理 interface 验证完整流程，复用真实的确认、生命周期和 Target 操作 module。
 
 ## 8. Service 控制面
 
