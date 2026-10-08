@@ -1,4 +1,5 @@
-import { computed, getCurrentScope, onScopeDispose, ref, shallowRef, watch, type Ref } from 'vue'
+import { computed, ref, shallowRef, watch, type Ref } from 'vue'
+import { useOperationLifecycle } from '~/composables/use-operation-lifecycle'
 import type { PlatformUpstreamDetail, ServiceConfigurationSyncOutcome, ServiceDiscoveryOutcome } from '#shared/types/service-control'
 import { UPSTREAM_CONSTRAINTS } from '#shared/schemas/platform-constraints'
 import { usePrivateResource } from '~/composables/dashboard/use-private-resource'
@@ -42,9 +43,8 @@ export function useAdminServiceControl(upstreamId: Readonly<Ref<string>>) {
   const pageFeedback = ref<ServiceFeedback | null>(null)
   const configurationFeedback = ref<ServiceFeedback | null>(null)
   const tokenFeedback = ref<ServiceFeedback | null>(null)
-  const active = shallowRef<{ kind: OperationKind, upstreamId: string, generation: number } | null>(null)
-  let generation = 0
-  const disposed = ref(false)
+  const lifecycle = useOperationLifecycle({ context: upstreamId, onInvalidate: clearContext })
+  const { active, disposed } = lifecycle
 
   const targetOperations = useAdminTargetOperations({
     context: () => upstreamId.value,
@@ -54,10 +54,10 @@ export function useAdminServiceControl(upstreamId: Readonly<Ref<string>>) {
   const operationBusy = computed(() => active.value !== null || targetOperations.state.value.busy)
   const disabled = computed(() => disposed.value || !upstreamId.value || operationBusy.value || loading.value)
   const controls = computed(() => ({
-    discovering: active.value?.kind === 'discover',
-    updatingToken: active.value?.kind === 'token',
-    saving: active.value?.kind === 'save',
-    synchronizing: active.value?.kind === 'synchronize',
+    discovering: active.value === 'discover',
+    updatingToken: active.value === 'token',
+    saving: active.value === 'save',
+    synchronizing: active.value === 'synchronize',
     discoverDisabled: disabled.value,
     tokenInputDisabled: disabled.value,
     tokenUpdateDisabled: disabled.value || !serviceToken.value.trim(),
@@ -67,8 +67,6 @@ export function useAdminServiceControl(upstreamId: Readonly<Ref<string>>) {
   }))
 
   function clearContext() {
-    generation += 1
-    active.value = null
     serviceToken.value = ''
     pageFeedback.value = null
     configurationFeedback.value = null
@@ -77,30 +75,22 @@ export function useAdminServiceControl(upstreamId: Readonly<Ref<string>>) {
   }
 
   watch(upstreamId, (id) => {
-    clearContext()
     resource.data.value = null
     resource.error.value = null
     if (id) void refreshData()
   }, { flush: 'sync' })
 
-  if (getCurrentScope()) {
-    onScopeDispose(() => {
-      disposed.value = true
-      clearContext()
-    })
-  }
-
   async function refreshData() {
     if (disposed.value || !upstreamId.value) return
-    const startedGeneration = generation
+    const effects = lifecycle.capture()
     refreshError.value = null
-    try {
-      const result = await resource.refresh()
-      if (result?.status === 'error') throw result.error
-    } catch (error: unknown) {
-      // A completed mutation stays completed even if the subsequent read fails.
-      if (!disposed.value && startedGeneration === generation) refreshError.value = error
-    }
+    await effects.execute({
+      request: async () => {
+        const result = await resource.refresh()
+        if (result?.status === 'error') throw result.error
+      },
+      reject: (error) => { refreshError.value = error }
+    }).catch(() => false)
   }
 
   async function refresh() {
@@ -116,25 +106,19 @@ export function useAdminServiceControl(upstreamId: Readonly<Ref<string>>) {
     refreshAfterFailure?: boolean
   }): Promise<boolean> {
     if (disabled.value) return false
-    const started = { kind: operation.kind, upstreamId: upstreamId.value, generation }
-    const isCurrent = () => !disposed.value && started.generation === generation
-    active.value = started
+    const id = upstreamId.value
     operation.feedback.value = null
-    try {
-      const result = await operation.request(started.upstreamId)
-      if (!isCurrent()) return false
-      operation.accept(result)
-      await refreshData()
-      return isCurrent()
-    } catch (error: unknown) {
-      if (!isCurrent()) return false
-      operation.feedback.value = { message: parseFetchError(error, t(failureKeys[operation.kind])), color: 'error' }
-      if (operation.refreshAfterFailure) await refreshData()
-      return false
-    } finally {
-      // An older request cannot release an operation started in a new context.
-      if (active.value === started) active.value = null
-    }
+    return lifecycle.run(operation.kind, scope => scope.execute({
+      request: () => operation.request(id),
+      accept: async (result) => {
+        operation.accept(result)
+        await refreshData()
+      },
+      reject: async (error) => {
+        operation.feedback.value = { message: parseFetchError(error, t(failureKeys[operation.kind])), color: 'error' }
+        if (operation.refreshAfterFailure) await refreshData()
+      }
+    })).catch(() => false)
   }
 
   function discover() {

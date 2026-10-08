@@ -10,13 +10,12 @@ import {
   upstreamServices
 } from '~~/server/db/schema'
 import { createApplicationError } from '~~/server/errors/application-error'
-import { platformRouteService, routeMutationFromBinding } from '~~/server/services/platform-route-service'
+import { endpointRoutes } from '~~/server/services/platform-endpoint/routes'
 import { applyPlatformMutation } from '~~/server/services/routing-revision-service'
 import type {
   HttpMethod,
   PublicationStatus,
   RouteBinding,
-  RouteMutationInput,
   TargetRuntimeDrift,
   UpstreamView
 } from '~~/server/types/platform-publication'
@@ -279,7 +278,7 @@ async function synchronizeEndpointSupportRoutes(input: {
   endpoints: ServiceEndpointSummary[]
   transaction?: DatabaseTransaction
 }) {
-  const routes = (await platformRouteService.list({
+  const routes = (await endpointRoutes.list({
     transaction: input.transaction
   })).filter(
     binding => binding.route.upstreamServiceId === input.upstream.id
@@ -325,18 +324,9 @@ async function synchronizeEndpointSupportRoutes(input: {
     if (groupedPublicRoutes.length === 0) {
       await Promise.all(candidates
         .filter(binding => binding.route.state !== 'disabled')
-        .map(binding => platformRouteService.update(
+        .map(binding => endpointRoutes.update(
           binding.route.id,
-          routeMutationFromBinding(binding, {
-            isApiKey: false,
-            isStatistics: false,
-            creditsCost: 0,
-            rateLimitPerSecond: 0,
-            rateLimitPerMinute: 0,
-            rateLimitPerHour: 0,
-            rateLimitPerDay: 0,
-            state: 'disabled'
-          }),
+          { state: 'disabled' },
           {
             transaction: input.transaction
           }
@@ -355,9 +345,9 @@ async function synchronizeEndpointSupportRoutes(input: {
     await Promise.all(candidates
       .filter(binding => binding.route.id !== selected?.route.id)
       .filter(binding => binding.route.state !== 'disabled')
-      .map(binding => platformRouteService.update(
+      .map(binding => endpointRoutes.update(
         binding.route.id,
-        routeMutationFromBinding(binding, { state: 'disabled' }),
+        { state: 'disabled' },
         {
           transaction: input.transaction
         }
@@ -367,31 +357,24 @@ async function synchronizeEndpointSupportRoutes(input: {
       ?? endpoint.operationId
       ?? `${endpoint.method} ${endpoint.path}`
     if (selected) {
-      await platformRouteService.update(
+      await endpointRoutes.update(
         selected.route.id,
-        routeMutationFromBinding(selected, {
+        {
           apiVersionId: versionId,
           name,
           hosts: supportHosts,
           method: endpoint.method as HttpMethod,
           pathPattern: endpoint.path,
           upstreamPathTemplate: endpointUpstreamTemplate(endpoint.path),
-          isApiKey: false,
-          isStatistics: false,
-          creditsCost: 0,
-          rateLimitPerSecond: 0,
-          rateLimitPerMinute: 0,
-          rateLimitPerHour: 0,
-          rateLimitPerDay: 0,
           state
-        }),
+        },
         {
           transaction: input.transaction
         }
       )
       continue
     }
-    const created = await platformRouteService.create({
+    const created = await endpointRoutes.create({
       apiVersionId: versionId,
       name,
       hosts: supportHosts,
@@ -399,16 +382,6 @@ async function synchronizeEndpointSupportRoutes(input: {
       pathPattern: endpoint.path,
       upstreamServiceId: input.upstream.id,
       upstreamPathTemplate: endpointUpstreamTemplate(endpoint.path),
-      isApiKey: false,
-      isStatistics: false,
-      creditsCost: 0,
-      rateLimitPerSecond: 0,
-      rateLimitPerMinute: 0,
-      rateLimitPerHour: 0,
-      rateLimitPerDay: 0,
-      timeoutMs: 10_000,
-      maxRequestBytes: 1024 * 1024,
-      maxResponseBytes: 10 * 1024 * 1024,
       state
     }, {
       isSupportRoute: true,
@@ -423,9 +396,9 @@ async function synchronizeEndpointSupportRoutes(input: {
       && !handledSupportRouteIds.has(binding.route.id)
       && binding.route.state !== 'disabled'
     ))
-    .map(binding => platformRouteService.update(
+    .map(binding => endpointRoutes.update(
       binding.route.id,
-      routeMutationFromBinding(binding, { state: 'disabled' }),
+      { state: 'disabled' },
       {
         transaction: input.transaction
       }
@@ -440,7 +413,7 @@ export const platformEndpointService = {
     const runtime = await platformRuntimeService.get()
     const [upstreams, routes, revision] = await Promise.all([
       platformUpstreamService.list({ checkAvailability: true }),
-      platformRouteService.list(),
+      endpointRoutes.list(),
       activeRevision(runtime.activeRevisionId)
     ])
     const liveRoutes = new Map(
@@ -594,7 +567,7 @@ export const platformEndpointService = {
           openapiDocumentId: upstream.openapiDocumentId,
           openapiSha256: view.connection.openapiSha256
         })
-        const existingRoutes = await platformRouteService.list({
+        const existingRoutes = await endpointRoutes.list({
           transaction: tx
         })
         const existing = existingRoutes
@@ -614,15 +587,15 @@ export const platformEndpointService = {
           transaction: tx
         })
         const route = existing
-          ? await platformRouteService.update(
+          ? await endpointRoutes.update(
               existing.route.id,
-              routeMutationFromBinding(existing, {
+              {
                 apiVersionId,
                 state: 'active'
-              }),
+              },
               { transaction: tx }
             )
-          : await platformRouteService.create({
+          : await endpointRoutes.create({
               apiVersionId,
               name: endpoint.summary
                 ?? endpoint.operationId
@@ -632,16 +605,6 @@ export const platformEndpointService = {
               pathPattern: endpoint.path,
               upstreamServiceId: upstream.id,
               upstreamPathTemplate: endpointUpstreamTemplate(endpoint.path),
-              isApiKey: false,
-              isStatistics: true,
-              creditsCost: 0,
-              rateLimitPerSecond: 0,
-              rateLimitPerMinute: 0,
-              rateLimitPerHour: 0,
-              rateLimitPerDay: 0,
-              timeoutMs: 10_000,
-              maxRequestBytes: 1024 * 1024,
-              maxResponseBytes: 10 * 1024 * 1024,
               state: 'active'
             }, { transaction: tx })
         if (!route) throw new Error('endpoint route could not be created')
@@ -674,7 +637,7 @@ export const platformEndpointService = {
     createdBy: number | null,
     options: { publishRouting?: boolean } = {}
   ) {
-    const binding = await platformRouteService.get(routeId)
+    const binding = await endpointRoutes.get(routeId)
     const view = await getServiceControlView(
       binding.upstream.id,
       { checkAvailability: false }
@@ -692,7 +655,7 @@ export const platformEndpointService = {
     const committed = await applyPlatformMutation(
       createdBy,
       async (tx) => {
-        const current = await platformRouteService.get(routeId, {
+        const current = await endpointRoutes.get(routeId, {
           transaction: tx
         })
         await assertServiceContractCurrent(tx, {
@@ -700,36 +663,7 @@ export const platformEndpointService = {
           openapiDocumentId: binding.upstream.openapiDocumentId,
           openapiSha256: view.connection.openapiSha256
         })
-        const route = await platformRouteService.update(routeId, {
-          apiVersionId: current.route.apiVersionId,
-          name: input.name ?? current.route.name,
-          hosts: current.route.hosts,
-          method: current.route.method as HttpMethod,
-          pathPattern: current.route.pathPattern,
-          upstreamServiceId: current.route.upstreamServiceId,
-          upstreamPathTemplate: current.route.upstreamPathTemplate,
-          isApiKey: input.isApiKey ?? current.route.isApiKey,
-          isStatistics: input.isStatistics ?? current.route.isStatistics,
-          creditsCost: input.creditsCost ?? current.route.creditsCost,
-          rateLimitPerSecond: input.rateLimitPerSecond
-            ?? current.route.rateLimitPerSecond,
-          rateLimitPerMinute: input.rateLimitPerMinute
-            ?? current.route.rateLimitPerMinute,
-          rateLimitPerHour: input.rateLimitPerHour
-            ?? current.route.rateLimitPerHour,
-          rateLimitPerDay: input.rateLimitPerDay
-            ?? current.route.rateLimitPerDay,
-          timeoutMs: input.timeoutMs ?? current.route.timeoutMs,
-          maxRequestBytes: input.maxRequestBytes ?? current.route.maxRequestBytes,
-          maxResponseBytes: input.maxResponseBytes ?? current.route.maxResponseBytes,
-          catalogStatus: input.catalogStatus
-            ?? current.route.catalogStatus as RouteMutationInput['catalogStatus'],
-          sensitiveQueryParameters: input.sensitiveQueryParameters
-            ?? current.route.sensitiveQueryParameters,
-          state: input.enabled === undefined
-            ? current.route.state as 'draft' | 'active' | 'disabled'
-            : input.enabled ? 'active' : 'disabled'
-        }, { transaction: tx })
+        const route = await endpointRoutes.updateSettings(routeId, input, { transaction: tx })
         if (endpoint) {
           await synchronizeEndpointSupportRoutes({
             upstream: current.upstream,

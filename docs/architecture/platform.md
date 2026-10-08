@@ -61,6 +61,12 @@ Product / Version 复用和支撑 Route 联动是该模块的内部规则。目�
 活动快照中的 Route；发布优先复用期望状态为 active 的 Route；支撑 Route 优先匹配
 所属 Version。这些场景的选择顺序有意保持不同。
 
+Route 写入是 Endpoint 的内部实现，位于 `server/services/platform-endpoint/routes.ts`。
+协调流程只传变化字段，当前 Route 的读取、未提交字段保留、创建默认值和支撑 Route 的
+匿名／零积分／零限流规则由内部写入统一处理。设置入口只接受治理字段，不能通过额外字段
+修改契约身份；省略或 undefined 保留当前值，显式 false、0 和空数组仍表示更新。
+管理调用和行为测试以 Endpoint 入口为主，内部 Route 操作仅供协调及快照测试夹具使用。
+
 通用事务与运行快照发布由 `routing-revision-service.ts` 完整负责。
 领域变更通过 `applyPlatformMutation` 在其拥有的事务内执行；独立发布和历史激活复用
 同一提交流程，锁与缓存失效不再向调用方开放，也不接受外部事务作为发布入口。
@@ -121,10 +127,12 @@ Revision 的 `appliedRoutes` 保存最近明确应用的 Route 配置，包括�
 
 Service 发现和配置同步包含对 Target 的网络调用，不能纳入数据库事务。它们采用显式可重试语义：网络结果先按 Target 记录，健康 Target 可先刷新运行快照，失败 Target 标记为 degraded/error；只有全部 Target 都失败时才向调用方返回整体错误。相同配置和相同 Revision 均保持幂等。
 
-发现与配置同步通过 `platform-service-control-context.ts` 的 `commitServiceControlContext`
-统一接纳异步结果：在事务中锁定连接和 Target，检查凭证、期望配置、Target 地址、启用状态及集合是否仍属于请求开始时的上下文。
+发现与配置同步通过 `platform-service-control/state.ts` 的完整状态变更入口统一接纳异步结果：
+在事务中锁定连接和 Target，检查凭证、期望配置、Target 地址、启用状态及集合是否仍属于请求开始时的上下文。
 上下文变化返回冲突，旧成功或失败结果都不能改写新状态；配置保存和版本恢复从提交后的上下文开始下一次网络请求。
 状态写入时间单调推进，避免同一时钟刻度内停用再启用或连续同步使旧结果重新有效。
+锁、写入回调和单调时间戳为内部实现，不再交给发现或配置流程编排；
+`platform-service-control-context.ts` 只负责上下文与公开视图读取及可用性观测。
 
 后台将该技术概念显示为“运行快照”。运行快照页面只用于审计和回滚；管理员可以重新激活历史 Revision，而不需要恢复旧 Route 行或重启进程。
 
@@ -285,6 +293,11 @@ Target 状态共用一次读取范围及一次探测集合。详情不会为补�
 管理台通过 `app/composables/admin/use-admin-service-control.ts` 协调发现、Token 更新、
 配置保存与同步。该模块持有控制视图、刷新和反馈，统一输出操作准入状态，并与 Target 操作互斥。
 每次操作绑定发起时的 Service 上下文；切换 Service 或卸载后，旧响应不能覆盖当前反馈、清空新 Token 草稿或解除新操作的占用。
+操作身份、上下文失效和旧响应接纳统一由 `use-operation-lifecycle.ts` 管理，
+Service 控制、Target 操作、Upstream 编辑及确认流程不再各自维护 generation 与 finally 防护。
+Target 直接保存与确认操作共用同一个生命周期实例；确认流程继续管理失败重试、
+重复点击共享 Promise 和完成后不可重放。领域模块保留准入、草稿、反馈和读取决策；
+后续读取反馈只绑定上下文，不将刷新失败转换为重复写入。
 配置草稿仍由 `use-admin-service-configuration-form.ts` 管理：可用性刷新保留编辑，已保存 Revision 变化后重置草稿。
 保存与同步共用结果解释，配置 Revision 与 Routing Revision 保持区分；读取失败单独显示，不改写已完成的变更结果。
 
@@ -300,11 +313,13 @@ Target 状态共用一次读取范围及一次探测集合。详情不会为补�
 
 业务配置保存后，Platform 使用乐观锁生成更高 Revision，分别向全部启用 Target 下发同一完整快照，并记录 `synced`、`drifted`、`error` 或 `unknown` 状态。部分 Target 失败不会被视为全部成功。
 
-发现和配置同步的 Target 观测统一进入 `platform-service-control-context.ts` 的
-`acceptServiceTargetResults`。该入口在指纹校验后的同一事务内，按当前期望配置判断状态，
+发现和配置同步的 Target 观测统一由 `platform-service-control/state.ts` 接纳。
+该模块在指纹校验后的同一事务内，按当前期望配置判断状态，
 使用统一时间戳写入 Target，并拒绝重复或不属于原启用 Target 集合的观测。
 发现可以在这个事务中先更新契约，结果分类使用更新后的契约；网络失败保留上次观测事实，
 同时标记 error。配置同步只有全部启用 Target 匹配时才更新连接的整体同步时间。
+发现提交还完整负责 OpenAPI 保存、支撑 Route 同步、Token 提升和事务内结果准备。
+配置保存与 Revision 恢复共用一次完整写入：更新连接、重置启用 Target、回读新上下文。
 
 发现成功，或配置同步至少有一个 Target 成功后，Platform 自动重新计算运行配置。相同配置复用当前 Revision；只有验证通过的 Target 集合实际变化时才生成新 Revision。部分同步生成只包含成功 Target 的快照；如果某个 Upstream 的全部 Target 同步失败，则该 Upstream 在后续 Revision 中继续使用最后一个有效 Target 快照，其他 Upstream 仍可独立更新。没有历史有效快照的新 Upstream 会保持待发布状态，直到至少一个 Target 验证成功。期望配置与实际运行状态会保持可见差异，等待管理员修复后重试。发现不会自行创建公开 Route，但可以应用管理员此前已经明确发布、因 Target 尚未验证而等待的 Route。
 

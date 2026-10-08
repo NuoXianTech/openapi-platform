@@ -1,18 +1,12 @@
-import { and, eq } from 'drizzle-orm'
+import { serviceControlState } from '~~/server/services/platform-service-control/state'
 import type {
   RedactedServiceConfigurationState,
   ServiceConfigurationSyncResult
 } from '#shared/types/service-control'
-import {
-  upstreamServiceConnections,
-  upstreamTargets
-} from '~~/server/db/schema'
 import { createApplicationError } from '~~/server/errors/application-error'
 import {
   type PlatformServiceControlContext,
   loadServiceControlContext,
-  commitServiceControlContext,
-  acceptServiceTargetResults,
   safeServiceControlError,
   serviceTargetControlState
 } from '~~/server/services/platform-service-control-context'
@@ -199,7 +193,7 @@ async function pushConfiguration(
     throw new ServiceConfigurationRevisionAheadError(conflictingRevision)
   }
 
-  const accepted = await acceptServiceTargetResults(context, 'configuration', results)
+  const accepted = await serviceControlState.acceptConfiguration(context, results)
   return {
     status: accepted.status,
     revision,
@@ -209,25 +203,6 @@ async function pushConfiguration(
       serviceTargetControlState(target, 'unknown')
     ))
   }
-}
-
-async function advanceStoredConfigurationRevision(input: {
-  context: PlatformServiceControlContext
-  revision: number
-}): Promise<PlatformServiceControlContext> {
-  return commitServiceControlContext(input.context, 'configuration', async (tx, _current, now) => {
-    await tx.update(upstreamServiceConnections)
-      .set({ configurationRevision: input.revision, updatedAt: now })
-      .where(eq(upstreamServiceConnections.upstreamServiceId, input.context.service.id))
-    await tx.update(upstreamTargets).set({
-      configurationStatus: 'unknown',
-      updatedAt: now
-    }).where(and(
-      eq(upstreamTargets.upstreamServiceId, input.context.service.id),
-      eq(upstreamTargets.enabled, true)
-    ))
-    return loadServiceControlContext(input.context.service.id, { transaction: tx })
-  })
 }
 
 async function pushConfigurationWithRevisionRecovery(input: {
@@ -252,10 +227,7 @@ async function pushConfigurationWithRevisionRecovery(input: {
         revision,
         error.currentRevision
       ))
-      context = await advanceStoredConfigurationRevision({
-        context,
-        revision
-      })
+      context = await serviceControlState.saveConfiguration(context, { revision })
     }
   }
   throw new Error('Service configuration revision recovery exhausted')
@@ -313,22 +285,9 @@ export async function updatePlatformServiceConfiguration(
     context.connection.configurationRevision,
     context.targets
   )
-  const stored = configuration.toStoredValues()
-  const updated = await commitServiceControlContext(context, 'configuration', async (tx, _current, now) => {
-    await tx.update(upstreamServiceConnections).set({
-      configurationValues: stored,
-      configurationRevision: revision,
-      configurationHash: configuration.hash,
-      updatedAt: now
-    }).where(eq(upstreamServiceConnections.upstreamServiceId, upstreamServiceId))
-    await tx.update(upstreamTargets).set({
-      configurationStatus: 'unknown',
-      updatedAt: now
-    }).where(and(
-      eq(upstreamTargets.upstreamServiceId, upstreamServiceId),
-      eq(upstreamTargets.enabled, true)
-    ))
-    return loadServiceControlContext(upstreamServiceId, { transaction: tx })
+  const updated = await serviceControlState.saveConfiguration(context, {
+    revision,
+    configuration: { values: configuration.toStoredValues(), hash: configuration.hash }
   })
   const result = await pushConfigurationWithRevisionRecovery({
     context: updated,
@@ -377,10 +336,7 @@ export async function synchronizePlatformServiceConfiguration(
   )
   const synchronizedContext = revision === context.connection.configurationRevision
     ? context
-    : await advanceStoredConfigurationRevision({
-        context,
-        revision
-      })
+    : await serviceControlState.saveConfiguration(context, { revision })
   const result = await pushConfigurationWithRevisionRecovery({
     context: synchronizedContext,
     revision,

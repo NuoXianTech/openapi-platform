@@ -46,11 +46,8 @@ const { apiKeyService } = await import(
 const { dynamicGatewayService } = await import(
   '~~/server/services/dynamic-gateway-service'
 )
-const { platformRouteService } = await import(
-  '~~/server/services/platform-route-service'
-)
-const { routeMutationFromBinding } = await import(
-  '~~/server/services/platform-route-service'
+const { endpointRoutes } = await import(
+  '~~/server/services/platform-endpoint/routes'
 )
 const { platformServiceControlService } = await import(
   '~~/server/services/platform-service-control-service'
@@ -943,7 +940,7 @@ describe('Platform to Node API Service acceptance', () => {
       await response.arrayBuffer()
     } finally {
       await routingRevisionService.activate(initialRevisionId)
-      if (routeId) await platformRouteService.remove(routeId)
+      if (routeId) await endpointRoutes.remove(routeId)
       await closeServer(redirectServer)
     }
   })
@@ -1000,7 +997,7 @@ describe('Platform to Node API Service acceptance', () => {
       expect(requestCounts[failedTarget === 0 ? 1 : 0]).toBe(2)
     } finally {
       await routingRevisionService.activate(initialRevisionId)
-      if (routeId) await platformRouteService.remove(routeId)
+      if (routeId) await endpointRoutes.remove(routeId)
       await Promise.all(servers.map(closeServer))
     }
   })
@@ -1050,7 +1047,7 @@ describe('Platform to Node API Service acceptance', () => {
       expect(requests).toBe(1)
     } finally {
       await routingRevisionService.activate(initialRevisionId)
-      if (routeId) await platformRouteService.remove(routeId)
+      if (routeId) await endpointRoutes.remove(routeId)
       await Promise.all(servers.map(closeServer))
     }
   })
@@ -1173,7 +1170,7 @@ describe('Platform to Node API Service acceptance', () => {
       )).toEqual({ count: 0 })
     } finally {
       await routingRevisionService.activate(initialRevisionId)
-      await Promise.all(routeIds.map(routeId => platformRouteService.remove(routeId)))
+      await Promise.all(routeIds.map(routeId => endpointRoutes.remove(routeId)))
       await closeServer(streamServer)
     }
   })
@@ -1296,7 +1293,7 @@ describe('Platform to Node API Service acceptance', () => {
     expect(initial.status).toBe(200)
     await initial.arrayBuffer()
 
-    await platformRouteService.update(routeIds.lifecycle, lifecycleRouteInput(newPath))
+    await endpointRoutes.update(routeIds.lifecycle, lifecycleRouteInput(newPath))
 
     const beforePublishOld = await fetch(`${gatewayBaseURL}${oldPath}?type=a&id=a1`)
     const beforePublishNew = await fetch(`${gatewayBaseURL}${newPath}?type=a&id=a1`)
@@ -1313,12 +1310,11 @@ describe('Platform to Node API Service acceptance', () => {
     await afterPublishOld.arrayBuffer()
     await afterPublishNew.arrayBuffer()
 
-    await expect(platformRouteService.remove(routeIds.lifecycle))
+    await expect(endpointRoutes.remove(routeIds.lifecycle))
       .rejects.toMatchObject({ data: { code: 'ROUTE_STILL_PUBLISHED' } })
-    const binding = await platformRouteService.get(routeIds.lifecycle)
-    await platformRouteService.update(
+    await endpointRoutes.update(
       routeIds.lifecycle,
-      routeMutationFromBinding(binding, { state: 'disabled' })
+      { state: 'disabled' }
     )
     const beforeDisablePublish = await fetch(
       `${gatewayBaseURL}${newPath}?type=a&id=a1`
@@ -1332,7 +1328,7 @@ describe('Platform to Node API Service acceptance', () => {
     )
     expect(afterDisablePublish.status).toBe(404)
     await afterDisablePublish.arrayBuffer()
-    await platformRouteService.remove(routeIds.lifecycle)
+    await endpointRoutes.remove(routeIds.lifecycle)
 
     await routingRevisionService.activate(updatedRevision.id)
     const rolledBack = await fetch(`${gatewayBaseURL}${newPath}?type=a&id=a1`)
@@ -1661,7 +1657,7 @@ async function createRoute(input: {
   maxResponseBytes?: number
   rateLimitPerMinute?: number
 }): Promise<string> {
-  const route = await platformRouteService.create({
+  const route = await endpointRoutes.create({
     apiVersionId: input.apiVersionId,
     name: input.name,
     hosts: [],

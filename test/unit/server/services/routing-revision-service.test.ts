@@ -45,7 +45,7 @@ const { platformProductService } = await import('~~/server/services/platform-pro
 const { apiCatalogService } = await import('~~/server/services/api-catalog-service')
 const { platformEndpointService } = await import('~~/server/services/platform-endpoint-service')
 const { applyPlatformRevision, refreshPlatformRevision, applyPlatformMutation } = await import('~~/server/services/routing-revision-service')
-const { platformRouteService } = await import('~~/server/services/platform-route-service')
+const { endpointRoutes } = await import('~~/server/services/platform-endpoint/routes')
 const { platformUpstreamService } = await import('~~/server/services/platform-upstream-service')
 const { platformRuntimeService } = await import('~~/server/services/platform-runtime-service')
 const { routingRevisionService } = await import('~~/server/services/routing-revision-service')
@@ -111,7 +111,7 @@ async function createRoutingGraph(options: {
       }
     }).where(eq(schema.upstreamTargets.upstreamServiceId, upstream.id))
   }
-  const route = await platformRouteService.create({
+  const route = await endpointRoutes.create({
     apiVersionId: product.versions[0]!.id,
     name: options.routeName ?? 'Proxy smoke',
     hosts: options.hosts ?? [],
@@ -257,7 +257,7 @@ describe('routing revision service', () => {
   it('refreshes parents, Targets and domains without applying Route drafts', async () => {
     const graph = await createRoutingGraph({})
     const original = await routingRevisionService.publish(null)
-    await platformRouteService.update(graph.route.id, { ...routeMutationInput(graph.route), isApiKey: true, timeoutMs: 9000, state: 'disabled' })
+    await endpointRoutes.update(graph.route.id, { ...routeMutationInput(graph.route), isApiKey: true, timeoutMs: 9000, state: 'disabled' })
     await applyPlatformMutation(null, async tx => ({ value: await platformProductService.update(graph.product.id, { visibility: 'private' }, { transaction: tx }) }))
     await applyPlatformMutation(null, async tx => ({ value: await platformProductService.updateVersion(graph.route.apiVersionId, { state: 'deprecated' }, { transaction: tx }) }))
     const [target] = await database.select().from(schema.upstreamTargets).where(eq(schema.upstreamTargets.upstreamServiceId, graph.upstream.id))
@@ -292,7 +292,7 @@ describe('routing revision service', () => {
     const applied = await routingRevisionService.publish(null)
     expect(applied.configPayload.routes).toEqual([])
     expect(applied.configPayload.appliedRoutes).toHaveLength(1)
-    await platformRouteService.update(graph.route.id, { ...routeMutationInput(graph.route), isApiKey: true })
+    await endpointRoutes.update(graph.route.id, { ...routeMutationInput(graph.route), isApiKey: true })
     await database.update(schema.upstreamTargets).set({ configurationRevision: 0, configurationHash: '0'.repeat(64), configurationState: {
       schemaVersion: 1, serviceId: 'verified-service', schemaSha256: '1'.repeat(64), revision: 0, configurationSha256: '0'.repeat(64), values: {}, updatedAt: null
     } }).where(eq(schema.upstreamTargets.upstreamServiceId, graph.upstream.id))
@@ -306,7 +306,7 @@ describe('routing revision service', () => {
     const original = await createRoutingGraph({ productSlug: 'original', pathPattern: '/v1/original', upstreamPathTemplate: '/healthz' })
     const replacement = await createRoutingGraph({ productSlug: 'replacement', pathPattern: '/v1/replacement', upstreamPathTemplate: '/healthz' })
     const first = await routingRevisionService.publish(null)
-    await platformRouteService.update(original.route.id, { ...routeMutationInput(original.route), upstreamServiceId: replacement.upstream.id, isApiKey: true })
+    await endpointRoutes.update(original.route.id, { ...routeMutationInput(original.route), upstreamServiceId: replacement.upstream.id, isApiKey: true })
     await routingRevisionService.publish(null)
     await routingRevisionService.activate(first.id)
     await platformUpstreamService.updateAndPublish(replacement.upstream.id, { status: 'disabled' }, null)
@@ -321,14 +321,14 @@ describe('routing revision service', () => {
     const second = await createRoutingGraph({ productSlug: 'legacy-second', pathPattern: '/v1/legacy/{id}' })
     const byId = [graph.route, second.route].sort((left, right) => left.id.localeCompare(right.id))
     for (const [index, route] of byId.entries()) {
-      await platformRouteService.update(route.id, { ...routeMutationInput(route), pathPattern: index === 0 ? '/v1/z/{id}' : '/v1/a/{id}' })
+      await endpointRoutes.update(route.id, { ...routeMutationInput(route), pathPattern: index === 0 ? '/v1/z/{id}' : '/v1/a/{id}' })
     }
     const first = await routingRevisionService.publish(null)
     const legacy = { ...first.configPayload }
     delete legacy.appliedRoutes
     const checksum = createHash('sha256').update(canonicalJson(legacy)).digest('hex')
     await database.update(schema.routingRevisions).set({ configPayload: legacy, checksum }).where(eq(schema.routingRevisions.id, first.id))
-    await platformRouteService.update(graph.route.id, { ...routeMutationInput(graph.route), isApiKey: true })
+    await endpointRoutes.update(graph.route.id, { ...routeMutationInput(graph.route), isApiKey: true })
     expect((await refreshPlatformRevision(null)).revision.id).toBe(first.id)
     const [stored] = await database.select().from(schema.routingRevisions).where(eq(schema.routingRevisions.id, first.id))
     expect(stored?.configPayload).toEqual(legacy)
@@ -438,12 +438,12 @@ describe('routing revision service', () => {
     const active = await createRoutingGraph({ productSlug: 'active-upstream' })
     await platformUpstreamService.updateAndPublish(disabled.upstream.id, { status: 'disabled' }, null)
 
-    await expect(platformRouteService.update(
+    await expect(endpointRoutes.update(
       disabled.route.id,
       routeMutationInput(disabled.route)
     )).resolves.toMatchObject({ upstreamServiceId: disabled.upstream.id })
 
-    await expect(platformRouteService.update(
+    await expect(endpointRoutes.update(
       active.route.id,
       {
         ...routeMutationInput(active.route),
@@ -490,7 +490,7 @@ describe('routing revision service', () => {
       params: { id: '42' }
     })
 
-    await platformRouteService.create({
+    await endpointRoutes.create({
       apiVersionId: graph.product.versions[0]!.id,
       name: 'Second route',
       hosts: [],
@@ -692,7 +692,7 @@ describe('routing revision service', () => {
     const graph = await createRoutingGraph({ productSlug: 'protected-graph' })
     await routingRevisionService.publish(null)
 
-    await expect(platformRouteService.remove(graph.route.id))
+    await expect(endpointRoutes.remove(graph.route.id))
       .rejects.toMatchObject({ data: { code: 'ROUTE_STILL_PUBLISHED' } })
     await expect(platformProductService.remove(graph.product.id))
       .rejects.toMatchObject({ data: { code: 'PRODUCT_STILL_PUBLISHED' } })
@@ -783,7 +783,7 @@ describe('routing revision service', () => {
       visibility: 'public',
       version: 'v1'
     })
-    await platformRouteService.create({
+    await endpointRoutes.create({
       apiVersionId: secondProduct.versions[0]!.id,
       name: 'Conflicting route',
       hosts: [],
@@ -957,7 +957,7 @@ describe('routing revision service', () => {
 
     // Two public paths can map to the same discovered Endpoint shape.
     // This path sorts first, but is not in the active Routing Revision.
-    const pending = await platformRouteService.create({
+    const pending = await endpointRoutes.create({
       ...routeMutationInput(live.route),
       name: 'Earlier pending binding',
       method: 'GET',
@@ -989,7 +989,7 @@ describe('routing revision service', () => {
       revision: null,
       route: { id: pending.id, isStatistics: false }
     })
-    expect((await platformRouteService.get(live.route.id)).route.isStatistics).toBe(true)
+    expect((await endpointRoutes.get(live.route.id)).route.isStatistics).toBe(true)
     expect(await database.select().from(schema.apiRoutes)).toHaveLength(2)
     expect(await database.select().from(schema.routingRevisions)).toHaveLength(1)
   })
@@ -1089,7 +1089,7 @@ describe('routing revision service', () => {
       method: 'GET',
       path: '/v1/player'
     }, null)
-    let routes = (await platformRouteService.list())
+    let routes = (await endpointRoutes.list())
       .filter(binding => binding.route.upstreamServiceId === service.upstream.id)
     expect(routes).toHaveLength(2)
     expect(new Set(routes.map(binding => binding.product.id)).size).toBe(1)
@@ -1116,7 +1116,7 @@ describe('routing revision service', () => {
       method: 'GET',
       path: '/v1/player/art'
     }, null)
-    routes = (await platformRouteService.list())
+    routes = (await endpointRoutes.list())
       .filter(binding => binding.route.upstreamServiceId === service.upstream.id)
     expect(routes).toHaveLength(3)
     expect(new Set(routes.map(binding => binding.product.id)).size).toBe(1)
@@ -1126,7 +1126,7 @@ describe('routing revision service', () => {
       { enabled: false },
       null
     )
-    routes = (await platformRouteService.list())
+    routes = (await endpointRoutes.list())
       .filter(binding => binding.route.upstreamServiceId === service.upstream.id)
     expect(routes.find(binding => (
       binding.route.pathPattern === '/v1/player/assets/{asset}'
@@ -1137,11 +1137,47 @@ describe('routing revision service', () => {
       { enabled: false },
       null
     )
-    routes = (await platformRouteService.list())
+    routes = (await endpointRoutes.list())
       .filter(binding => binding.route.upstreamServiceId === service.upstream.id)
     expect(routes.find(binding => (
       binding.route.pathPattern === '/v1/player/assets/{asset}'
     ))?.route.state).toBe('disabled')
+  })
+
+  it('preserves omitted Endpoint settings and contract identity while accepting explicit zero and false values', async () => {
+    const service = await createDiscoveredService({})
+    const published = await platformEndpointService.publish({
+      upstreamServiceId: service.upstream.id, method: 'GET', path: service.path
+    }, null)
+    const settings = {
+      name: 'Configured endpoint', isApiKey: true, isStatistics: true, creditsCost: 7,
+      rateLimitPerSecond: 2, rateLimitPerMinute: 10, rateLimitPerHour: 100, rateLimitPerDay: 1000,
+      timeoutMs: 9000, maxRequestBytes: 2048, maxResponseBytes: 4096,
+      catalogStatus: 'maintenance' as const, sensitiveQueryParameters: ['token']
+    }
+    await platformEndpointService.update(published.route.id, settings, null, { publishRouting: false })
+    const retained = await platformEndpointService.update(published.route.id, {
+      enabled: false, name: undefined,
+      ...{ pathPattern: '/v9/untrusted', method: 'POST', upstreamServiceId: crypto.randomUUID() }
+    }, null, { publishRouting: false })
+    expect(retained.route).toMatchObject({
+      ...settings, state: 'disabled', pathPattern: published.route.pathPattern,
+      method: published.route.method, upstreamServiceId: service.upstream.id
+    })
+    const cleared = await platformEndpointService.update(published.route.id, {
+      enabled: true, isApiKey: false, isStatistics: false, creditsCost: 0,
+      rateLimitPerSecond: 0, rateLimitPerMinute: 0, rateLimitPerHour: 0, rateLimitPerDay: 0,
+      sensitiveQueryParameters: [], catalogStatus: 'automatic'
+    }, null, { publishRouting: false })
+    expect(cleared.route).toMatchObject({
+      state: 'active', isApiKey: false, isStatistics: false, creditsCost: 0,
+      rateLimitPerSecond: 0, rateLimitPerMinute: 0, rateLimitPerHour: 0, rateLimitPerDay: 0,
+      sensitiveQueryParameters: [], catalogStatus: 'automatic', timeoutMs: 9000,
+      maxRequestBytes: 2048, maxResponseBytes: 4096
+    })
+    await expect(platformEndpointService.update(published.route.id, { creditsCost: 1 }, null))
+      .rejects.toMatchObject({ data: { code: 'ROUTE_PAID_POLICY_INVALID' } })
+    expect((await endpointRoutes.get(published.route.id)).route.creditsCost).toBe(0)
   })
 
   it('preserves generated group identifiers and edited metadata across publications', async () => {
@@ -1155,7 +1191,7 @@ describe('routing revision service', () => {
     const first = await platformEndpointService.publish({
       upstreamServiceId: service.upstream.id, method: 'GET', path: '/v1/weather'
     }, null)
-    const original = await platformRouteService.get(first.route.id)
+    const original = await endpointRoutes.get(first.route.id)
     const groupPatch = {
       name: 'Weather forecast', slug: 'must-not-change', summary: 'Edited summary',
       description: 'Edited description', visibility: 'private' as const,
@@ -1171,7 +1207,7 @@ describe('routing revision service', () => {
     const second = await platformEndpointService.publish({
       upstreamServiceId: service.upstream.id, method: 'GET', path: '/v1/forecast'
     }, null)
-    const updated = await platformRouteService.get(second.route.id)
+    const updated = await endpointRoutes.get(second.route.id)
     expect(updated.product).toMatchObject({
       id: original.product.id, slug: 'managed-groups-weather',
       name: groupPatch.name, summary: groupPatch.summary, description: groupPatch.description,
@@ -1193,7 +1229,7 @@ describe('routing revision service', () => {
     const published = await platformEndpointService.publish({
       upstreamServiceId: service.upstream.id, method: 'GET', path: service.path
     }, null)
-    const binding = await platformRouteService.get(published.route.id)
+    const binding = await endpointRoutes.get(published.route.id)
     if (kind === 'group') {
       await platformProductService.update(binding.product.id, { lifecycle: 'retired' })
     } else {
@@ -1202,7 +1238,7 @@ describe('routing revision service', () => {
     await expect(platformEndpointService.publish({
       upstreamServiceId: service.upstream.id, method: 'GET', path: service.path
     }, null)).rejects.toMatchObject({ data: { code } })
-    const after = await platformRouteService.get(published.route.id)
+    const after = await endpointRoutes.get(published.route.id)
     expect(kind === 'group' ? after.product.lifecycle : after.version.state).toBe('retired')
     expect(await database.select().from(schema.apiRoutes)).toHaveLength(1)
   })
@@ -1241,7 +1277,7 @@ describe('routing revision service', () => {
       serviceName: 'Viewer Catalog Service',
       endpoints: [publicEndpoint]
     })
-    let supportRoute = (await platformRouteService.list()).find(binding => (
+    let supportRoute = (await endpointRoutes.list()).find(binding => (
       binding.route.upstreamServiceId === service.upstream.id
       && binding.route.isSupportRoute
     ))
@@ -1252,7 +1288,7 @@ describe('routing revision service', () => {
       serviceName: 'Viewer Catalog Service',
       endpoints: [publicEndpoint, supportEndpoint]
     })
-    supportRoute = (await platformRouteService.list()).find(binding => (
+    supportRoute = (await endpointRoutes.list()).find(binding => (
       binding.route.upstreamServiceId === service.upstream.id
       && binding.route.isSupportRoute
     ))
@@ -1316,7 +1352,7 @@ describe('routing revision service', () => {
       path: '/v2/player'
     }, null)
 
-    let routes = (await platformRouteService.list())
+    let routes = (await endpointRoutes.list())
       .filter(binding => binding.route.upstreamServiceId === service.upstream.id)
     expect(routes.filter(binding => (
       binding.route.pathPattern.includes('/assets/')
@@ -1342,7 +1378,7 @@ describe('routing revision service', () => {
       { enabled: false },
       null
     )
-    routes = (await platformRouteService.list())
+    routes = (await endpointRoutes.list())
       .filter(binding => binding.route.upstreamServiceId === service.upstream.id)
     expect(routes.filter(binding => (
       binding.route.pathPattern.includes('/assets/')

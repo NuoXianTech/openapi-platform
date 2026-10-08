@@ -265,4 +265,44 @@ describe('Target operations', () => {
     expect(operations.state.value.busy).toBe(false)
     expect(fetchMock).not.toHaveBeenCalled()
   })
+
+  it('does not let a late direct save release a new confirmation in another context', async () => {
+    const scope = effectScope()
+    const upstreamId = ref('first')
+    const operations = scope.run(() => useAdminTargetOperations({ refresh, isBlocked: () => false, context: () => upstreamId.value }))!
+    const oldRequest = deferred<unknown>()
+    fetchMock.mockReturnValueOnce(oldRequest.promise)
+    const oldSave = operations.save('first', target, values)
+    upstreamId.value = 'second'
+    const current = operations.remove({ ...target, id: 'second-target' })
+    oldRequest.resolve(target)
+    await expect(oldSave).resolves.toBe(false)
+    expect(operations.state.value.busy).toBe(true)
+    expect(toast).not.toHaveBeenCalled()
+    expect(refresh).not.toHaveBeenCalled()
+    await expect(operations.save('second', target, values)).resolves.toBe(false)
+    await dialog.options.onConfirm()
+    dialog.resolve(true)
+    await expect(current).resolves.toBe(true)
+    expect(fetchMock).toHaveBeenLastCalledWith('/api/admin/v1/targets/second-target', { method: 'DELETE' })
+    expect(refresh).toHaveBeenCalledOnce()
+    scope.stop()
+  })
+
+  it('ignores a late follow-up read failure after switching away and back', async () => {
+    const scope = effectScope()
+    const upstreamId = ref('first')
+    const operations = scope.run(() => useAdminTargetOperations({ refresh, isBlocked: () => false, context: () => upstreamId.value }))!
+    const read = deferred<undefined>()
+    refresh.mockReturnValueOnce(read.promise)
+    const oldSave = operations.save('first', target, values)
+    await vi.waitFor(() => expect(refresh).toHaveBeenCalledOnce())
+    upstreamId.value = 'second'
+    upstreamId.value = 'first'
+    read.reject(new Error('stale read'))
+    await expect(oldSave).resolves.toBe(false)
+    expect(toast.mock.calls.map(call => call[0].color)).toEqual(['success'])
+    await expect(operations.save('first', target, values)).resolves.toBe(true)
+    scope.stop()
+  })
 })

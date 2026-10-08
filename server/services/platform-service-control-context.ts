@@ -1,6 +1,5 @@
 import { and, eq } from 'drizzle-orm'
 import type {
-  RedactedServiceConfigurationState,
   ServiceAvailability,
   ServiceConfigurationView,
   ServiceTargetAvailability,
@@ -8,7 +7,6 @@ import type {
   ServiceTargetControlState
 } from '#shared/types/service-control'
 import { db, type DatabaseTransaction } from '~~/server/db/client'
-import { withCommittedTransaction } from '~~/server/utils/committed-transaction'
 import {
   openapiDocuments,
   upstreamServiceConnections,
@@ -24,7 +22,6 @@ import {
 } from '~~/server/utils/service-configuration-values'
 import { toNullableIsoString } from '~~/server/utils/date'
 import { firstRow } from '~~/server/utils/row'
-import { canonicalJson } from '~~/server/utils/canonical-json'
 
 export interface PlatformServiceControlContext {
   service: typeof upstreamServices.$inferSelect
@@ -127,151 +124,6 @@ export async function loadServiceControlContext(
     ? targetsQuery.for('update')
     : targetsQuery)
   return { ...row, targets }
-}
-
-function serviceControlFingerprint(context: PlatformServiceControlContext): string {
-  return canonicalJson({
-    service: {
-      openapiDocumentId: context.service.openapiDocumentId,
-      status: context.service.status,
-      deletedAt: context.service.deletedAt?.toISOString() ?? null,
-      updatedAt: context.service.updatedAt.toISOString()
-    },
-    connection: {
-      serviceTokenCiphertext: context.connection.serviceTokenCiphertext,
-      pendingServiceTokenCiphertext: context.connection.pendingServiceTokenCiphertext,
-      configurationRevision: context.connection.configurationRevision,
-      configurationHash: context.connection.configurationHash,
-      configurationSchemaSha256: context.connection.configurationSchemaSha256,
-      updatedAt: context.connection.updatedAt.toISOString()
-    },
-    targets: context.targets.map(target => ({
-      id: target.id,
-      baseUrl: target.baseUrl,
-      enabled: target.enabled,
-      updatedAt: target.updatedAt.toISOString()
-    })).sort((left, right) => left.id.localeCompare(right.id))
-  })
-}
-
-/** Network results may only change the exact control context they observed.
- * Hold the connection and Target locks through validation and the entire write. */
-export async function commitServiceControlContext<T>(
-  expected: PlatformServiceControlContext,
-  operation: 'discovery' | 'configuration',
-  commit: (tx: DatabaseTransaction, current: PlatformServiceControlContext, changedAt: Date) => Promise<T>
-): Promise<T> {
-  return withCommittedTransaction(async (tx) => {
-    const current = await loadServiceControlContext(expected.service.id, {
-      transaction: tx,
-      forUpdate: true
-    })
-    if (serviceControlFingerprint(expected) !== serviceControlFingerprint(current)) {
-      throw createApplicationError({
-        statusCode: 409,
-        message: operation === 'discovery'
-          ? 'Service changed while discovery was running; retry discovery'
-          : 'Service changed while configuration was running; retry configuration',
-        data: { code: operation === 'discovery'
-          ? 'SERVICE_DISCOVERY_CONFLICT'
-          : 'SERVICE_CONFIGURATION_REVISION_CONFLICT' }
-      })
-    }
-    // Keep each accepted write distinguishable even within one clock tick.
-    const lastChange = current.targets.reduce(
-      (latest, target) => Math.max(latest, target.updatedAt.getTime()),
-      Math.max(current.connection.updatedAt.getTime(), current.service.updatedAt.getTime())
-    )
-    return commit(tx, current, new Date(Math.max(Date.now(), lastChange + 1)))
-  })
-}
-
-type ServiceTargetResult
-  = { ok: true, targetId: string, state: RedactedServiceConfigurationState }
-    | { ok: false, targetId: string, error: string }
-
-type UpdateServiceConnection = (
-  tx: DatabaseTransaction,
-  current: PlatformServiceControlContext,
-  changedAt: Date
-) => Promise<PlatformServiceControlContext['connection']>
-
-/** Accept a network observation and its Target state changes under the same
- * context lock. Discovery may update the contract first, in this transaction. */
-export async function acceptServiceTargetResults(
-  expected: PlatformServiceControlContext,
-  operation: 'discovery' | 'configuration',
-  results: readonly ServiceTargetResult[],
-  updateConnection?: UpdateServiceConnection
-): Promise<{ status: 'synced' | 'partial' | 'failed', targets: PlatformServiceControlContext['targets'] }> {
-  return commitServiceControlContext(expected, operation, (tx, current, changedAt) => (
-    writeServiceTargetResults(tx, current, changedAt, operation, results, updateConnection)
-  ))
-}
-
-/** Write under commitServiceControlContext's locks. Discovery also prepares
- * its response in that transaction, so later reads cannot undo its success. */
-export async function writeServiceTargetResults(
-  tx: DatabaseTransaction,
-  current: PlatformServiceControlContext,
-  changedAt: Date,
-  operation: 'discovery' | 'configuration',
-  results: readonly ServiceTargetResult[],
-  updateConnection?: UpdateServiceConnection
-): Promise<{ status: 'synced' | 'partial' | 'failed', targets: PlatformServiceControlContext['targets'] }> {
-  const enabledIds = new Set(current.targets.filter(target => target.enabled).map(target => target.id))
-  const observedIds = new Set<string>()
-  for (const result of results) {
-    if (!enabledIds.has(result.targetId) || observedIds.has(result.targetId)) {
-      throw new Error('Target observation must belong to one enabled Target in the accepted context')
-    }
-    observedIds.add(result.targetId)
-  }
-  const connection = updateConnection
-    ? await updateConnection(tx, current, changedAt)
-    : current.connection
-  let successful = 0
-  const acceptedTargets = new Map(current.targets.map(target => [target.id, target]))
-  for (const result of results) {
-    const state = result.ok ? result.state : null
-    const matches = state !== null
-      && connection.configurationHash !== null
-      && connection.configurationRevision > 0
-      && state.serviceId === connection.serviceId
-      && state.schemaSha256 === connection.configurationSchemaSha256
-      && state.revision === connection.configurationRevision
-      && state.configurationSha256 === connection.configurationHash
-    if (matches) successful += 1
-    const updated = firstRow(await tx.update(upstreamTargets).set({
-      ...(state ? {
-        configurationRevision: state.revision,
-        configurationHash: state.configurationSha256,
-        configurationState: state
-      } : {}),
-      configurationStatus: !result.ok ? 'error'
-        : !connection.configurationHash ? 'unknown'
-            : matches ? 'synced' : 'drifted',
-      lastError: !result.ok ? result.error
-        : operation === 'configuration' && !matches ? 'Service configuration ACK mismatch' : null,
-      lastConfigurationSyncAt: changedAt,
-      updatedAt: changedAt
-    }).where(and(
-      eq(upstreamTargets.id, result.targetId),
-      eq(upstreamTargets.upstreamServiceId, current.service.id)
-    )).returning())
-    if (!updated) throw new Error('Target disappeared during result acceptance')
-    acceptedTargets.set(updated.id, updated)
-  }
-  const status = successful > 0 && successful === enabledIds.size
-    ? 'synced'
-    : successful > 0 ? 'partial' : 'failed'
-  if (operation === 'configuration' && status === 'synced') {
-    await tx.update(upstreamServiceConnections).set({
-      lastConfigurationSyncAt: changedAt,
-      updatedAt: changedAt
-    }).where(eq(upstreamServiceConnections.upstreamServiceId, current.service.id))
-  }
-  return { status, targets: [...acceptedTargets.values()] }
 }
 
 export async function buildServiceControlView(

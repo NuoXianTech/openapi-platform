@@ -30,7 +30,8 @@ const { synchronizeConfiguration: synchronizePlatformServiceConfiguration, updat
 const { serviceControlClient } = await import('~~/server/utils/service-control-client')
 const { upstreamServiceTokenService } = await import('~~/server/services/upstream-service-token-service')
 const { refreshPlatformRevision } = await import('~~/server/services/routing-revision-service')
-const { acceptServiceTargetResults, loadServiceControlContext, getServiceControlView } = await import('~~/server/services/platform-service-control-context')
+const { loadServiceControlContext, getServiceControlView } = await import('~~/server/services/platform-service-control-context')
+const { serviceControlState } = await import('~~/server/services/platform-service-control/state')
 const { default: discoverHandler } = await import('~~/server/api/admin/v1/upstreams/[id]/discover.post')
 let client: PGlite
 let database: ReturnType<typeof drizzle<typeof schema>>
@@ -356,12 +357,24 @@ describe('configuration result acceptance', () => {
     }).where(eq(schema.upstreamTargets.id, failed.id))
     const expected = await loadServiceControlContext(upstream.id)
     const lastChange = Math.max(expected.connection.updatedAt.getTime(), ...expected.targets.map(target => target.updatedAt.getTime()))
-    const status = await acceptServiceTargetResults(expected, operation, [
-      { ok: true, targetId: upstream.targets[0]!.id, state: response().data },
-      { ok: true, targetId: drifted.id, state: { ...response().data, configurationSha256: 'c'.repeat(64) } },
-      { ok: false, targetId: failed.id, error: 'offline' }
-    ])
-    expect(status.status).toBe('partial')
+    const observations = [
+      { ok: true as const, targetId: upstream.targets[0]!.id, state: response().data },
+      { ok: true as const, targetId: drifted.id, state: { ...response().data, configurationSha256: 'c'.repeat(64) } },
+      { ok: false as const, targetId: failed.id, error: 'offline' }
+    ]
+    if (operation === 'configuration') {
+      expect((await serviceControlState.acceptConfiguration(expected, observations)).status).toBe('partial')
+    } else {
+      const document = { openapi: '3.1.0', info: { title: 'Workflow', version: '1' }, paths: {} }
+      const sha = createHash('sha256').update(canonicalJson(document)).digest('hex')
+      await serviceControlState.commitDiscovery(expected, {
+        description: { ...expected.connection.serviceDescription!, openapiSha256: sha },
+        definition: expected.connection.configurationSchema!,
+        targets: observations.flatMap(item => item.ok ? [{ targetId: item.targetId, state: item.state }] : []),
+        targetErrors: new Map([[failed.id, 'offline']]),
+        openapi: { document, reportedSha256: sha, sourceUrl: 'http://127.0.0.1:8080/openapi.json' }
+      })
+    }
     const current = await loadServiceControlContext(upstream.id)
     const byId = new Map(current.targets.map(target => [target.id, target]))
     expect(byId.get(upstream.targets[0]!.id)).toMatchObject({ configurationStatus: 'synced', lastError: null })
@@ -378,17 +391,11 @@ describe('configuration result acceptance', () => {
   })
 
   it('classifies discovery against the contract committed in the same acceptance transaction', async () => {
-    const upstream = await configuredUpstream()
-    const expected = await loadServiceControlContext(upstream.id)
-    await acceptServiceTargetResults(expected, 'discovery', [
-      { ok: true, targetId: upstream.targets[0]!.id, state: response().data }
-    ], async (tx, current, changedAt) => {
-      const [connection] = await tx.update(schema.upstreamServiceConnections).set({
-        configurationHash: null, updatedAt: changedAt
-      }).where(eq(schema.upstreamServiceConnections.upstreamServiceId, current.service.id)).returning()
-      return connection!
-    })
+    const { upstream, description } = await discoveryFixture()
+    await discoverPlatformService(upstream.id)
     const current = await loadServiceControlContext(upstream.id)
+    expect(current.connection.configurationSchemaSha256).toBe(description.configuration.schemaSha256)
+    expect(current.connection.configurationHash).toBeNull()
     expect(current.targets[0]).toMatchObject({ configurationStatus: 'unknown', lastError: null })
     expect(isServiceTargetReady(current.targets[0]!, current.connection)).toBe(true)
   })
@@ -398,11 +405,9 @@ describe('configuration result acceptance', () => {
     const expected = await loadServiceControlContext(upstream.id)
     const targetId = kind === 'foreign' ? 'unknown-target' : upstream.targets[0]!.id
     const observation = { ok: true as const, targetId, state: response().data }
-    const update = vi.fn(async () => expected.connection)
-    await expect(acceptServiceTargetResults(expected, 'discovery',
-      kind === 'duplicate' ? [observation, observation] : [observation], update
+    await expect(serviceControlState.acceptConfiguration(expected,
+      kind === 'duplicate' ? [observation, observation] : [observation]
     )).rejects.toThrow('Target observation')
-    expect(update).not.toHaveBeenCalled()
     expect(await loadServiceControlContext(upstream.id)).toEqual(expected)
   })
 

@@ -18,10 +18,44 @@ import {
 import { firstRow } from '~~/server/utils/row'
 import { routingReferenceService } from '~~/server/services/routing-reference-service'
 import type { HttpMethod, RouteBinding, RouteMutationInput } from '~~/server/types/platform-publication'
+import type { PlatformEndpointPublicationPatch } from '#shared/types/platform'
 
 interface RouteMutationOptions {
   isSupportRoute?: boolean
   transaction?: DatabaseTransaction
+}
+
+type RouteIdentity = Pick<RouteMutationInput,
+  'apiVersionId' | 'name' | 'method' | 'pathPattern' | 'upstreamServiceId' | 'upstreamPathTemplate'>
+
+const supportPolicy = {
+  isApiKey: false,
+  isStatistics: false,
+  creditsCost: 0,
+  rateLimitPerSecond: 0,
+  rateLimitPerMinute: 0,
+  rateLimitPerHour: 0,
+  rateLimitPerDay: 0
+} as const
+
+const routeDefaults = {
+  ...supportPolicy,
+  isStatistics: true,
+  hosts: [],
+  timeoutMs: 10_000,
+  maxRequestBytes: 1024 * 1024,
+  maxResponseBytes: 10 * 1024 * 1024,
+  state: 'active'
+} satisfies Partial<RouteMutationInput>
+
+const settingKeys = [
+  'name', 'isApiKey', 'isStatistics', 'creditsCost',
+  'rateLimitPerSecond', 'rateLimitPerMinute', 'rateLimitPerHour', 'rateLimitPerDay',
+  'timeoutMs', 'maxRequestBytes', 'maxResponseBytes', 'catalogStatus', 'sensitiveQueryParameters'
+] as const satisfies ReadonlyArray<keyof PlatformEndpointPublicationPatch>
+
+function definedPatch(input: Partial<RouteMutationInput>): Partial<RouteMutationInput> {
+  return Object.fromEntries(Object.entries(input).filter(([, value]) => value !== undefined))
 }
 
 async function normalizeRouteMutation(
@@ -129,7 +163,19 @@ async function normalizeRouteMutation(
   }
 }
 
-export const platformRouteService = {
+/** Internal to Endpoint reconciliation; management callers use platformEndpointService.
+ * Route identity selection stays with reconciliation, while defaults, preservation
+ * and policy validation belong to this implementation. */
+export const endpointRoutes = {
+  updateSettings(id: string, input: PlatformEndpointPublicationPatch, options: RouteMutationOptions = {}) {
+    // Only governance settings may enter this path. Route identity belongs to
+    // the discovered contract even if a caller supplies extra runtime fields.
+    return endpointRoutes.update(id, {
+      ...Object.fromEntries(settingKeys.map(key => [key, input[key]])),
+      state: input.enabled === undefined ? undefined : input.enabled ? 'active' : 'disabled'
+    }, options)
+  },
+
   async list(
     options: { transaction?: DatabaseTransaction } = {}
   ): Promise<RouteBinding[]> {
@@ -156,9 +202,13 @@ export const platformRouteService = {
     return rows
   },
 
-  async create(input: RouteMutationInput, options: RouteMutationOptions = {}) {
+  async create(input: RouteIdentity & Partial<RouteMutationInput>, options: RouteMutationOptions = {}) {
     const executor = options.transaction ?? db
-    const values = await normalizeRouteMutation(input, options.transaction)
+    const values = await normalizeRouteMutation({
+      ...routeDefaults,
+      ...input,
+      ...(options.isSupportRoute ? supportPolicy : {})
+    }, options.transaction)
     try {
       return firstRow(await executor.insert(apiRoutes).values({
         ...values,
@@ -207,7 +257,7 @@ export const platformRouteService = {
     return binding
   },
 
-  async update(id: string, input: RouteMutationInput, options: RouteMutationOptions = {}) {
+  async update(id: string, input: Partial<RouteMutationInput>, options: RouteMutationOptions = {}) {
     const executor = options.transaction ?? db
     const existing = firstRow(await executor.select().from(apiRoutes)
       .where(and(eq(apiRoutes.id, id), isNull(apiRoutes.deletedAt)))
@@ -216,7 +266,14 @@ export const platformRouteService = {
       throw createApplicationError({ statusCode: 404, message: 'route not found', data: { code: 'ROUTE_NOT_FOUND' } })
     }
     const values = await normalizeRouteMutation(
-      input,
+      {
+        ...existing,
+        method: existing.method as HttpMethod,
+        state: existing.state as RouteMutationInput['state'],
+        catalogStatus: existing.catalogStatus as RouteMutationInput['catalogStatus'],
+        ...definedPatch(input),
+        ...(existing.isSupportRoute ? supportPolicy : {})
+      },
       options.transaction,
       existing.upstreamServiceId
     )
@@ -261,34 +318,5 @@ export const platformRouteService = {
       throw createApplicationError({ statusCode: 404, message: 'route not found', data: { code: 'ROUTE_NOT_FOUND' } })
     }
     return removed
-  }
-}
-
-export function routeMutationFromBinding(
-  binding: RouteBinding,
-  patch: Partial<RouteMutationInput> = {}
-): RouteMutationInput {
-  return {
-    apiVersionId: binding.route.apiVersionId,
-    name: binding.route.name,
-    hosts: binding.route.hosts,
-    method: binding.route.method as HttpMethod,
-    pathPattern: binding.route.pathPattern,
-    upstreamServiceId: binding.route.upstreamServiceId,
-    upstreamPathTemplate: binding.route.upstreamPathTemplate,
-    isApiKey: binding.route.isApiKey,
-    isStatistics: binding.route.isStatistics,
-    creditsCost: binding.route.creditsCost,
-    rateLimitPerSecond: binding.route.rateLimitPerSecond,
-    rateLimitPerMinute: binding.route.rateLimitPerMinute,
-    rateLimitPerHour: binding.route.rateLimitPerHour,
-    rateLimitPerDay: binding.route.rateLimitPerDay,
-    timeoutMs: binding.route.timeoutMs,
-    maxRequestBytes: binding.route.maxRequestBytes,
-    maxResponseBytes: binding.route.maxResponseBytes,
-    catalogStatus: binding.route.catalogStatus as RouteMutationInput['catalogStatus'],
-    sensitiveQueryParameters: binding.route.sensitiveQueryParameters,
-    state: binding.route.state as RouteMutationInput['state'],
-    ...patch
   }
 }

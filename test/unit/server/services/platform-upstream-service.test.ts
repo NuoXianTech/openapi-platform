@@ -33,7 +33,7 @@ const { upstreamServiceTokenService } = await import(
 )
 const revisionCompiler = await import('~~/server/services/routing-revision-compiler')
 const { routingRevisionService } = await import('~~/server/services/routing-revision-service')
-const { loadServiceControlContext, commitServiceControlContext } = await import('~~/server/services/platform-service-control-context')
+const { loadServiceControlContext } = await import('~~/server/services/platform-service-control-context')
 
 let client: PGlite
 let database: ReturnType<typeof drizzle<typeof schema>>
@@ -206,8 +206,8 @@ describe('Platform upstream target state', () => {
     await expect(upstreamServiceTokenService.get(id)).resolves.toBe(active)
     const expected = await loadServiceControlContext(id)
     const invalidate = vi.spyOn(upstreamServiceTokenService, 'invalidate')
-    await commitServiceControlContext(expected, 'discovery', async (tx, current) => {
-      const promoted = await upstreamServiceTokenService.promoteVerified(tx, current.connection)
+    await withCommittedTransaction(async (tx) => {
+      const promoted = await upstreamServiceTokenService.promoteVerified(tx, expected.connection)
       expect(invalidate).not.toHaveBeenCalled()
       await expect(upstreamServiceTokenService.get(id)).resolves.toBe(active)
       return promoted
@@ -218,7 +218,7 @@ describe('Platform upstream target state', () => {
     expect((await loadServiceControlContext(id)).connection.pendingServiceTokenCiphertext).toBeNull()
   })
 
-  it('does not expose a promoted Token when the enclosing discovery transaction rolls back', async () => {
+  it('does not expose a promoted Token when the enclosing transaction rolls back', async () => {
     const target = await createConfiguredTarget()
     const id = target.upstreamServiceId
     const original = await upstreamServiceTokenService.get(id)
@@ -226,8 +226,8 @@ describe('Platform upstream target state', () => {
     await platformUpstreamService.updateServiceToken(id, replacement)
     const expected = await loadServiceControlContext(id)
     const invalidate = vi.spyOn(upstreamServiceTokenService, 'invalidate')
-    await expect(commitServiceControlContext(expected, 'discovery', async (tx, current) => {
-      await upstreamServiceTokenService.promoteVerified(tx, current.connection)
+    await expect(withCommittedTransaction(async (tx) => {
+      await upstreamServiceTokenService.promoteVerified(tx, expected.connection)
       throw new Error('Target persistence failed')
     })).rejects.toThrow('Target persistence failed')
     expect(invalidate).not.toHaveBeenCalled()
