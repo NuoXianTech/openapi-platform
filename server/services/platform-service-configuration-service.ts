@@ -21,6 +21,7 @@ import {
   ServiceConfigurationValueError
 } from '~~/server/utils/service-configuration-values'
 
+// Limit queued Target work per synchronization; the control client owns the shared HTTP budget.
 const CONFIGURATION_SYNC_CONCURRENCY = 8
 const MAX_CONFIGURATION_REVISION = 2_147_483_647
 

@@ -16,10 +16,48 @@ import { readLimitedText } from '~~/server/utils/safe-fetch'
 import { fetchUpstreamTarget } from '~~/server/utils/upstream-target-fetch'
 import { containsDotPathSegment } from '~~/server/utils/route-pattern'
 
-const CONTROL_TIMEOUT_MS = 10_000
 const MAX_CONTROL_RESPONSE_BYTES = 4 * 1024 * 1024
 const MAX_CONTROL_ERROR_BYTES = 64 * 1024
 const SERVICE_ERROR_CODE_PATTERN = /^[A-Z][A-Z0-9_]{0,79}$/
+
+interface RequestBudget {
+  limit: number
+  timeoutMs: number
+  active: number
+  waiting: Array<() => void>
+}
+
+// Per-process HTTP budgets, shared across all Upstreams. Probe capacity is
+// reserved so slow discovery/configuration bodies cannot starve availability.
+const requestBudgets: Record<'control' | 'probe', RequestBudget> = {
+  control: { limit: 16, timeoutMs: 10_000, active: 0, waiting: [] },
+  probe: { limit: 16, timeoutMs: 1_500, active: 0, waiting: [] }
+}
+
+async function withRequestBudget<T>(
+  kind: keyof typeof requestBudgets,
+  consume: (signal: AbortSignal) => Promise<T>
+): Promise<T> {
+  const budget = requestBudgets[kind]
+  if (budget.active < budget.limit) budget.active += 1
+  else await new Promise<void>((resolve) => { budget.waiting.push(resolve) })
+
+  // Waiting for capacity does not spend the network deadline. The caller must
+  // finish consuming/cancelling the body before returning its permit.
+  const controller = new AbortController()
+  const timeout = setTimeout(() => {
+    controller.abort(new DOMException('Service request timed out', 'TimeoutError'))
+  }, budget.timeoutMs)
+  try {
+    return await consume(controller.signal)
+  } finally {
+    clearTimeout(timeout)
+    controller.abort()
+    const next = budget.waiting.shift()
+    if (next) next()
+    else budget.active -= 1
+  }
+}
 
 export class ServiceControlRequestError extends Error {
   constructor(
@@ -199,55 +237,77 @@ async function requestJson<TSchema extends z.ZodType>(
   headers.set('accept', 'application/json')
   if (init.body) headers.set('content-type', 'application/json')
 
-  let response: Response
-  try {
-    response = await fetchUpstreamTarget(url, {
-      ...init,
-      headers,
-      signal: AbortSignal.timeout(CONTROL_TIMEOUT_MS)
-    })
-  } catch (error) {
-    throw new ServiceControlRequestError(
-      null,
-      endpoint,
-      `service control request failed: ${
-        error instanceof Error ? error.name : 'network error'
-      }`
-    )
-  }
+  return withRequestBudget('control', async (signal) => {
+    let response: Response
+    try {
+      response = await fetchUpstreamTarget(url, { ...init, headers, signal })
+    } catch (error) {
+      throw new ServiceControlRequestError(
+        null,
+        endpoint,
+        `service control request failed: ${
+          error instanceof Error ? error.name : 'network error'
+        }`
+      )
+    }
 
-  if (!response.ok) {
-    const detail = await describeErrorResponse(response)
-    throw new ServiceControlRequestError(
-      response.status,
-      endpoint,
-      `service control request returned HTTP ${response.status}${
-        detail ? `: ${detail.summary}` : ''
-      }`,
-      detail?.code ?? null,
-      detail?.data ?? null
-    )
-  }
-  const raw = await readLimitedText(response, MAX_CONTROL_RESPONSE_BYTES)
-  let json: unknown
-  try {
-    json = JSON.parse(raw)
-  } catch {
-    throw new ServiceControlRequestError(
-      response.status,
-      endpoint,
-      'service control response is not valid JSON'
-    )
-  }
-  return {
-    data: parseResponseData(json, schema, response.status, endpoint),
-    headers: response.headers,
-    status: response.status,
-    url: url.toString()
-  }
+    if (!response.ok) {
+      const detail = await describeErrorResponse(response)
+      throw new ServiceControlRequestError(
+        response.status,
+        endpoint,
+        `service control request returned HTTP ${response.status}${
+          detail ? `: ${detail.summary}` : ''
+        }`,
+        detail?.code ?? null,
+        detail?.data ?? null
+      )
+    }
+    const raw = await readLimitedText(response, MAX_CONTROL_RESPONSE_BYTES)
+    let json: unknown
+    try {
+      json = JSON.parse(raw)
+    } catch {
+      throw new ServiceControlRequestError(
+        response.status,
+        endpoint,
+        'service control response is not valid JSON'
+      )
+    }
+    return {
+      data: parseResponseData(json, schema, response.status, endpoint),
+      headers: response.headers,
+      status: response.status,
+      url: url.toString()
+    }
+  })
+}
+
+function probeTarget(url: URL, serviceToken?: string): Promise<boolean> {
+  return withRequestBudget('probe', async (signal) => {
+    const response = await fetchUpstreamTarget(url, {
+      headers: {
+        accept: 'application/json',
+        ...(serviceToken ? { authorization: `Service ${serviceToken}` } : {})
+      },
+      signal
+    })
+    const online = response.ok
+    await response.body?.cancel().catch(() => undefined)
+    return online
+  })
 }
 
 export const serviceControlClient = {
+  async checkAvailability(baseUrl: string, readinessPath: string, controlPath: string, serviceToken: string): Promise<boolean> {
+    try {
+      if (!await probeTarget(buildServiceControlUrl(baseUrl, readinessPath))) return false
+      return await probeTarget(buildServiceControlUrl(baseUrl, controlPath), serviceToken)
+    } catch {
+      return false
+    }
+  },
+
   async getDescription(baseUrl: string, token: string) {
     const response = await requestJson(
       baseUrl,

@@ -4,11 +4,10 @@ import type {
   ServiceDescription,
   ServiceTargetAvailability
 } from '#shared/types/service-control'
-import { buildServiceControlUrl } from '~~/server/utils/service-control-client'
-import { fetchUpstreamTarget } from '~~/server/utils/upstream-target-fetch'
+import { serviceControlClient } from '~~/server/utils/service-control-client'
 
-const AVAILABILITY_PROBE_TIMEOUT_MS = 1_500
-const AVAILABILITY_PROBE_CONCURRENCY = 16
+// Bound queued work from one read; the client owns the process-wide HTTP budget.
+const AVAILABILITY_TARGET_WORKERS = 16
 
 interface AvailabilityTarget {
   id: string
@@ -22,63 +21,6 @@ interface ServiceAvailabilitySnapshot {
 }
 
 const pendingAvailabilityRequests = new Map<string, Promise<boolean>>()
-let activeProbes = 0
-const waitingProbes: Array<() => void> = []
-
-// Lists probe many Upstreams concurrently. The budget belongs to the process,
-// not a single caller; a completed probe transfers its slot to the next waiter.
-async function acquireProbe(): Promise<void> {
-  if (activeProbes < AVAILABILITY_PROBE_CONCURRENCY) {
-    activeProbes += 1
-    return
-  }
-  await new Promise<void>((resolve) => { waitingProbes.push(resolve) })
-}
-
-function releaseProbe(): void {
-  const next = waitingProbes.shift()
-  if (next) next()
-  else activeProbes -= 1
-}
-
-async function requestTargetAvailability(
-  baseUrl: string,
-  readinessPath: string,
-  controlPath: string,
-  serviceToken: string
-): Promise<boolean> {
-  await acquireProbe()
-  try {
-    const readinessUrl = buildServiceControlUrl(baseUrl, readinessPath)
-    const requestOptions = {
-      headers: { accept: 'application/json' },
-      signal: AbortSignal.timeout(AVAILABILITY_PROBE_TIMEOUT_MS)
-    }
-    const readiness = await fetchUpstreamTarget(
-      readinessUrl,
-      requestOptions
-    )
-    const ready = readiness.ok
-    await readiness.body?.cancel().catch(() => undefined)
-    if (!ready) return false
-
-    const controlUrl = buildServiceControlUrl(baseUrl, controlPath)
-    const control = await fetchUpstreamTarget(controlUrl, {
-      headers: {
-        accept: 'application/json',
-        authorization: `Service ${serviceToken}`
-      },
-      signal: AbortSignal.timeout(AVAILABILITY_PROBE_TIMEOUT_MS)
-    })
-    const authenticated = control.ok
-    await control.body?.cancel().catch(() => undefined)
-    return authenticated
-  } catch {
-    return false
-  } finally {
-    releaseProbe()
-  }
-}
 
 function targetAvailability(
   baseUrl: string,
@@ -91,7 +33,7 @@ function targetAvailability(
   const pending = pendingAvailabilityRequests.get(key)
   if (pending) return pending
 
-  const result = requestTargetAvailability(
+  const result = serviceControlClient.checkAvailability(
     baseUrl,
     readinessPath,
     controlPath,
@@ -139,7 +81,7 @@ export async function resolveServiceAvailability(
     }
   }
   await Promise.all(Array.from({
-    length: Math.min(AVAILABILITY_PROBE_CONCURRENCY, enabledTargets.length)
+    length: Math.min(AVAILABILITY_TARGET_WORKERS, enabledTargets.length)
   }, probeWorker))
   for (const target of availability) {
     targetStatuses.set(target.id, target.online ? 'online' : 'offline')

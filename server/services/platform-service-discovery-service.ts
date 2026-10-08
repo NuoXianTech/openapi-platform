@@ -38,6 +38,7 @@ interface DiscoveryFetchFailure {
 
 type DiscoveryFetchResult = DiscoveryFetchSuccess | DiscoveryFetchFailure
 
+// Limit queued Target work per discovery; the control client caps actual HTTP requests across Upstreams.
 const DISCOVERY_CONCURRENCY = 8
 
 async function allSettledBounded<TItem, TResult>(

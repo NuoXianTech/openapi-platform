@@ -11,6 +11,7 @@ import * as schema from '~~/server/db/schema'
 import { calculateServiceConfigurationHash } from '~~/server/utils/service-configuration-values'
 import { canonicalJson } from '~~/server/utils/canonical-json'
 import * as availability from '~~/server/services/service-availability-service'
+import * as targetTransport from '~~/server/utils/upstream-target-fetch'
 import { isServiceTargetReady } from '~~/server/utils/service-upstream-readiness'
 import { encryptStoredSecret } from '~~/server/utils/stored-secret'
 
@@ -60,11 +61,12 @@ beforeEach(async () => {
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals() })
 afterAll(async () => client.close())
 
-async function configuredUpstream() {
+async function configuredUpstream(slug = 'configuration-workflow', targetCount = 1) {
   const upstream = await platformUpstreamService.create({
-    slug: 'configuration-workflow', name: 'Configuration workflow',
+    slug, name: 'Configuration workflow',
     serviceToken: 'configuration-test-token-with-at-least-32-characters',
-    loadBalancing: 'round_robin', targets: [{ baseUrl: 'http://127.0.0.1:8080', weight: 1 }]
+    loadBalancing: 'round_robin',
+    targets: Array.from({ length: targetCount }, (_, index) => ({ baseUrl: `http://127.0.0.1:${8080 + index}`, weight: 1 }))
   })
   const description: ServiceDescription = {
     schemaVersion: 1, serviceProtocol: 'openapi-service/v1', serviceId: 'workflow', name: 'Workflow', version: '1', commit: 'test',
@@ -111,6 +113,43 @@ async function discoveryFixture() {
 }
 
 describe('configuration result acceptance', () => {
+  it('shares one HTTP budget across concurrent Upstream synchronizations without holding database transactions while queued', async () => {
+    const upstreams = []
+    for (let index = 0; index < 3; index += 1) upstreams.push(await configuredUpstream(`budget-${index}`, 8))
+    const saturated = deferred<undefined>()
+    const release = deferred<undefined>()
+    let active = 0
+    let peak = 0
+    const request = vi.spyOn(targetTransport, 'fetchUpstreamTarget').mockImplementation(async () => {
+      active += 1
+      peak = Math.max(peak, active)
+      if (active === 16) saturated.resolve(undefined)
+      try {
+        await release.promise
+        return Response.json(response().data)
+      } finally {
+        active -= 1
+      }
+    })
+    const pending = Promise.all(upstreams.map(upstream => synchronizePlatformServiceConfiguration(upstream.id)))
+    try {
+      await saturated.promise
+      const current = await Promise.all(upstreams.map(upstream => loadServiceControlContext(upstream.id)))
+      expect(current).toHaveLength(3)
+      expect(request).toHaveBeenCalledTimes(16)
+      release.resolve(undefined)
+      const results = await pending
+      expect(results.every(result => result.status === 'synced' && result.routingStatus === 'applied')).toBe(true)
+      expect(results.every(result => result.targets.length === 8 && result.targets.every(target => target.configurationStatus === 'synced'))).toBe(true)
+      expect(request).toHaveBeenCalledTimes(24)
+      expect(peak).toBe(16)
+      expect(active).toBe(0)
+    } finally {
+      release.resolve(undefined)
+      await pending
+    }
+  })
+
   it('saves above the highest enabled Target revision and reuses that revision on synchronization', async () => {
     const upstream = await configuredUpstream()
     await database.update(schema.upstreamTargets).set({ configurationRevision: 7 })
