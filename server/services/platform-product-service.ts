@@ -44,6 +44,127 @@ function groupProducts(rows: Array<{
   return Array.from(result.values())
 }
 
+async function updateProduct(
+  tx: DatabaseTransaction,
+  id: string,
+  input: UpdateProductInput
+) {
+  try {
+    const updated = firstRow(await tx.update(apiProducts).set({
+      name: input.name,
+      summary: input.summary,
+      description: input.description,
+      categoryId: input.categoryId,
+      visibility: input.visibility,
+      lifecycle: input.lifecycle,
+      updatedAt: new Date()
+    }).where(and(eq(apiProducts.id, id), isNull(apiProducts.deletedAt))).returning())
+    if (!updated) {
+      throw createApplicationError({ statusCode: 404, message: 'product not found', data: { code: 'PRODUCT_NOT_FOUND' } })
+    }
+    return updated
+  } catch (error) {
+    if (getSqlState(error) === '23503') {
+      throw createApplicationError({ statusCode: 404, message: 'category not found', data: { code: 'CATEGORY_NOT_FOUND' } })
+    }
+    throw error
+  }
+}
+
+async function removeProduct(
+  tx: DatabaseTransaction,
+  id: string
+) {
+  if (await routingReferenceService.hasProduct(id, tx)) {
+    throw createApplicationError({
+      statusCode: 409,
+      message: 'product is still referenced by an active routing revision',
+      data: { code: 'PRODUCT_STILL_PUBLISHED' }
+    })
+  }
+  const routeCount = firstRow(await tx.select({ value: count() })
+    .from(apiRoutes)
+    .innerJoin(apiVersions, eq(apiVersions.id, apiRoutes.apiVersionId))
+    .where(and(eq(apiVersions.productId, id), isNull(apiRoutes.deletedAt))))
+  if (Number(routeCount?.value ?? 0) > 0) {
+    throw createApplicationError({
+      statusCode: 409,
+      message: 'remove every route before deleting the product',
+      data: { code: 'PRODUCT_HAS_ROUTES' }
+    })
+  }
+  const now = new Date()
+  const removed = firstRow(await tx.update(apiProducts).set({
+    lifecycle: 'retired',
+    deletedAt: now,
+    updatedAt: now
+  }).where(and(eq(apiProducts.id, id), isNull(apiProducts.deletedAt))).returning())
+  if (!removed) {
+    throw createApplicationError({ statusCode: 404, message: 'product not found', data: { code: 'PRODUCT_NOT_FOUND' } })
+  }
+  return removed
+}
+
+async function updateVersion(
+  tx: DatabaseTransaction,
+  id: string,
+  input: UpdateVersionInput
+) {
+  const current = firstRow(await tx.select({ version: apiVersions })
+    .from(apiVersions)
+    .innerJoin(apiProducts, eq(apiProducts.id, apiVersions.productId))
+    .where(and(eq(apiVersions.id, id), isNull(apiProducts.deletedAt)))
+    .limit(1))
+  if (!current) {
+    throw createApplicationError({ statusCode: 404, message: 'version not found', data: { code: 'VERSION_NOT_FOUND' } })
+  }
+  const timestampPatch = input.state
+    ? lifecycleDates(input.state)
+    : {}
+  const version = firstRow(await tx.update(apiVersions).set({
+    state: input.state,
+    changelog: input.changelog,
+    ...timestampPatch
+  }).where(eq(apiVersions.id, id)).returning())
+  if (!version) throw new Error('version update returned no row')
+  return version
+}
+
+async function removeVersion(
+  tx: DatabaseTransaction,
+  id: string
+) {
+  if (await routingReferenceService.hasVersion(id, tx)) {
+    throw createApplicationError({
+      statusCode: 409,
+      message: 'version is still referenced by an active routing revision',
+      data: { code: 'VERSION_STILL_PUBLISHED' }
+    })
+  }
+  const current = firstRow(await tx.select({ version: apiVersions })
+    .from(apiVersions)
+    .innerJoin(apiProducts, eq(apiProducts.id, apiVersions.productId))
+    .where(eq(apiVersions.id, id)).limit(1))
+  if (!current) {
+    throw createApplicationError({ statusCode: 404, message: 'version not found', data: { code: 'VERSION_NOT_FOUND' } })
+  }
+  const routeCount = firstRow(await tx.select({ value: count() })
+    .from(apiRoutes).where(and(
+      eq(apiRoutes.apiVersionId, id),
+      isNull(apiRoutes.deletedAt)
+    )))
+  if (Number(routeCount?.value ?? 0) > 0) {
+    throw createApplicationError({
+      statusCode: 409,
+      message: 'version still owns routes',
+      data: { code: 'VERSION_HAS_ROUTES' }
+    })
+  }
+  await tx.delete(apiVersions).where(eq(apiVersions.id, id))
+  return current.version
+}
+
+/** Writes expose only the complete mutation; their transaction belongs to publication. */
 export const platformProductService = {
   async list() {
     const rows = await db.select({ product: apiProducts, version: apiVersions })
@@ -86,130 +207,6 @@ export const platformProductService = {
     }
   },
 
-  async update(
-    id: string,
-    input: UpdateProductInput,
-    options: { transaction?: DatabaseTransaction } = {}
-  ) {
-    const executor = options.transaction ?? db
-    try {
-      const updated = firstRow(await executor.update(apiProducts).set({
-        name: input.name,
-        summary: input.summary,
-        description: input.description,
-        categoryId: input.categoryId,
-        visibility: input.visibility,
-        lifecycle: input.lifecycle,
-        updatedAt: new Date()
-      }).where(and(eq(apiProducts.id, id), isNull(apiProducts.deletedAt))).returning())
-      if (!updated) {
-        throw createApplicationError({ statusCode: 404, message: 'product not found', data: { code: 'PRODUCT_NOT_FOUND' } })
-      }
-      return updated
-    } catch (error) {
-      if (getSqlState(error) === '23503') {
-        throw createApplicationError({ statusCode: 404, message: 'category not found', data: { code: 'CATEGORY_NOT_FOUND' } })
-      }
-      throw error
-    }
-  },
-
-  async remove(
-    id: string,
-    options: { transaction?: DatabaseTransaction } = {}
-  ) {
-    const executor = options.transaction ?? db
-    if (await routingReferenceService.hasProduct(id, options.transaction)) {
-      throw createApplicationError({
-        statusCode: 409,
-        message: 'product is still referenced by an active routing revision',
-        data: { code: 'PRODUCT_STILL_PUBLISHED' }
-      })
-    }
-    const routeCount = firstRow(await executor.select({ value: count() })
-      .from(apiRoutes)
-      .innerJoin(apiVersions, eq(apiVersions.id, apiRoutes.apiVersionId))
-      .where(and(eq(apiVersions.productId, id), isNull(apiRoutes.deletedAt))))
-    if (Number(routeCount?.value ?? 0) > 0) {
-      throw createApplicationError({
-        statusCode: 409,
-        message: 'remove every route before deleting the product',
-        data: { code: 'PRODUCT_HAS_ROUTES' }
-      })
-    }
-    const now = new Date()
-    const removed = firstRow(await executor.update(apiProducts).set({
-      lifecycle: 'retired',
-      deletedAt: now,
-      updatedAt: now
-    }).where(and(eq(apiProducts.id, id), isNull(apiProducts.deletedAt))).returning())
-    if (!removed) {
-      throw createApplicationError({ statusCode: 404, message: 'product not found', data: { code: 'PRODUCT_NOT_FOUND' } })
-    }
-    return removed
-  },
-
-  async updateVersion(
-    id: string,
-    input: UpdateVersionInput,
-    options: { transaction?: DatabaseTransaction } = {}
-  ) {
-    const executor = options.transaction ?? db
-    const current = firstRow(await executor.select({ version: apiVersions })
-      .from(apiVersions)
-      .innerJoin(apiProducts, eq(apiProducts.id, apiVersions.productId))
-      .where(and(eq(apiVersions.id, id), isNull(apiProducts.deletedAt)))
-      .limit(1))
-    if (!current) {
-      throw createApplicationError({ statusCode: 404, message: 'version not found', data: { code: 'VERSION_NOT_FOUND' } })
-    }
-    const timestampPatch = input.state
-      ? lifecycleDates(input.state)
-      : {}
-    const version = firstRow(await executor.update(apiVersions).set({
-      state: input.state,
-      changelog: input.changelog,
-      ...timestampPatch
-    }).where(eq(apiVersions.id, id)).returning())
-    if (!version) throw new Error('version update returned no row')
-    return version
-  },
-
-  async removeVersion(
-    id: string,
-    options: { transaction?: DatabaseTransaction } = {}
-  ) {
-    const executor = options.transaction ?? db
-    if (await routingReferenceService.hasVersion(id, options.transaction)) {
-      throw createApplicationError({
-        statusCode: 409,
-        message: 'version is still referenced by an active routing revision',
-        data: { code: 'VERSION_STILL_PUBLISHED' }
-      })
-    }
-    const current = firstRow(await executor.select({ version: apiVersions })
-      .from(apiVersions)
-      .innerJoin(apiProducts, eq(apiProducts.id, apiVersions.productId))
-      .where(eq(apiVersions.id, id)).limit(1))
-    if (!current) {
-      throw createApplicationError({ statusCode: 404, message: 'version not found', data: { code: 'VERSION_NOT_FOUND' } })
-    }
-    const routeCount = firstRow(await executor.select({ value: count() })
-      .from(apiRoutes).where(and(
-        eq(apiRoutes.apiVersionId, id),
-        isNull(apiRoutes.deletedAt)
-      )))
-    if (Number(routeCount?.value ?? 0) > 0) {
-      throw createApplicationError({
-        statusCode: 409,
-        message: 'version still owns routes',
-        data: { code: 'VERSION_HAS_ROUTES' }
-      })
-    }
-    await executor.delete(apiVersions).where(eq(apiVersions.id, id))
-    return current.version
-  },
-
   async findVersionProduct(
     apiVersionId: string,
     options: { transaction?: DatabaseTransaction } = {}
@@ -230,7 +227,7 @@ export const platformProductService = {
     createdBy: number | null
   ) {
     const committed = await applyPlatformMutation(createdBy, async tx => ({
-      value: await platformProductService.update(id, input, { transaction: tx })
+      value: await updateProduct(tx, id, input)
     }))
     const { value: product, ...publication } = committed
     return { product, ...publication }
@@ -238,7 +235,7 @@ export const platformProductService = {
 
   async removeAndPublish(id: string, createdBy: number | null) {
     const committed = await applyPlatformMutation(createdBy, async tx => ({
-      value: await platformProductService.remove(id, { transaction: tx })
+      value: await removeProduct(tx, id)
     }))
     const { value: product, ...publication } = committed
     return { product, ...publication }
@@ -250,7 +247,7 @@ export const platformProductService = {
     createdBy: number | null
   ) {
     const committed = await applyPlatformMutation(createdBy, async tx => ({
-      value: await platformProductService.updateVersion(id, input, { transaction: tx })
+      value: await updateVersion(tx, id, input)
     }))
     const { value: version, ...publication } = committed
     return { version, ...publication }
@@ -258,7 +255,7 @@ export const platformProductService = {
 
   async removeVersionAndPublish(id: string, createdBy: number | null) {
     const committed = await applyPlatformMutation(createdBy, async tx => ({
-      value: await platformProductService.removeVersion(id, { transaction: tx })
+      value: await removeVersion(tx, id)
     }))
     const { value: version, ...publication } = committed
     return { version, ...publication }

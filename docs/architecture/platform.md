@@ -92,6 +92,12 @@ Service 的标准流程是：
 执行前按当前目录重新检查 Route 与操作准入，保存期间纳入目录占用，反馈关联到同一 Endpoint。
 保存后的读取失败单独呈现，不将已成功的变更改报失败；离开页面后忽略旧保存响应。
 
+Product / Version 的管理写入统一使用 `platform-product-service.ts` 的完整发布入口。
+底层更新与删除为私有 implementation，必须接收发布流程持有的事务；调用方不能单独写入
+或传入外部事务。删除引用保护、领域变更与 Routing Revision 共用原发布锁和事务，冲突时
+整体回滚。行为测试与管理调用穿过同一个 interface，草稿或不可执行 Route 的初始状态由
+数据库测试夹具构造，不为测试暴露绕过发布的写入入口。
+
 Product / Version 的编辑上下文、保存、删除确认和列表刷新由
 `app/composables/admin/use-admin-product-management.ts` 管理。确认期间保留操作占用，失败可在原确认中重试；
 成功读取后重新定位 Product 和 Version，读取失败保留编辑上下文。表单草稿与校验留在各自弹窗。

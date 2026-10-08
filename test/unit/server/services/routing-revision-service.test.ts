@@ -44,7 +44,7 @@ vi.stubGlobal('useRuntimeConfig', () => ({
 const { platformProductService } = await import('~~/server/services/platform-product-service')
 const { apiCatalogService } = await import('~~/server/services/api-catalog-service')
 const { platformEndpointService } = await import('~~/server/services/platform-endpoint-service')
-const { applyPlatformRevision, refreshPlatformRevision, applyPlatformMutation } = await import('~~/server/services/routing-revision-service')
+const { applyPlatformRevision, refreshPlatformRevision } = await import('~~/server/services/routing-revision-service')
 const { endpointRoutes } = await import('~~/server/services/platform-endpoint/routes')
 const { platformUpstreamService } = await import('~~/server/services/platform-upstream-service')
 const { platformRuntimeService } = await import('~~/server/services/platform-runtime-service')
@@ -244,7 +244,7 @@ describe('routing revision service', () => {
     const staged = await platformEndpointService.publish({ upstreamServiceId: service.upstream.id, method: 'GET', path: service.path }, null, { publishRouting: false })
     const unrelated = await createRoutingGraph({ productSlug: 'unrelated' })
     await platformUpstreamService.updateAndPublish(unrelated.upstream.id, { name: 'Renamed' }, null)
-    await applyPlatformMutation(null, async tx => ({ value: await platformProductService.update(unrelated.product.id, { name: 'Renamed group' }, { transaction: tx }) }))
+    await platformProductService.updateAndPublish(unrelated.product.id, { name: 'Renamed group' }, null)
     await platformRuntimeService.updateDefaultDomain('api.example.test', null)
     await refreshPlatformRevision(null)
     expect((await currentPayload()).appliedRoutes).toEqual([])
@@ -258,18 +258,18 @@ describe('routing revision service', () => {
     const graph = await createRoutingGraph({})
     const original = await routingRevisionService.publish(null)
     await endpointRoutes.update(graph.route.id, { ...routeMutationInput(graph.route), isApiKey: true, timeoutMs: 9000, state: 'disabled' })
-    await applyPlatformMutation(null, async tx => ({ value: await platformProductService.update(graph.product.id, { visibility: 'private' }, { transaction: tx }) }))
-    await applyPlatformMutation(null, async tx => ({ value: await platformProductService.updateVersion(graph.route.apiVersionId, { state: 'deprecated' }, { transaction: tx }) }))
+    await platformProductService.updateAndPublish(graph.product.id, { visibility: 'private' }, null)
+    await platformProductService.updateVersionAndPublish(graph.route.apiVersionId, { state: 'deprecated' }, null)
     const [target] = await database.select().from(schema.upstreamTargets).where(eq(schema.upstreamTargets.upstreamServiceId, graph.upstream.id))
     await platformUpstreamService.updateTargetAndPublish(target!.id, { weight: 5 }, null)
     await platformRuntimeService.updateDefaultDomain('api.example.test', null)
     const payload = await currentPayload()
     expect(payload.routes).toEqual([{ ...original.configPayload.routes[0], productVisibility: 'private', versionState: 'deprecated' }])
     expect(payload.upstreams[0]?.targets[0]?.weight).toBe(5)
-    await applyPlatformMutation(null, async tx => ({ value: await platformProductService.update(graph.product.id, { lifecycle: 'retired' }, { transaction: tx }) }))
+    await platformProductService.updateAndPublish(graph.product.id, { lifecycle: 'retired' }, null)
     expect((await currentPayload()).routes).toEqual([])
     expect((await currentPayload()).appliedRoutes).toHaveLength(1)
-    await applyPlatformMutation(null, async tx => ({ value: await platformProductService.update(graph.product.id, { lifecycle: 'active' }, { transaction: tx }) }))
+    await platformProductService.updateAndPublish(graph.product.id, { lifecycle: 'active' }, null)
     expect((await currentPayload()).routes).toHaveLength(1)
     await applyPlatformRevision(null)
     expect((await currentPayload()).routes).toEqual([])
@@ -670,15 +670,16 @@ describe('routing revision service', () => {
     const graph = await createRoutingGraph({ productSlug: 'deprecated-product' })
     const first = await routingRevisionService.publish(null)
 
-    await platformProductService.update(graph.product.id, {
+    const { product, revision: second } = await platformProductService.updateAndPublish(graph.product.id, {
       lifecycle: 'deprecated'
-    })
-    const second = await routingRevisionService.publish(null)
+    }, null)
     const catalog = await apiCatalogService.listPublicApis()
 
-    expect(second.id).not.toBe(first.id)
-    expect(second.configPayload.routes).toHaveLength(1)
-    expect(second.configPayload.routes[0]).toMatchObject({
+    expect(product.lifecycle).toBe('deprecated')
+    expect(second).not.toBeNull()
+    expect(second!.id).not.toBe(first.id)
+    expect(second!.configPayload.routes).toHaveLength(1)
+    expect(second!.configPayload.routes[0]).toMatchObject({
       id: graph.route.id,
       productLifecycle: 'deprecated'
     })
@@ -688,15 +689,94 @@ describe('routing revision service', () => {
     }))
   })
 
+  it.each(['product', 'version'] as const)('rolls back a %s restoration when its applied Route conflicts', async (kind) => {
+    const active = await createRoutingGraph({
+      productSlug: 'active-parent', pathPattern: '/v1/parent/{id}', upstreamPathTemplate: '/parent/{path.id}'
+    })
+    const retired = await createRoutingGraph({
+      productSlug: 'retired-parent', pathPattern: '/v1/parent/{other}', upstreamPathTemplate: '/parent/{path.other}'
+    })
+    // Build an applied-but-ineligible Route fixture without adding a management bypass.
+    if (kind === 'product') {
+      await database.update(schema.apiProducts).set({ lifecycle: 'retired' })
+        .where(eq(schema.apiProducts.id, retired.product.id))
+    } else {
+      await database.update(schema.apiVersions).set({ state: 'retired', retiredAt: new Date() })
+        .where(eq(schema.apiVersions.id, retired.route.apiVersionId))
+    }
+    const published = await routingRevisionService.publish(null)
+    expect(published.configPayload.appliedRoutes).toHaveLength(2)
+    expect(published.configPayload.routes.map(route => route.id)).toEqual([active.route.id])
+    const originalProduct = await database.select().from(schema.apiProducts)
+      .where(eq(schema.apiProducts.id, retired.product.id))
+    const originalVersion = await database.select().from(schema.apiVersions)
+      .where(eq(schema.apiVersions.id, retired.route.apiVersionId))
+    const runtime = await platformRuntimeService.get()
+    const request = () => routingRuntimeService.resolve('GET', '/v1/parent/42', 'localhost')
+    expect((await request()).match?.route.id).toBe(active.route.id)
+
+    const restore = kind === 'product'
+      ? platformProductService.updateAndPublish(retired.product.id, { lifecycle: 'active', name: 'Restored' }, null)
+      : platformProductService.updateVersionAndPublish(retired.route.apiVersionId, { state: 'published', changelog: 'Restored' }, null)
+    await expect(restore).rejects.toMatchObject({ statusCode: 409, data: { code: 'REVISION_ROUTE_CONFLICT' } })
+
+    expect(await database.select().from(schema.apiProducts).where(eq(schema.apiProducts.id, retired.product.id)))
+      .toEqual(originalProduct)
+    expect(await database.select().from(schema.apiVersions).where(eq(schema.apiVersions.id, retired.route.apiVersionId)))
+      .toEqual(originalVersion)
+    expect(await platformRuntimeService.get()).toEqual(runtime)
+    expect(await database.select().from(schema.routingRevisions)).toEqual([published])
+    expect((await request()).match).toMatchObject({ revisionId: published.id, route: { id: active.route.id } })
+  })
+
+  it.each(['product', 'version'] as const)('removes an unused %s through publication without disturbing active traffic', async (kind) => {
+    const graph = await createRoutingGraph({})
+    const published = await routingRevisionService.publish(null)
+    const unused = await createProductFixture(database, {
+      slug: 'unused-parent', name: 'Unused', visibility: 'public', version: 'v1'
+    })
+    const result = kind === 'product'
+      ? await platformProductService.removeAndPublish(unused.id, null)
+      : await platformProductService.removeVersionAndPublish(unused.versions[0]!.id, null)
+
+    expect(result.revision?.id).toBe(published.id)
+    if ('product' in result) {
+      expect(result.product).toMatchObject({ id: unused.id, lifecycle: 'retired', deletedAt: expect.any(Date) })
+      expect((await platformProductService.list()).some(product => product.id === unused.id)).toBe(false)
+    } else {
+      expect(result.version.id).toBe(unused.versions[0]!.id)
+      expect((await platformProductService.list()).find(product => product.id === unused.id)?.versions).toEqual([])
+    }
+    expect((await platformRuntimeService.get()).activeRevisionId).toBe(published.id)
+    expect(await database.select().from(schema.routingRevisions)).toEqual([published])
+    expect((await routingRuntimeService.resolve('GET', '/v1/proxy-smoke/42', 'localhost')).match)
+      .toMatchObject({ revisionId: published.id, route: { id: graph.route.id } })
+  })
+
+  it.each([
+    ['product', 'PRODUCT_HAS_ROUTES'], ['version', 'VERSION_HAS_ROUTES']
+  ] as const)('refuses to delete a %s that still owns an unpublished Route', async (kind, code) => {
+    const graph = await createRoutingGraph({})
+    const original = await platformProductService.list()
+    const remove = kind === 'product'
+      ? platformProductService.removeAndPublish(graph.product.id, null)
+      : platformProductService.removeVersionAndPublish(graph.route.apiVersionId, null)
+
+    await expect(remove).rejects.toMatchObject({ statusCode: 409, data: { code } })
+    expect(await platformProductService.list()).toEqual(original)
+    expect(await database.select().from(schema.routingRevisions)).toEqual([])
+    expect((await platformRuntimeService.get()).activeRevisionId).toBeNull()
+  })
+
   it('protects every object referenced by the active revision from deletion', async () => {
     const graph = await createRoutingGraph({ productSlug: 'protected-graph' })
     await routingRevisionService.publish(null)
 
     await expect(endpointRoutes.remove(graph.route.id))
       .rejects.toMatchObject({ data: { code: 'ROUTE_STILL_PUBLISHED' } })
-    await expect(platformProductService.remove(graph.product.id))
+    await expect(platformProductService.removeAndPublish(graph.product.id, null))
       .rejects.toMatchObject({ data: { code: 'PRODUCT_STILL_PUBLISHED' } })
-    await expect(platformProductService.removeVersion(graph.product.versions[0]!.id))
+    await expect(platformProductService.removeVersionAndPublish(graph.product.versions[0]!.id, null))
       .rejects.toMatchObject({ data: { code: 'VERSION_STILL_PUBLISHED' } })
     await expect(platformUpstreamService.removeAndPublish(graph.upstream.id, null))
       .rejects.toMatchObject({ data: { code: 'UPSTREAM_STILL_PUBLISHED' } })
@@ -1201,8 +1281,8 @@ describe('routing revision service', () => {
       version: 'v99', productId: crypto.randomUUID(),
       state: 'deprecated' as const, changelog: 'Keep this changelog'
     }
-    await platformProductService.update(original.product.id, groupPatch)
-    await platformProductService.updateVersion(original.version.id, versionPatch)
+    await platformProductService.updateAndPublish(original.product.id, groupPatch, null)
+    await platformProductService.updateVersionAndPublish(original.version.id, versionPatch, null)
 
     const second = await platformEndpointService.publish({
       upstreamServiceId: service.upstream.id, method: 'GET', path: '/v1/forecast'
@@ -1231,9 +1311,9 @@ describe('routing revision service', () => {
     }, null)
     const binding = await endpointRoutes.get(published.route.id)
     if (kind === 'group') {
-      await platformProductService.update(binding.product.id, { lifecycle: 'retired' })
+      await platformProductService.updateAndPublish(binding.product.id, { lifecycle: 'retired' }, null)
     } else {
-      await platformProductService.updateVersion(binding.version.id, { state: 'retired' })
+      await platformProductService.updateVersionAndPublish(binding.version.id, { state: 'retired' }, null)
     }
     await expect(platformEndpointService.publish({
       upstreamServiceId: service.upstream.id, method: 'GET', path: service.path
