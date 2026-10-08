@@ -768,6 +768,76 @@ describe('routing revision service', () => {
     expect((await platformRuntimeService.get()).activeRevisionId).toBeNull()
   })
 
+  it.each([false, true])('deletes a second discovered Upstream with staged endpoints = %s without changing live routes', async (staged) => {
+    const endpoints: ServiceEndpointSummary[] = Array.from({ length: 27 }, (_, index) => ({
+      method: 'GET', path: `/v1/duplicate/${index}`, operationId: `duplicate-${index}`,
+      summary: `Endpoint ${index}`, tags: [], system: false, support: false
+    }))
+    const support: ServiceEndpointSummary = {
+      ...endpoints[0]!, path: '/v1/duplicate/assets/{id}', operationId: 'assets', support: true
+    }
+    const original = await createDiscoveredService({ slug: 'original', endpoints: [...endpoints, support] })
+    for (const endpoint of endpoints) {
+      await platformEndpointService.publish({
+        upstreamServiceId: original.upstream.id, method: 'GET', path: endpoint.path
+      }, null, { publishRouting: false })
+    }
+    const live = await routingRevisionService.publish(null)
+    const added = await createDiscoveredService({ slug: 'added', endpoints: [...endpoints, support] })
+    expect((await platformEndpointService.list()).totals).toMatchObject({ discovered: 54, live: 27, available: 27, pending: 0 })
+
+    if (staged) {
+      for (const endpoint of endpoints) {
+        await platformEndpointService.publish({
+          upstreamServiceId: added.upstream.id, method: 'GET', path: endpoint.path
+        }, null, { publishRouting: false })
+      }
+      expect((await platformEndpointService.list()).totals).toMatchObject({ discovered: 54, live: 27, available: 0, pending: 27 })
+    }
+    const originalRoutes = await database.select().from(schema.apiRoutes)
+      .where(eq(schema.apiRoutes.upstreamServiceId, original.upstream.id))
+    const removed = await platformUpstreamService.removeAndPublish(added.upstream.id, null)
+
+    expect(removed.upstream).toMatchObject({ status: 'disabled', deletedAt: expect.any(Date) })
+    expect(removed.revision?.id).toBe(live.id)
+    expect(await currentPayload()).toEqual(live.configPayload)
+    expect(await database.select().from(schema.apiRoutes)
+      .where(eq(schema.apiRoutes.upstreamServiceId, original.upstream.id))).toEqual(originalRoutes)
+    const removedRoutes = await database.select().from(schema.apiRoutes)
+      .where(eq(schema.apiRoutes.upstreamServiceId, added.upstream.id))
+    expect(removedRoutes).toHaveLength(staged ? 28 : 0)
+    for (const route of removedRoutes) {
+      expect(route).toMatchObject({ state: 'disabled', deletedAt: removed.upstream.deletedAt })
+    }
+    const catalog = await platformEndpointService.list()
+    expect(catalog.services.map(service => service.upstream.id)).toEqual([original.upstream.id])
+    expect(catalog.totals).toMatchObject({ discovered: 27, live: 27, available: 0, pending: 0 })
+  })
+
+  it('removes retired endpoints and hidden support routes only after unpublishing is applied', async () => {
+    const endpoint: ServiceEndpointSummary = {
+      method: 'GET', path: '/v1/player', operationId: 'player', summary: 'Player', tags: [], system: false, support: false
+    }
+    const support = { ...endpoint, path: '/v1/player/assets/{id}', operationId: 'asset', support: true }
+    const service = await createDiscoveredService({ endpoints: [endpoint, support] })
+    const published = await platformEndpointService.publish({
+      upstreamServiceId: service.upstream.id, method: 'GET', path: endpoint.path
+    }, null)
+    await platformEndpointService.update(published.route.id, { enabled: false }, null, { publishRouting: false })
+    const pendingRoutes = await database.select().from(schema.apiRoutes)
+    await expect(platformUpstreamService.removeAndPublish(service.upstream.id, null))
+      .rejects.toMatchObject({ data: { code: 'UPSTREAM_STILL_PUBLISHED' } })
+    expect(await database.select().from(schema.apiRoutes)).toEqual(pendingRoutes)
+    expect((await platformUpstreamService.findById(service.upstream.id))?.deletedAt).toBeNull()
+
+    await routingRevisionService.publish(null)
+    await platformUpstreamService.removeAndPublish(service.upstream.id, null)
+    const removedRoutes = await database.select().from(schema.apiRoutes)
+    expect(removedRoutes).toHaveLength(2)
+    expect(removedRoutes.every(route => route.deletedAt && route.state === 'disabled')).toBe(true)
+    expect((await platformEndpointService.list()).services).toEqual([])
+  })
+
   it('protects every object referenced by the active revision from deletion', async () => {
     const graph = await createRoutingGraph({ productSlug: 'protected-graph' })
     await routingRevisionService.publish(null)

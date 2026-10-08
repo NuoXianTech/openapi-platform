@@ -137,7 +137,12 @@ async function removeUpstream(upstream: PlatformUpstream) {
         toast.add({ title: t('common.feedback.deleted'), color: 'success' })
         await refreshUpstreams()
       } catch (error: unknown) {
-        toast.add({ title: parseFetchError(error, t('common.feedback.deleteFailed')), color: 'error' })
+        toast.add({
+          title: parseFetchError(error, t('common.feedback.deleteFailed'), {
+            UPSTREAM_STILL_PUBLISHED: t('admin.apis.routing.deleteUpstream.stillPublished')
+          }),
+          color: 'error'
+        })
         throw error
       }
     }

@@ -2,6 +2,26 @@ import { describe, expect, it } from 'vitest'
 import { parseFetchError } from '~/utils/client-error'
 
 describe('parseFetchError', () => {
+  it('uses localized application codes before the raw API message or HTTP status', () => {
+    expect(parseFetchError({
+      data: {
+        message: 'upstream is still referenced by an active routing revision',
+        data: { code: 'UPSTREAM_STILL_PUBLISHED' }
+      },
+      statusCode: 409
+    }, '删除失败', { UPSTREAM_STILL_PUBLISHED: '请先下线接口并应用变更', 409: '操作冲突' }))
+      .toBe('请先下线接口并应用变更')
+  })
+
+  it('keeps the normal fallback for unmapped application codes', () => {
+    for (const code of ['UNKNOWN', 'toString']) {
+      expect(parseFetchError({
+        data: { message: 'Business error', data: { code } }
+      }, 'Delete failed', { UPSTREAM_STILL_PUBLISHED: 'Unpublish endpoints first' }))
+        .toBe('Business error')
+    }
+  })
+
   it('falls back for Zod type errors returned by the API', () => {
     expect(parseFetchError({ data: { message: '无效输入：期望 string，实际接收 数字' } }, '保存失败'))
       .toBe('保存失败')

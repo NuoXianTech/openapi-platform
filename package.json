@@ -16,6 +16,7 @@
     "typecheck": "nuxt typecheck",
     "lint": "eslint . --max-warnings 0",
     "test": "vitest run",
+    "test:postgres": "vitest run --config vitest.postgres.config.ts",
     "test:api-service": "vitest run --config vitest.api-service.config.ts",
     "test:integration": "vitest run --config vitest.integration.config.ts"
   },

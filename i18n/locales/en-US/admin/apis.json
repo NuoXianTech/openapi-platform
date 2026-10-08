@@ -245,7 +245,8 @@
         },
         "deleteUpstream": {
           "title": "Delete Upstream: {name}",
-          "description": "Only Upstreams without Routes and without references from the active runtime snapshot can be deleted."
+          "description": "This removes the upstream and its endpoints from the management lists, including any unapplied endpoint settings. If endpoints are still live, unpublish them in the endpoint catalog and apply the changes first.",
+          "stillPublished": "This upstream is still used by the current runtime snapshot. Unpublish its endpoints in the endpoint catalog and apply all changes before deleting the upstream."
         },
         "toggleUpstream": {
           "title": "Change Upstream state: {name}",

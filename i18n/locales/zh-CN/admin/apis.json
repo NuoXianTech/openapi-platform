@@ -245,7 +245,8 @@
         },
         "deleteUpstream": {
           "title": "删除 Upstream：{name}",
-          "description": "仅没有 Route 且未被活动运行快照引用的 Upstream 可以删除。"
+          "description": "删除后，该上游服务及其接口将从管理列表移除，未应用的接口设置也会一并删除。若仍有已上线接口，请先在接口目录中下线并应用变更。",
+          "stillPublished": "该上游服务仍被当前运行快照使用。请先在接口目录中下线该服务的接口并应用全部变更，再删除上游服务。"
         },
         "toggleUpstream": {
           "title": "确认切换 Upstream 状态：{name}",

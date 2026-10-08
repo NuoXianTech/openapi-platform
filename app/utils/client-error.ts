@@ -1,5 +1,5 @@
 interface FetchLikeError {
-  data?: { message?: unknown }
+  data?: { message?: unknown, data?: { code?: unknown } }
   statusCode?: number
   status?: number
   statusMessage?: unknown
@@ -16,10 +16,15 @@ function isZodTypeErrorMessage(message: string): boolean {
 export function parseFetchError(
   err: unknown,
   fallback: string,
-  codeMap?: Record<number, string>
+  codeMap?: Record<string | number, string>
 ): string {
   if (err && typeof err === 'object') {
     const e = err as FetchLikeError
+    const applicationCode = e.data?.data?.code
+    if (codeMap && typeof applicationCode === 'string'
+      && Object.hasOwn(codeMap, applicationCode)) {
+      return codeMap[applicationCode]!
+    }
     const dataMessage = e.data?.message
     if (typeof dataMessage === 'string' && dataMessage) {
       if (!isZodTypeErrorMessage(dataMessage)) return dataMessage

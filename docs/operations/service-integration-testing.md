@@ -158,4 +158,24 @@ pnpm build
 
 测试数量会随功能变化，不应在文档中固定具体文件或用例数量。
 
+### PostgreSQL 删除并发验证
+
+`pnpm test` 在 PGlite 中验证真实 HTTP 发现响应迟到、删除后的成功或失败结果隔离，以及支撑 Route 清理。
+`pnpm test:postgres` 使用同一组行为测试，并增加真实 PostgreSQL 多连接行锁场景：
+发现持锁时删除等待、发布先完成时拒绝删除、删除先完成时发布不能恢复已删除 Route。
+测试通过数据库阻塞关系确认交错顺序，不依赖固定延时猜测执行进度。
+
+本地准备独立的 PostgreSQL 测试实例，通过 `TEST_POSTGRES_URL` 指定连接；不读取应用的 `DATABASE_URL`。
+测试账号需要创建和删除数据库的权限。测试会创建随机命名的临时数据库，在其中迁移、运行和清理；
+连接 URL 指向的数据库不参与迁移或清空。结束后删除本次创建的数据库，异常中断时可能留下 `upstream_test_` 前缀的测试数据库。
+
+```powershell
+$env:TEST_POSTGRES_URL = 'postgres://postgres:test-password@127.0.0.1:5432/postgres'
+pnpm test:postgres
+```
+
+这组测试不需要构建产物或运行 `openapi-service`，HTTP Target 由测试在本机临时端口提供。
+未配置 `TEST_POSTGRES_URL` 时该专用命令会明确失败；普通 `pnpm test` 跳过真实 PostgreSQL 行锁场景。
+质量工作流使用 PostgreSQL 17 容器运行该门禁。
+
 GitHub Actions 的日常质量工作流只检出 `openapi-service` 的 `main`，以保持 PR 反馈速度。两个仓库各自的 `compatibility` 工作流按周或手动解析对方最新正式 Release，并运行同一套真实链路测试；发布前可手动触发该工作流。两者不要求使用相同版本号，也不建立发布绑定关系。业务 `/v1`、`/v2` 路径由 OpenAPI 发现，和控制协议版本分别验证。

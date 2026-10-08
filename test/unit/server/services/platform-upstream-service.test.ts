@@ -144,6 +144,22 @@ async function createActiveRoute(upstreamServiceId: string) {
 }
 
 describe('Platform upstream target state', () => {
+  it('rolls back Upstream deletion and Route cleanup when publication fails', async () => {
+    const target = await createConfiguredTarget()
+    await createActiveRoute(target.upstreamServiceId)
+    const upstream = await platformUpstreamService.findById(target.upstreamServiceId)
+    const routes = await database.select().from(schema.apiRoutes)
+    vi.spyOn(revisionCompiler, 'compileRoutingRevision').mockImplementationOnce(() => {
+      throw new Error('publication failed')
+    })
+
+    await expect(platformUpstreamService.removeAndPublish(target.upstreamServiceId, null))
+      .rejects.toThrow('publication failed')
+    expect(await platformUpstreamService.findById(target.upstreamServiceId)).toEqual(upstream)
+    expect(await database.select().from(schema.apiRoutes)).toEqual(routes)
+    expect((await platformRuntimeService.get()).activeRevisionId).toBeNull()
+  })
+
   it.each(['disable', 'remove'] as const)('protects the live last Target from %s until the pending Route disable is applied', async (operation) => {
     const target = await createConfiguredTarget()
     await createActiveRoute(target.upstreamServiceId)

@@ -104,6 +104,19 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 30
 
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_PASSWORD: upstream-test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
     steps:
       - name: Check out source
         uses: actions/checkout@v7
@@ -133,6 +146,11 @@ jobs:
 
       - name: Run unit test suite
         run: pnpm test
+
+      - name: Verify PostgreSQL deletion concurrency
+        env:
+          TEST_POSTGRES_URL: postgres://postgres:upstream-test@127.0.0.1:5432/postgres
+        run: pnpm test:postgres
 
       - name: Check out API Service main
         uses: actions/checkout@v7

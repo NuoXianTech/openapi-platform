@@ -120,7 +120,13 @@ async function updateUpstream(tx: DatabaseTransaction, id: string, input: Update
 }
 
 async function removeUpstream(tx: DatabaseTransaction, id: string) {
-  const service = await platformUpstreamService.findById(id, { transaction: tx })
+  // Serialize deletion with discovery before cleaning up its Route definitions.
+  const row = firstRow(await tx.select({ service: upstreamServices }).from(upstreamServices)
+    .innerJoin(upstreamServiceConnections, eq(upstreamServiceConnections.upstreamServiceId, upstreamServices.id))
+    .where(eq(upstreamServices.id, id))
+    .limit(1)
+    .for('update'))
+  const service = row?.service
   if (!service || service.deletedAt) {
     throw createApplicationError({ statusCode: 404, message: 'upstream not found', data: { code: 'UPSTREAM_NOT_FOUND' } })
   }
@@ -131,16 +137,14 @@ async function removeUpstream(tx: DatabaseTransaction, id: string) {
       data: { code: 'UPSTREAM_STILL_PUBLISHED' }
     })
   }
-  const routeCount = firstRow(await tx.select({ value: count() }).from(apiRoutes)
-    .where(and(eq(apiRoutes.upstreamServiceId, id), isNull(apiRoutes.deletedAt))))
-  if (Number(routeCount?.value ?? 0) > 0) {
-    throw createApplicationError({
-      statusCode: 409,
-      message: 'remove every route before deleting the upstream',
-      data: { code: 'UPSTREAM_HAS_ROUTES' }
-    })
-  }
   const now = new Date()
+  // Unapplied and retired Routes, including hidden support Routes, belong to
+  // this Upstream. Retain their history without requiring individual deletion.
+  await tx.update(apiRoutes).set({
+    state: 'disabled',
+    deletedAt: now,
+    updatedAt: now
+  }).where(and(eq(apiRoutes.upstreamServiceId, id), isNull(apiRoutes.deletedAt)))
   const removed = firstRow(await tx.update(upstreamServices).set({
     status: 'disabled',
     deletedAt: now,
