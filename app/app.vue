@@ -38,7 +38,10 @@ if (import.meta.client) {
 
 <template>
   <UTheme :ui="themeUi">
-    <UApp :locale="uiLocale">
+    <UApp
+      :locale="uiLocale"
+      :toaster="{ position: 'bottom-right', max: 3, progress: false }"
+    >
       <NuxtLoadingIndicator
         color="#18181b"
         :height="3"

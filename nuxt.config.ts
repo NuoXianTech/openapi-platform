@@ -52,6 +52,11 @@ export default defineNuxtConfig({
   },
 
   css: ['~/assets/css/main.css'],
+  imports: {
+    // Apply shared feedback defaults to existing callers while the wrapper
+    // explicitly imports Nuxt UI's native store and lifecycle.
+    imports: [{ name: 'useToast', from: '~/composables/use-toast', priority: 10 }]
+  },
   ui: {
     fonts: false,
     experimental: {

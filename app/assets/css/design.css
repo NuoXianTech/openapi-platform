@@ -55,12 +55,52 @@
   box-shadow: var(--ui-floating-shadow);
 }
 
+.design-toast {
+  box-shadow: var(--ui-floating-shadow);
+}
+
+.design-toast:not(:has([data-slot="description"], [data-slot="wrapper"] [data-slot="actions"])) {
+  align-items: center;
+}
+
+.design-toast:not(:has([data-slot="description"], [data-slot="wrapper"] [data-slot="actions"])) > [data-slot="icon"] {
+  margin-top: 0;
+}
+
+.design-toaster {
+  right: max(16px, env(safe-area-inset-right));
+  bottom: max(16px, env(safe-area-inset-bottom));
+}
+
+/* Let expanded messages reflow when text wraps or the viewport changes.
+   Nuxt UI's cached mount heights still serve its optional collapsed mode. */
+.design-toaster[data-expanded="true"] {
+  height: auto;
+  gap: 16px;
+}
+
+.design-toast[data-expanded="true"] {
+  --translate-factor: 0px;
+  position: relative;
+  inset: auto;
+  transform: none;
+}
+
+@media (min-width: 640px) {
+  .design-toaster {
+    right: max(24px, env(safe-area-inset-right));
+    bottom: max(24px, env(safe-area-inset-bottom));
+  }
+}
+
 .public-page :focus-visible,
 .dashboard-shell :focus-visible,
 .dashboard-sidebar-panel :focus-visible,
 .design-form-control:focus-visible,
 .design-slideover[role="dialog"] :focus-visible,
 .design-button:focus-visible,
+.design-toast:focus-visible,
+.design-toast :focus-visible,
 .design-floating-panel :focus-visible,
 .design-dialog[role="dialog"] :focus-visible {
   outline: 2px solid var(--ui-ring);
@@ -73,6 +113,11 @@
 }
 
 @media (pointer: coarse) {
+  .design-toast [data-slot="close"] {
+    width: 44px;
+    height: 44px;
+  }
+
   .design-button {
     min-width: 44px;
     min-height: 44px;

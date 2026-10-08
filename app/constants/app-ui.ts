@@ -14,7 +14,24 @@ export const appUi = {
   slideover: { slots: { content: 'design-slideover' } },
   popover: { slots: { content: 'design-floating-panel' } },
   dropdownMenu: { slots: { content: 'design-floating-panel' } },
-  tooltip: { slots: { content: 'design-floating-panel' } }
+  tooltip: { slots: { content: 'design-floating-panel' } },
+  toast: {
+    slots: {
+      root: 'design-toast bg-elevated rounded-xl border border-default ring-0 p-4 gap-3',
+      wrapper: 'min-w-0',
+      title: 'text-sm/6 font-medium text-highlighted wrap-anywhere',
+      description: 'text-[13px]/5 text-default wrap-anywhere',
+      icon: 'size-5 mt-0.5',
+      actions: 'flex-wrap',
+      close: 'size-6 shrink-0 rounded-md p-0 justify-center text-muted hover:text-highlighted hover:bg-muted focus-visible:ring-2 focus-visible:ring-(--ui-ring)'
+    }
+  },
+  toaster: {
+    slots: {
+      viewport: 'design-toaster sm:w-[380px]',
+      base: 'design-toast-motion'
+    }
+  }
 } as const
 
 export type AppTheme = 'public' | 'auth' | 'dashboard'
