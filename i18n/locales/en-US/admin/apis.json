@@ -391,7 +391,11 @@
             "required": "This setting is required",
             "invalid": "The setting value is invalid",
             "minLength": "Use at least {count} characters",
-            "maxLength": "Use at most {count} characters"
+            "maxLength": "Use at most {count} characters",
+            "minimum": "Enter a value of at least {value}",
+            "maximum": "Enter a value of at most {value}",
+            "step": "Use increments of {step} starting at {base}",
+            "unsupportedOption": "Choose from the available options"
           }
         },
         "catalog": {

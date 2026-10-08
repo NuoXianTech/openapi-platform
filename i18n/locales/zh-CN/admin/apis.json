@@ -391,7 +391,11 @@
             "required": "此配置项不能为空",
             "invalid": "配置值格式不正确",
             "minLength": "至少需要 {count} 个字符",
-            "maxLength": "最多允许 {count} 个字符"
+            "maxLength": "最多允许 {count} 个字符",
+            "minimum": "请输入不小于 {value} 的数值",
+            "maximum": "请输入不大于 {value} 的数值",
+            "step": "请从 {base} 起按 {step} 的步长取值",
+            "unsupportedOption": "请从当前可用的选项中选择"
           }
         },
         "catalog": {

@@ -1,7 +1,8 @@
 import { effectScope, nextTick, ref } from 'vue'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { ServiceConfigurationView } from '#shared/types/service-control'
+import type { ServiceConfigurationField, ServiceConfigurationValue, ServiceConfigurationView } from '#shared/types/service-control'
 import { useAdminServiceConfigurationForm } from '@/composables/admin/use-admin-service-configuration-form'
+import { prepareServiceConfiguration, publicStoredServiceConfiguration, ServiceConfigurationValueError } from '~~/server/utils/service-configuration-values'
 
 let scope = effectScope()
 
@@ -80,6 +81,112 @@ beforeEach(() => {
 afterEach(() => {
   scope.stop()
   vi.unstubAllGlobals()
+})
+
+describe('field rules through the form and server preparation interfaces', () => {
+  const numberField = { key: 'sample', label: 'Sample', type: 'number', default: 3, minimum: 1, maximum: 9, step: 2 } satisfies ServiceConfigurationField
+  const textField = { key: 'sample', label: 'Sample', type: 'text', default: 'abc', minLength: 2, maxLength: 4 } satisfies ServiceConfigurationField
+  const selectField = { key: 'sample', label: 'Sample', type: 'single-select', default: 'a', options: [{ label: 'A', value: 'a' }] } satisfies ServiceConfigurationField
+
+  function setupField(field: ServiceConfigurationField, value: ServiceConfigurationValue | { configured: boolean }) {
+    const initial = createView()
+    initial.definition = { schemaVersion: 1, groups: [{ key: 'general', label: 'General', fields: [field] }] }
+    initial.values = { sample: value }
+    return { ...setup(initial), definition: initial.definition }
+  }
+
+  const invalidCases = [
+    { name: 'below minimum', field: numberField, value: 0, message: 'minimum:{"value":1}' },
+    { name: 'above maximum', field: numberField, value: 10, message: 'maximum:{"value":9}' },
+    { name: 'step anchored at the minimum', field: numberField, value: 2, message: 'step:{"step":2,"base":1}' },
+    { name: 'step anchored at zero', field: { ...numberField, minimum: undefined }, value: 3, message: 'step:{"step":2,"base":0}' },
+    { name: 'NaN', field: numberField, value: Number.NaN, message: 'invalid' },
+    { name: 'infinite number', field: numberField, value: Number.POSITIVE_INFINITY, message: 'invalid' },
+    { name: 'string instead of number', field: numberField, value: '3', message: 'invalid' },
+    { name: 'string instead of boolean', field: { key: 'sample', label: 'Sample', type: 'boolean', default: false }, value: 'true', message: 'invalid' },
+    { name: 'number instead of text', field: textField, value: 3, message: 'invalid' },
+    { name: 'required text', field: { ...textField, required: true }, value: '', message: 'required' },
+    { name: 'optional text minimum length', field: textField, value: '', message: 'minLength:{"count":2}' },
+    { name: 'text maximum length', field: textField, value: 'abcde', message: 'maxLength:{"count":4}' },
+    { name: 'textarea length', field: { ...textField, type: 'textarea' }, value: 'a', message: 'minLength:{"count":2}' },
+    { name: 'removed single-select option', field: selectField, value: 'removed', message: 'unsupportedOption' },
+    { name: 'wrong single-select type', field: selectField, value: ['a'], message: 'invalid' },
+    { name: 'removed multi-select option', field: { ...selectField, type: 'multi-select', default: ['a'] }, value: ['removed'], message: 'unsupportedOption' },
+    { name: 'wrong multi-select type', field: { ...selectField, type: 'multi-select', default: ['a'] }, value: 'a', message: 'invalid' },
+    { name: 'required multi-select', field: { ...selectField, type: 'multi-select', default: ['a'], required: true }, value: [], message: 'required' }
+  ] satisfies Array<{ name: string, field: ServiceConfigurationField, value: ServiceConfigurationValue, message: string }>
+
+  it.each(invalidCases)('rejects $name from a saved view in both interfaces', ({ field, value, message }) => {
+    const { form, definition } = setupField(field, value)
+    expect(form.validate()).toEqual([{ name: 'sample', message: `admin.apis.routing.serviceControl.validation.${message}` }])
+    expect(() => prepareServiceConfiguration({
+      definition, schemaSha256: 'a'.repeat(64), stored: { values: {}, secrets: {} },
+      valueUpdates: form.payload().values, secretUpdates: form.payload().secrets
+    })).toThrow(ServiceConfigurationValueError)
+  })
+
+  const validCases = [
+    { name: 'minimum', field: numberField, value: 1, normalized: 1 },
+    { name: 'maximum', field: numberField, value: 9, normalized: 9 },
+    { name: 'decimal step', field: { ...numberField, minimum: 0.1, maximum: 1, step: 0.1 }, value: 0.3, normalized: 0.3 },
+    { name: 'false boolean', field: { key: 'sample', label: 'Sample', type: 'boolean', default: true }, value: false, normalized: false },
+    { name: 'text at minimum length', field: textField, value: 'ab', normalized: 'ab' },
+    { name: 'textarea at maximum length', field: { ...textField, type: 'textarea' }, value: 'abcd', normalized: 'abcd' },
+    { name: 'single selection', field: selectField, value: 'a', normalized: 'a' },
+    { name: 'duplicate selections', field: { ...selectField, type: 'multi-select', default: ['a'] }, value: ['a', 'a'], normalized: ['a'] },
+    { name: 'empty optional selection', field: { ...selectField, type: 'multi-select', default: ['a'] }, value: [], normalized: [] }
+  ] satisfies Array<{ name: string, field: ServiceConfigurationField, value: ServiceConfigurationValue, normalized: ServiceConfigurationValue }>
+
+  it.each(validCases)('accepts $name and prepares it without changing the draft', ({ field, value, normalized }) => {
+    const { form, definition } = setupField(field, value)
+    expect(form.validate()).toEqual([])
+    const prepared = prepareServiceConfiguration({
+      definition, schemaSha256: 'a'.repeat(64), stored: { values: {}, secrets: {} },
+      valueUpdates: form.payload().values, secretUpdates: {}
+    })
+    expect(prepared.values).toEqual({ sample: normalized })
+    expect(prepared.publicValues).toEqual({ sample: normalized })
+    expect(form.payload().values).toEqual({ sample: value })
+  })
+
+  it('keeps saved Secrets opaque and validates only replacements and explicit clears in the browser', () => {
+    vi.stubGlobal('useRuntimeConfig', () => ({ apiKeySecret: '0123456789abcdef0123456789abcdef' }))
+    const field = { key: 'sample', label: 'Sample', type: 'secret', required: true, minLength: 4, maxLength: 10 } as const
+    const { form, definition, view } = setupField(field, { configured: true })
+    const input = { definition, schemaSha256: 'a'.repeat(64), stored: { values: {}, secrets: {} }, valueUpdates: {}, secretUpdates: {} }
+    const original = prepareServiceConfiguration({ ...input, secretUpdates: { sample: 'old-secret' } })
+    const stored = original.toStoredValues()
+    expect(form.validate()).toEqual([])
+    expect(form.payload().secrets).toEqual({})
+    expect(form.secretValues.sample).toBe('')
+    expect(publicStoredServiceConfiguration(definition, stored)).toEqual(view.value.values)
+    expect(prepareServiceConfiguration({ ...input, stored }).hash).toBe(original.hash)
+
+    form.setSecret('sample', 'bad')
+    expect(form.validate()[0]?.message).toBe('admin.apis.routing.serviceControl.validation.minLength:{"count":4}')
+    expect(() => prepareServiceConfiguration({ ...input, stored, secretUpdates: form.payload().secrets })).toThrow(ServiceConfigurationValueError)
+    form.setSecret('sample', 'far-too-long-secret')
+    expect(form.validate()[0]?.message).toBe('admin.apis.routing.serviceControl.validation.maxLength:{"count":10}')
+    expect(() => prepareServiceConfiguration({ ...input, stored, secretUpdates: form.payload().secrets })).toThrow(ServiceConfigurationValueError)
+    form.setSecret('sample', 'new-secret')
+    expect(form.validate()).toEqual([])
+    expect(prepareServiceConfiguration({ ...input, stored, secretUpdates: form.payload().secrets }).values.sample).toBe('new-secret')
+    form.clearSecret('sample')
+    expect(form.validate()[0]?.message).toBe('admin.apis.routing.serviceControl.validation.required')
+    expect(() => prepareServiceConfiguration({ ...input, stored, secretUpdates: form.payload().secrets })).toThrow(ServiceConfigurationValueError)
+    form.keepSecret('sample')
+    expect(form.validate()).toEqual([])
+    expect(form.payload().secrets).toEqual({})
+  })
+
+  it('applies minimum length to an absent optional Secret just as server preparation does', () => {
+    const field = { key: 'sample', label: 'Sample', type: 'secret', minLength: 4 } as const
+    const { form, definition } = setupField(field, { configured: false })
+    expect(form.validate()[0]?.message).toBe('admin.apis.routing.serviceControl.validation.minLength:{"count":4}')
+    expect(() => prepareServiceConfiguration({
+      definition, schemaSha256: 'a'.repeat(64), stored: { values: {}, secrets: {} }, valueUpdates: {}, secretUpdates: {}
+    })).toThrow(ServiceConfigurationValueError)
+  })
 })
 
 describe('service configuration form', () => {

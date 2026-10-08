@@ -8,6 +8,7 @@ import type {
 } from '#shared/types/service-control'
 import { decryptStoredSecret, encryptStoredSecret } from '~~/server/utils/stored-secret'
 import { canonicalJson } from '~~/server/utils/canonical-json'
+import { parseServiceConfigurationField } from '#shared/utils/service-configuration-field'
 
 export class ServiceConfigurationValueError extends Error {
   constructor(
@@ -121,7 +122,9 @@ export function normalizeServiceConfigurationValues(
     const value = Object.hasOwn(input, field.key)
       ? input[field.key]
       : baseValues[field.key]
-    normalized[field.key] = normalizeFieldValue(field, value)
+    const result = parseServiceConfigurationField(field, value)
+    if (!result.valid) throw new ServiceConfigurationValueError(field.key, result.message)
+    normalized[field.key] = result.value
   }
   return normalized
 }
@@ -133,99 +136,6 @@ export function calculateServiceConfigurationHash(
   return createHash('sha256')
     .update(canonicalJson({ schemaSha256, values }))
     .digest('hex')
-}
-
-function normalizeFieldValue(
-  field: ServiceConfigurationField,
-  value: unknown
-): ServiceConfigurationValue {
-  switch (field.type) {
-    case 'boolean':
-      if (typeof value !== 'boolean') throw invalidType(field, 'boolean')
-      return value
-    case 'number': {
-      if (typeof value !== 'number' || !Number.isFinite(value)) {
-        throw invalidType(field, 'finite number')
-      }
-      if (field.minimum !== undefined && value < field.minimum) {
-        throw invalidValue(field, `must be at least ${field.minimum}`)
-      }
-      if (field.maximum !== undefined && value > field.maximum) {
-        throw invalidValue(field, `must be at most ${field.maximum}`)
-      }
-      if (field.step !== undefined) {
-        const steps = (value - (field.minimum ?? 0)) / field.step
-        if (Math.abs(steps - Math.round(steps)) > Number.EPSILON * 16) {
-          throw invalidValue(field, `must use step ${field.step}`)
-        }
-      }
-      return value
-    }
-    case 'text':
-    case 'textarea':
-    case 'secret':
-      return normalizeText(field, value)
-    case 'single-select':
-      if (typeof value !== 'string') throw invalidType(field, 'string')
-      if (!field.options.some(option => option.value === value)) {
-        throw invalidValue(field, 'contains an unsupported option')
-      }
-      return value
-    case 'multi-select': {
-      if (!Array.isArray(value) || value.some(item => typeof item !== 'string')) {
-        throw invalidType(field, 'string array')
-      }
-      const allowed = new Set(field.options.map(option => option.value))
-      const unique = Array.from(new Set(value as string[]))
-      if (unique.some(item => !allowed.has(item))) {
-        throw invalidValue(field, 'contains an unsupported option')
-      }
-      if (field.required && unique.length === 0) {
-        throw invalidValue(field, 'is required')
-      }
-      return unique
-    }
-  }
-}
-
-function normalizeText(
-  field: Extract<
-    ServiceConfigurationField,
-    { type: 'text' | 'textarea' | 'secret' }
-  >,
-  value: unknown
-): string {
-  if (typeof value !== 'string') throw invalidType(field, 'string')
-  if (field.required && value.length === 0) {
-    throw invalidValue(field, 'is required')
-  }
-  if (field.minLength !== undefined && value.length < field.minLength) {
-    throw invalidValue(
-      field,
-      `must contain at least ${field.minLength} characters`
-    )
-  }
-  if (field.maxLength !== undefined && value.length > field.maxLength) {
-    throw invalidValue(
-      field,
-      `must contain at most ${field.maxLength} characters`
-    )
-  }
-  return value
-}
-
-function invalidType(field: ServiceConfigurationField, expected: string) {
-  return new ServiceConfigurationValueError(
-    field.key,
-    `${field.key} must be a ${expected}`
-  )
-}
-
-function invalidValue(field: ServiceConfigurationField, message: string) {
-  return new ServiceConfigurationValueError(
-    field.key,
-    `${field.key} ${message}`
-  )
 }
 
 export interface PreparedServiceConfiguration {

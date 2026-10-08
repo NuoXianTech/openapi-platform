@@ -5,6 +5,7 @@ import type {
   ServiceConfigurationValue,
   ServiceConfigurationView
 } from '#shared/types/service-control'
+import { parseServiceConfigurationField } from '#shared/utils/service-configuration-field'
 
 export interface ServiceConfigurationFormPayload {
   expectedRevision: number
@@ -137,38 +138,16 @@ export function useAdminServiceConfigurationForm(getView: () => ServiceConfigura
   }
 
   function validateField(field: ServiceConfigurationField): string | null {
-    if (field.type === 'secret') {
-      const value = secretValues[field.key] ?? ''
-      const preserved = secretConfigured(field.key) && !secretDirty[field.key]
-      if (field.required && !preserved && (!value || secretCleared[field.key])) {
-        return t('admin.apis.routing.serviceControl.validation.required')
-      }
-      if (value && field.minLength !== undefined && value.length < field.minLength) {
-        return t('admin.apis.routing.serviceControl.validation.minLength', { count: field.minLength })
-      }
-      if (value && field.maxLength !== undefined && value.length > field.maxLength) {
-        return t('admin.apis.routing.serviceControl.validation.maxLength', { count: field.maxLength })
-      }
-      return null
-    }
-    const value = values[field.key]
-    if (field.type === 'text' || field.type === 'textarea') {
-      if (typeof value !== 'string') return t('admin.apis.routing.serviceControl.validation.invalid')
-      if (field.required && !value) return t('admin.apis.routing.serviceControl.validation.required')
-      if (field.minLength !== undefined && value.length < field.minLength) {
-        return t('admin.apis.routing.serviceControl.validation.minLength', { count: field.minLength })
-      }
-      if (field.maxLength !== undefined && value.length > field.maxLength) {
-        return t('admin.apis.routing.serviceControl.validation.maxLength', { count: field.maxLength })
-      }
-    }
-    if (field.type === 'number' && (typeof value !== 'number' || !Number.isFinite(value))) {
-      return t('admin.apis.routing.serviceControl.validation.invalid')
-    }
-    if (field.type === 'multi-select' && field.required && (!Array.isArray(value) || value.length === 0)) {
-      return t('admin.apis.routing.serviceControl.validation.required')
-    }
-    return null
+    // The browser knows only whether a saved Secret exists. Its plaintext and
+    // validation against a changed schema remain the server's responsibility.
+    if (field.type === 'secret' && secretConfigured(field.key) && !secretDirty[field.key]) return null
+    const value = field.type === 'secret'
+      ? secretCleared[field.key] ? '' : secretValues[field.key] ?? ''
+      : values[field.key]
+    const result = parseServiceConfigurationField(field, value)
+    if (result.valid) return null
+    const key = `admin.apis.routing.serviceControl.validation.${result.code}` as const
+    return result.params ? t(key, result.params) : t(key)
   }
 
   function validate(): FormError<string>[] {
