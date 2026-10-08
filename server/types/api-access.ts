@@ -33,23 +33,7 @@ export interface ApiCreditReservationContext {
   amount: number
 }
 
-interface ApiGateRejectionContext {
-  outcome: GateOutcome
-  errorCode: string
-  errorMessage: string
-  apiKeyId: number | null
-  apiKeyName: string | null
-  apiKeyUserId: number | null
-}
-
-interface ApiFailureContext {
-  errorCode: string
-  errorMessage: string | null
-}
-
 export interface AppEventContext {
-  apiGateRejection?: ApiGateRejectionContext
-  apiFailure?: ApiFailureContext
   requestId?: string
   publicRequestProtocol?: 'http' | 'https'
 }

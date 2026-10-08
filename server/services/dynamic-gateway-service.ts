@@ -107,10 +107,7 @@ function captureUpstreamFailure(event: H3Event, response: Response): void {
   if (response.status < 400) return
   const errorCode = response.headers.get('x-openapi-error-code')?.trim() ?? ''
   if (!UPSTREAM_ERROR_CODE_PATTERN.test(errorCode)) return
-  getAppEventContext(event).apiFailure = {
-    errorCode,
-    errorMessage: null
-  }
+  gatewayCallService.fail(event, errorCode, null)
 }
 
 function gatewayFailureResult(
@@ -120,6 +117,7 @@ function gatewayFailureResult(
   message: string,
   error: unknown
 ): DynamicGatewayResult {
+  gatewayCallService.fail(event, code, message)
   if (code === 'UPSTREAM_UNAVAILABLE' || code === 'UPSTREAM_TIMEOUT') {
     setResponseHeader(event, 'Retry-After', UPSTREAM_RETRY_AFTER_SECONDS)
   }
@@ -128,10 +126,6 @@ function gatewayFailureResult(
       matched: true,
       response: gatewayFail(event, status, code, message)
     }
-  }
-  getAppEventContext(event).apiFailure = {
-    errorCode: code,
-    errorMessage: message
   }
   event.node.res.statusCode = status
   event.node.res.destroy(error instanceof Error ? error : undefined)

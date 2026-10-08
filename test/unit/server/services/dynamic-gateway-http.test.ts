@@ -34,7 +34,10 @@ const upstream = createServer((req, res) => upstreamHandler(req, res))
 await new Promise<void>(resolve => upstream.listen(0, '127.0.0.1', resolve))
 const upstreamBaseUrl = `http://127.0.0.1:${(upstream.address() as { port: number }).port}`
 const app = createApp()
-app.use(eventHandler(async event => (await dynamicGatewayService.tryHandle(event)).response))
+app.use(eventHandler(async event => {
+  lastEvent = event
+  return (await dynamicGatewayService.tryHandle(event)).response
+}))
 const gateway = createServer(toNodeListener(app))
 await new Promise<void>(resolve => gateway.listen(0, '127.0.0.1', resolve))
 const url = `http://127.0.0.1:${(gateway.address() as { port: number }).port}/v1/stream`
@@ -248,6 +251,10 @@ describe('gateway over HTTP', () => {
     await response.arrayBuffer()
     expect(mocks.resolve).toHaveBeenCalledOnce()
     expect(mocks.authorize).not.toHaveBeenCalled()
+    await gatewayCallService.complete(lastEvent)
+    expect(mocks.record).not.toHaveBeenCalled()
+    expect(mocks.addCall).not.toHaveBeenCalled()
+    expect(mocks.usage).not.toHaveBeenCalled()
   })
 
   it('returns unavailable instead of a missing route when the routing read fails', async () => {
@@ -257,6 +264,9 @@ describe('gateway over HTTP', () => {
     expect(await response.json()).toMatchObject({ code: 'ROUTING_RUNTIME_UNAVAILABLE' })
     expect(mocks.resolve).toHaveBeenCalledOnce()
     expect(mocks.authorize).not.toHaveBeenCalled()
+    await gatewayCallService.complete(lastEvent)
+    expect(mocks.record).not.toHaveBeenCalled()
+    expect(mocks.addCall).not.toHaveBeenCalled()
   })
 
   it.each(['success', 'deadline', 'disconnect'] as const)('cleans up a timed-out first Target and a streaming replacement on %s', async (ending) => {
@@ -345,6 +355,26 @@ describe('gateway over HTTP', () => {
     expect(mocks.record).toHaveBeenCalledOnce()
   })
 
+  it.each(['BUSINESS_UNAVAILABLE', 'untrusted lowercase', ''])(
+    'records only a valid upstream error code through completed HTTP calls (%s)', async (code) => {
+      upstreamHandler = (_req, res) => {
+        res.statusCode = 422
+        if (code) res.setHeader('x-openapi-error-code', code)
+        res.end('business-error')
+      }
+      const response = await fetch(url)
+      expect(response.status).toBe(422)
+      expect(await response.text()).toBe('business-error')
+      await gatewayCallService.complete(lastEvent)
+      expect(mocks.record).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
+        errorCode: code === 'BUSINESS_UNAVAILABLE' ? code : null,
+        errorMessage: null, statusCode: 422, isCounted: true
+      }))
+      expect(mocks.usage).toHaveBeenCalledOnce()
+      expect(mocks.finalize).not.toHaveBeenCalled()
+    }
+  )
+
   it('retries a failed error-path release during completion without recording twice', async () => {
     vi.spyOn(console, 'error').mockImplementation(() => undefined)
     mocks.release.mockRejectedValueOnce(new Error('release temporarily unavailable'))
@@ -395,6 +425,10 @@ describe('gateway over HTTP', () => {
     expect(body).toMatchObject({ code: 'BILLING_UNAVAILABLE', data: null })
     expect(JSON.stringify(body)).not.toContain('paid-result')
     expect(mocks.release).toHaveBeenCalledOnce()
+    await gatewayCallService.complete(lastEvent)
+    expect(mocks.record).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
+      errorCode: 'BILLING_UNAVAILABLE', statusCode: 503, isCounted: true
+    }))
   })
 
   it('rejects a late oversized chunk without exposing the paid prefix', async () => {
@@ -424,7 +458,10 @@ describe('gateway over HTTP', () => {
     await gatewayCallService.release(lastEvent)
     expect(mocks.release).toHaveBeenCalledExactlyOnceWith(11, 7)
     expect(lastEvent.node.res.statusCode).toBe(499)
-    expect(lastEvent.context.apiFailure).toMatchObject({ errorCode: 'CLIENT_DISCONNECTED' })
+    await gatewayCallService.complete(lastEvent)
+    expect(mocks.record).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
+      errorCode: 'CLIENT_DISCONNECTED', statusCode: 499, isCounted: true
+    }))
   })
 
   it('releases failed calls without creating a settlement intent', async () => {
@@ -478,5 +515,31 @@ describe('gateway over HTTP', () => {
     expect(new TextDecoder().decode((await reader.read()).value)).toBe('last')
     expect((await reader.read()).done).toBe(true)
     expect(mocks.mark).not.toHaveBeenCalled()
+  })
+
+  it('records a late delivery failure over an upstream error after headers have been sent', async () => {
+    match.route.creditsCost = 0
+    match.route.maxResponseBytes = 8
+    let upstreamResponse: ServerResponse | undefined
+    upstreamHandler = (_req, res) => {
+      upstreamResponse = res
+      res.statusCode = 422
+      res.setHeader('x-openapi-error-code', 'BUSINESS_FAILURE')
+      res.write('first')
+    }
+    const response = await fetch(url)
+    expect(response.status).toBe(422)
+    const reader = response.body!.getReader()
+    expect(new TextDecoder().decode((await reader.read()).value)).toBe('first')
+    const interrupted = expect(reader.read()).rejects.toThrow()
+    upstreamResponse!.end('oversized-tail')
+    await interrupted
+    await vi.waitFor(() => expect(lastEvent.node.res.statusCode).toBe(502))
+    await gatewayCallService.complete(lastEvent)
+    expect(mocks.record).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
+      errorCode: 'UPSTREAM_RESPONSE_TOO_LARGE', statusCode: 502, isCounted: true
+    }))
+    expect(mocks.mark).not.toHaveBeenCalled()
+    expect(mocks.finalize).not.toHaveBeenCalled()
   })
 })

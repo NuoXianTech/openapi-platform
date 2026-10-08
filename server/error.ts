@@ -1,6 +1,7 @@
 import type { H3Error } from 'h3'
 import { getRequestURL, send } from 'h3'
 import { defineNitroErrorHandler } from 'nitropack/runtime'
+import { gatewayCallService } from '~~/server/services/dynamic-gateway-call-service'
 import { gatewayFail } from '~~/server/utils/gateway-response'
 import { isReservedPlatformPath } from '~~/server/utils/route-pattern'
 
@@ -41,6 +42,7 @@ export default defineNitroErrorHandler(function handlePublicApiRouteError(error:
     ? error.statusCode
     : 500
   const fallback = resolveKnownError(error) ?? resolvePublicError(status)
+  gatewayCallService.fail(event, fallback.code, fallback.message)
   const response = gatewayFail(event, status, fallback.code, fallback.message)
   return send(event, JSON.stringify(response), 'application/json')
 })

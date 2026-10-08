@@ -1,7 +1,7 @@
 import type { H3Event } from 'h3'
 import { getHeader, getRequestURL } from 'h3'
 import type { ResolvedDynamicRoute } from '~~/server/services/routing-runtime-service'
-import type { ApiCreditReservationContext } from '~~/server/types/api-access'
+import type { ApiCreditReservationContext, GateOutcome } from '~~/server/types/api-access'
 import { apiCallService } from '~~/server/services/api-call-service'
 import { apiKeyService } from '~~/server/services/api-key-service'
 import { creditService } from '~~/server/services/credit-service'
@@ -17,6 +17,15 @@ interface Caller {
   id: number
   userId: number
   name: string
+}
+
+interface CallFailure {
+  errorCode: string
+  errorMessage: string | null
+}
+
+interface AccessRejection extends CallFailure {
+  outcome: Exclude<GateOutcome, 'passed'>
 }
 
 interface CallStatistics {
@@ -36,6 +45,8 @@ interface GatewayCall {
   statistics: CallStatistics | null
   target: { id: string, baseUrl: string } | null
   caller: Caller | null
+  rejection: AccessRejection | null
+  failure: CallFailure | null
   reservation: ApiCreditReservationContext | null
   pending: boolean
   release?: Promise<void>
@@ -45,12 +56,7 @@ interface GatewayCall {
 // State belongs to one request and is never exposed through mutable event fields.
 const calls = new WeakMap<H3Event, GatewayCall>()
 
-const DO_NOT_WRITE_LOG_OUTCOMES = new Set(['disabled', 'invalid_api_key', 'missing_api_key'])
-const NON_COUNTED_REJECTION_OUTCOMES = new Set([
-  'api_key_quota_exceeded', 'credits_unavailable', 'disabled_api_key',
-  'expired_api_key', 'insufficient_credits', 'ip_denied', 'quota_exceeded',
-  'quota_unavailable', 'rate_limited', 'rate_limit_unavailable', 'scope_denied'
-])
+const DO_NOT_WRITE_LOG_OUTCOMES = new Set<AccessRejection['outcome']>(['invalid_api_key', 'missing_api_key'])
 
 function shouldCharge(call: GatewayCall, statusCode: number): boolean {
   return shouldChargeGatewayCall({
@@ -79,18 +85,20 @@ async function recordCall(event: H3Event, call: GatewayCall, statusCode: number)
   const tracked = call.statistics
   if (!tracked) return null
   const context = getAppEventContext(event)
-  const rejection = context.apiGateRejection
+  const rejection = call.rejection
   if (rejection && DO_NOT_WRITE_LOG_OUTCOMES.has(rejection.outcome)) return null
-  const isCounted = !rejection || !NON_COUNTED_REJECTION_OUTCOMES.has(rejection.outcome)
-  const apiKeyId = call.caller?.id ?? rejection?.apiKeyId ?? null
+  // Admission rejections take precedence over later failures and never count
+  // as upstream calls. Failure details remain private once completion starts.
+  const failure = rejection ?? call.failure
+  const isCounted = !rejection
   const input = {
     routeId: call.route.id,
     routeName: call.route.name,
     upstreamTargetId: call.target?.id ?? null,
     upstreamTargetUrl: call.target?.baseUrl ?? null,
-    apiKeyId,
-    apiKeyName: call.caller?.name ?? rejection?.apiKeyName ?? null,
-    userId: call.caller?.userId ?? rejection?.apiKeyUserId ?? null,
+    apiKeyId: call.caller?.id ?? null,
+    apiKeyName: call.caller?.name ?? null,
+    userId: call.caller?.userId ?? null,
     requestId: context.requestId ?? null,
     path: tracked.pathname,
     method: tracked.method,
@@ -105,8 +113,8 @@ async function recordCall(event: H3Event, call: GatewayCall, statusCode: number)
       event.node.res.getHeader('content-length') as string | string[] | number | undefined
     ),
     statDate: new Date(),
-    errorCode: rejection?.errorCode ?? context.apiFailure?.errorCode ?? null,
-    errorMessage: rejection?.errorMessage ?? context.apiFailure?.errorMessage ?? null,
+    errorCode: failure?.errorCode ?? null,
+    errorMessage: failure?.errorMessage ?? null,
     creditsCost: 0,
     isCounted,
     statusCodeForStats: statusCode
@@ -144,7 +152,7 @@ async function completeCall(event: H3Event, call: GatewayCall): Promise<void> {
         })
       }
     }
-    if (call.statistics && call.caller && !getAppEventContext(event).apiGateRejection) {
+    if (call.statistics && call.caller && !call.rejection) {
       await apiKeyService.recordUsage(call.caller.id, call.statistics.ip)
     }
   } catch (error) {
@@ -189,6 +197,8 @@ export const gatewayCallService = {
       } : null,
       target: null,
       caller: null,
+      rejection: null,
+      failure: null,
       reservation: null,
       pending: false
     })
@@ -197,8 +207,24 @@ export const gatewayCallService = {
   acceptAccess(event: H3Event, caller: Caller | null, reservation: ApiCreditReservationContext | null): void {
     const call = calls.get(event)
     if (!call) throw new Error('Gateway call must start before authorization')
+    if (call.completion) return
     call.caller = caller ? { id: caller.id, userId: caller.userId, name: caller.name } : null
     call.reservation = reservation ? { ...reservation } : null
+  },
+
+  rejectAccess(event: H3Event, caller: Caller | null, rejection: AccessRejection): void {
+    const call = calls.get(event)
+    if (!call) throw new Error('Gateway call must start before authorization')
+    if (call.completion) return
+    call.caller = caller ? { id: caller.id, userId: caller.userId, name: caller.name } : null
+    call.rejection = { ...rejection }
+  },
+
+  fail(event: H3Event, errorCode: string, errorMessage: string | null): void {
+    const call = calls.get(event)
+    // Routing and preflight failures have no call to record.
+    if (!call || call.completion) return
+    call.failure = { errorCode, errorMessage }
   },
 
   observe(event: H3Event, observation: {

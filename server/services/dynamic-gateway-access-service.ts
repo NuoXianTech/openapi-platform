@@ -8,7 +8,6 @@ import { creditService } from '~~/server/services/credit-service'
 import { gatewayCallService } from '~~/server/services/dynamic-gateway-call-service'
 import type { ResolvedDynamicRoute } from '~~/server/services/routing-runtime-service'
 import type { ApiCreditReservationContext, GateOutcome, RateLimitResult } from '~~/server/types/api-access'
-import { getAppEventContext } from '~~/server/utils/event-context'
 import { gatewayFail, type GatewayResponse } from '~~/server/utils/gateway-response'
 import { consumeRateLimitWindows } from '~~/server/utils/rate-limit'
 import { isRedisUnavailableError } from '~~/server/utils/redis'
@@ -29,7 +28,7 @@ type DynamicAccessResult
     | { passed: false, response: GatewayResponse }
 
 interface AccessRejection {
-  outcome: GateOutcome
+  outcome: Exclude<GateOutcome, 'passed'>
   error: { status: number, code: string, msg: string }
   apiKey: ApiKeyRecord | null
   headers?: Record<string, string>
@@ -94,15 +93,11 @@ function rateLimitHeaders(results: RateLimitResult[]): Record<string, string> {
 }
 
 function reject(event: H3Event, rejection: AccessRejection): DynamicAccessResult {
-  const context = getAppEventContext(event)
-  context.apiGateRejection = {
+  gatewayCallService.rejectAccess(event, rejection.apiKey, {
     outcome: rejection.outcome,
     errorCode: rejection.error.code,
-    errorMessage: rejection.error.msg,
-    apiKeyId: rejection.apiKey?.id ?? null,
-    apiKeyName: rejection.apiKey?.name ?? null,
-    apiKeyUserId: rejection.apiKey?.userId ?? null
-  }
+    errorMessage: rejection.error.msg
+  })
   if (rejection.headers) setResponseHeaders(event, rejection.headers)
   return {
     passed: false,
