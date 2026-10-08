@@ -2,7 +2,6 @@ import { and, asc, desc, eq, gte, isNull, lt, sql } from 'drizzle-orm'
 import type {
   AdminDashboardData,
   AdminDashboardDistributionItem,
-  AdminDashboardHourlyPoint,
   AdminDashboardInsightsData,
   AdminDashboardRecentCall,
   AdminDashboardTrendPoint
@@ -10,15 +9,9 @@ import type {
 import { db } from '~~/server/db/client'
 import { apiCallStats, apiCalls, apiProducts, apiRoutes, apiVersions, users } from '~~/server/db/schema'
 import { toIsoString } from '~~/server/utils/date'
-import { APP_TIME_ZONE, addLocalDays, getLocalDayStart, toLocalDateKey } from '~~/server/utils/local-time'
+import { addLocalDays, getLocalDayStart, toLocalDateKey } from '~~/server/utils/local-time'
 import { clampInteger, toNumber } from '~~/server/utils/number'
-
-const HOURLY_LABEL_FORMATTER = new Intl.DateTimeFormat('en-GB', {
-  timeZone: APP_TIME_ZONE,
-  hour: '2-digit',
-  minute: '2-digit',
-  hourCycle: 'h23'
-})
+import { callHourlyStatistics } from '~~/server/services/call-hourly-statistics'
 
 export const adminDashboardService = {
   async getDashboard(options: {
@@ -146,37 +139,7 @@ export const adminDashboardService = {
   },
 
   async getInsights(): Promise<AdminDashboardInsightsData> {
-    const last24hEnd = new Date()
-    last24hEnd.setMinutes(0, 0, 0)
-    const hourMs = 60 * 60 * 1000
-    const last24hStart = new Date(last24hEnd.getTime() - 24 * hourMs)
-    const hourlySource = db.select({
-      // Anchor 24 complete hours to the current app-local hour boundary.
-      // Epoch arithmetic keeps grouping independent of the database session timezone.
-      bucket: sql<number>`floor(extract(epoch from (${apiCalls.createdAt} - ${last24hStart.toISOString()}::timestamptz)) / 3600)::integer`.as('bucket')
-    }).from(apiCalls)
-      .where(and(
-        gte(apiCalls.createdAt, last24hStart),
-        lt(apiCalls.createdAt, last24hEnd),
-        eq(apiCalls.isCounted, true)
-      ))
-      .as('hourly_source')
-
-    const hourlyRows = await db.select({ bucket: hourlySource.bucket, totalCalls: sql<number>`count(*)` })
-      .from(hourlySource)
-      .groupBy(hourlySource.bucket)
-      .orderBy(asc(hourlySource.bucket))
-
-    const hourMap = new Map<number, number>()
-    for (const row of hourlyRows) {
-      hourMap.set(toNumber(row.bucket), toNumber(row.totalCalls))
-    }
-    const hourlyTrend24h: AdminDashboardHourlyPoint[] = Array.from({ length: 24 }, (_, index) => {
-      const date = new Date(last24hStart.getTime() + (index + 1) * hourMs)
-      const hour = date.toISOString()
-      return { hour, label: HOURLY_LABEL_FORMATTER.format(date), totalCalls: hourMap.get(index) ?? 0 }
-    })
-    return { hourlyTrend24h }
+    return callHourlyStatistics.forPlatform()
   }
 }
 

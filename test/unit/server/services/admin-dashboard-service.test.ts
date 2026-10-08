@@ -24,6 +24,9 @@ beforeAll(async () => {
     CREATE TABLE api_calls (
       id bigserial PRIMARY KEY,
       is_counted boolean NOT NULL DEFAULT true,
+      status_code integer NOT NULL DEFAULT 200,
+      error_code text,
+      credits_cost integer NOT NULL DEFAULT 0,
       created_at timestamptz NOT NULL
     );
   `)

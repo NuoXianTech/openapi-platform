@@ -18,6 +18,7 @@ interface UserDashboardApiKeys {
 }
 
 export interface UserDashboardHourlyPoint {
+  /** Exclusive end of this one-hour interval in the rolling 24-hour window. */
   hour: string
   label: string
   successCalls: number
