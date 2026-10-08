@@ -106,6 +106,10 @@ Product、Routing Revision 和 Target 的确认动作共用
 Target 操作还绑定当前 Upstream 上下文，切换详情后旧确认回调和保存结果失效。
 领域模块继续负责操作准入、文案和成功后的资源刷新。
 
+Product / Version 和 Runtime 管理通过 `use-operation-lifecycle.ts`，让直接保存、确认动作和
+后续读取共享同一个生命周期拥有者。占用一直保留到刷新完成或确认结束，页面卸载后忽略迟到结果；
+领域模块只读取占用与失效状态，保留编辑上下文、草稿协调和反馈规则，不再另行维护一套生命周期状态。
+
 Revision 是 Gateway 的安全运行边界，不是管理员必须手工编排的日常步骤。生成 Revision 时 Platform：
 
 1. 按发布范围选择 Route：显式应用全部读取期望配置，自动刷新沿用活动 Revision 的已应用配置，单个 Endpoint 直接发布仅替换指定 Route。

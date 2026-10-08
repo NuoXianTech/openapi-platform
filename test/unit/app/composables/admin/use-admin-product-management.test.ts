@@ -197,6 +197,30 @@ describe('Product and Version management', () => {
     await expect(management.removeProduct(product)).resolves.toBe(false)
   })
 
+  it.each(['save', 'delete'] as const)('ignores a late refresh failure after a successful %s and disposal', async (kind) => {
+    const { management, resource } = setup()
+    management.openEditProduct(product)
+    const started = deferred<undefined>()
+    const reading = deferred<{ status: 'error', error: Error }>()
+    resource.refresh.mockImplementationOnce(() => {
+      started.resolve(undefined)
+      return reading.promise
+    })
+    const operation = kind === 'save' ? management.saveProduct(values) : management.removeProduct(product)
+    const confirmation = kind === 'delete' ? dialog.options.onConfirm() : undefined
+    await started.promise
+    expect(management.controls.value.disabled).toBe(true)
+    expect(management.modalOpen.value).toBe(false)
+    scope.stop()
+    reading.resolve({ status: 'error', error: new Error('late read failure') })
+    await confirmation
+    if (kind === 'delete') dialog.resolve(true)
+    await expect(operation).resolves.toBe(false)
+    expect(toast.mock.calls.map(call => call[0].color)).toEqual(['success'])
+    expect(fetchMock).toHaveBeenCalledOnce()
+    expect(resource.refresh).toHaveBeenCalledOnce()
+  })
+
   it('blocks reads and confirmation callbacks after disposal', async () => {
     const { management, resource } = setup()
     const deleting = management.removeProduct(product)

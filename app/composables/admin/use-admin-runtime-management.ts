@@ -1,15 +1,18 @@
-import { computed, onScopeDispose, reactive, ref, watch } from 'vue'
+import { computed, reactive, watch } from 'vue'
 import type { PlatformRoutingRevisionSummary, PlatformRuntime } from '#shared/types/platform'
 import { PAGE_SIZE_OPTIONS } from '~/constants/pagination'
 import { usePrivateResource } from '~/composables/dashboard/use-private-resource'
 import { usePrivatePagedList } from '~/composables/dashboard/use-private-paged-list'
 import { useConfirmedOperation } from '~/composables/use-confirmed-operation'
+import { useOperationLifecycle } from '~/composables/use-operation-lifecycle'
 import { parseFetchError } from '~/utils/client-error'
 
 export function useAdminRuntimeManagement() {
   const { t } = useI18n()
   const toast = useToast()
-  const confirm = useConfirmedOperation()
+  const lifecycle = useOperationLifecycle()
+  const confirm = useConfirmedOperation(undefined, lifecycle)
+  const { active, disposed } = lifecycle
   const runtimeResource = usePrivateResource<PlatformRuntime>({
     path: '/api/admin/v1/runtime',
     defaultData: () => ({ defaultDomain: null, activeRevisionId: null, updatedAt: '' })
@@ -23,8 +26,6 @@ export function useAdminRuntimeManagement() {
   const resourceError = computed(() => runtimeResource.error.value || revisionsResource.error.value)
   const domainState = reactive({ defaultDomain: '' })
   const domainDirty = computed(() => domainState.defaultDomain.trim() !== (runtime.value.defaultDomain ?? ''))
-  const active = ref<'domain' | 'activation' | null>(null)
-  const disposed = ref(false)
   const controls = computed(() => ({
     savingDomain: active.value === 'domain',
     disabled: disposed.value || active.value !== null || runtimeResource.loading.value || Boolean(runtimeResource.error.value),
@@ -36,17 +37,17 @@ export function useAdminRuntimeManagement() {
     if (active.value === 'domain') return
     if (domainState.defaultDomain.trim() === (previous ?? '')) domainState.defaultDomain = domain ?? ''
   }, { immediate: true, flush: 'sync' })
-  onScopeDispose(() => { disposed.value = true })
 
   async function refreshResources() {
-    if (disposed.value) return
-    try {
-      const results = await Promise.all([runtimeResource.refresh(), revisionsResource.refresh()])
-      const failure = results.find(result => result?.status === 'error')
-      if (failure?.status === 'error') throw failure.error
-    } catch (error: unknown) {
-      if (!disposed.value) toast.add({ title: parseFetchError(error, t('common.feedback.loadFailed')), color: 'error' })
-    }
+    const effects = lifecycle.capture()
+    await effects.execute({
+      request: async () => {
+        const results = await Promise.all([runtimeResource.refresh(), revisionsResource.refresh()])
+        const failure = results.find(result => result?.status === 'error')
+        if (failure?.status === 'error') throw failure.error
+      },
+      reject: (error) => { toast.add({ title: parseFetchError(error, t('common.feedback.loadFailed')), color: 'error' }) }
+    }).catch(() => false)
   }
 
   async function refresh() {
@@ -56,50 +57,40 @@ export function useAdminRuntimeManagement() {
   async function saveDomain() {
     if (controls.value.disabled || !domainDirty.value) return false
     const draft = domainState.defaultDomain
-    active.value = 'domain'
-    try {
-      const result = await $fetch<PlatformRuntime & { revision: { id: string } | null }>('/api/admin/v1/runtime', {
+    return lifecycle.run('domain', operation => operation.execute({
+      request: () => $fetch<PlatformRuntime & { revision: { id: string } | null }>('/api/admin/v1/runtime', {
         method: 'PATCH', body: { defaultDomain: draft.trim() || null }
-      })
-      if (disposed.value) return false
-      runtimeResource.data.value = result
-      if (domainState.defaultDomain === draft) domainState.defaultDomain = result.defaultDomain ?? ''
-      toast.add({
-        title: t('admin.apis.routing.feedback.defaultDomainUpdated'),
-        description: t(result.revision ? 'admin.apis.routing.feedback.runtimeUpdated' : 'admin.apis.routing.feedback.runtimeUnchanged'),
-        color: 'success'
-      })
-      await refreshResources()
-      return !disposed.value
-    } catch (error: unknown) {
-      if (!disposed.value) toast.add({ title: parseFetchError(error, t('admin.apis.routing.feedback.updateFailed')), color: 'error' })
-      return false
-    } finally {
-      active.value = null
-    }
+      }),
+      accept: async (result) => {
+        runtimeResource.data.value = result
+        if (domainState.defaultDomain === draft) domainState.defaultDomain = result.defaultDomain ?? ''
+        toast.add({
+          title: t('admin.apis.routing.feedback.defaultDomainUpdated'),
+          description: t(result.revision ? 'admin.apis.routing.feedback.runtimeUpdated' : 'admin.apis.routing.feedback.runtimeUnchanged'),
+          color: 'success'
+        })
+        await refreshResources()
+      },
+      reject: (error) => { toast.add({ title: parseFetchError(error, t('admin.apis.routing.feedback.updateFailed')), color: 'error' }) }
+    })).catch(() => false)
   }
 
   async function activateRevision(revision: PlatformRoutingRevisionSummary) {
     if (controls.value.disabled || revision.id === runtime.value.activeRevisionId) return false
     const { id, sequence } = revision
-    active.value = 'activation'
-    try {
-      return await confirm({
-        title: t('admin.apis.routing.rollback.title', { sequence }),
-        description: t('admin.apis.routing.rollback.description'),
-        confirmLabel: t('admin.apis.routing.actions.activateRevision'),
-        confirmColor: 'warning',
-        mutate: () => $fetch('/api/admin/v1/revisions/activate', { method: 'POST', body: { revisionId: id } }),
-        onError: (error) => { toast.add({ title: parseFetchError(error, t('admin.apis.routing.feedback.activateFailed')), color: 'error' }) },
-        onSuccess: async () => {
-          runtimeResource.data.value = { ...runtime.value, activeRevisionId: id }
-          toast.add({ title: t('admin.apis.routing.feedback.revisionActivated', { sequence }), color: 'success' })
-          await refreshResources()
-        }
-      })
-    } finally {
-      active.value = null
-    }
+    return confirm({
+      title: t('admin.apis.routing.rollback.title', { sequence }),
+      description: t('admin.apis.routing.rollback.description'),
+      confirmLabel: t('admin.apis.routing.actions.activateRevision'),
+      confirmColor: 'warning',
+      mutate: () => $fetch('/api/admin/v1/revisions/activate', { method: 'POST', body: { revisionId: id } }),
+      onError: (error) => { toast.add({ title: parseFetchError(error, t('admin.apis.routing.feedback.activateFailed')), color: 'error' }) },
+      onSuccess: async () => {
+        runtimeResource.data.value = { ...runtime.value, activeRevisionId: id }
+        toast.add({ title: t('admin.apis.routing.feedback.revisionActivated', { sequence }), color: 'success' })
+        await refreshResources()
+      }
+    })
   }
 
   return {

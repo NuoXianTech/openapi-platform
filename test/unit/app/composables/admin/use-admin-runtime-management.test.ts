@@ -205,4 +205,30 @@ describe('Runtime management', () => {
     expect(runtime.refresh).not.toHaveBeenCalled()
     expect(toast).not.toHaveBeenCalled()
   })
+
+  it.each(['save', 'activate'] as const)('ignores a late refresh failure after a successful %s and disposal', async (kind) => {
+    const { management, runtime, revisions } = setup()
+    management.domainState.defaultDomain = 'draft.test'
+    fetchMock.mockResolvedValue({ defaultDomain: 'draft.test', activeRevisionId: 'current', updatedAt: '', revision: null })
+    const started = deferred<undefined>()
+    const reading = deferred<{ status: 'error', error: Error }>()
+    revisions.refresh.mockImplementationOnce(() => {
+      started.resolve(undefined)
+      return reading.promise
+    })
+    const operation = kind === 'save' ? management.saveDomain() : management.activateRevision(revision)
+    const confirmation = kind === 'activate' ? dialog.options.onConfirm() : undefined
+    await started.promise
+    expect(management.controls.value.disabled).toBe(true)
+    scope.stop()
+    reading.resolve({ status: 'error', error: new Error('late read failure') })
+    await confirmation
+    if (kind === 'activate') dialog.resolve(true)
+    await expect(operation).resolves.toBe(false)
+    expect(runtime.data.value.activeRevisionId).toBe(kind === 'activate' ? 'old' : 'current')
+    expect(toast.mock.calls.map(call => call[0].color)).toEqual(['success'])
+    expect(fetchMock).toHaveBeenCalledOnce()
+    expect(runtime.refresh).toHaveBeenCalledOnce()
+    expect(revisions.refresh).toHaveBeenCalledOnce()
+  })
 })

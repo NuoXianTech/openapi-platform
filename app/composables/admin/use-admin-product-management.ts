@@ -1,8 +1,9 @@
-import { computed, onScopeDispose, ref, watch } from 'vue'
+import { computed, ref, watch } from 'vue'
 import type { PlatformApiVersion, PlatformProduct, PlatformProductSummary } from '#shared/types/platform'
 import { PAGE_SIZE_OPTIONS } from '~/constants/pagination'
 import { usePrivatePagedList } from '~/composables/dashboard/use-private-paged-list'
 import { useConfirmedOperation } from '~/composables/use-confirmed-operation'
+import { useOperationLifecycle } from '~/composables/use-operation-lifecycle'
 import { parseFetchError } from '~/utils/client-error'
 
 export type ProductFormValues = Pick<PlatformProductSummary, 'name' | 'summary' | 'description' | 'visibility' | 'lifecycle'>
@@ -11,7 +12,9 @@ export type VersionFormValues = Pick<PlatformApiVersion, 'state' | 'changelog'>
 export function useAdminProductManagement() {
   const { t } = useI18n()
   const toast = useToast()
-  const confirm = useConfirmedOperation()
+  const lifecycle = useOperationLifecycle()
+  const confirm = useConfirmedOperation(undefined, lifecycle)
+  const { active, disposed } = lifecycle
   const resource = usePrivatePagedList<Record<string, never>, PlatformProduct>({
     path: '/api/admin/v1/products/paged', defaultFilters: {}, defaultPageSize: PAGE_SIZE_OPTIONS[0]
   })
@@ -21,8 +24,6 @@ export function useAdminProductManagement() {
   const editingProduct = ref<PlatformProduct | null>(null)
   const versionProduct = ref<PlatformProduct | null>(null)
   const editingVersion = ref<PlatformApiVersion | null>(null)
-  const active = ref<'product' | 'version' | 'delete' | null>(null)
-  const disposed = ref(false)
   const controls = computed(() => ({
     disabled: disposed.value || active.value !== null || resource.loading.value || Boolean(resource.error.value),
     refreshDisabled: disposed.value || active.value !== null,
@@ -36,7 +37,6 @@ export function useAdminProductManagement() {
       editingVersion.value = null
     }
   }, { flush: 'sync' })
-  onScopeDispose(() => { disposed.value = true })
 
   function openEditProduct(product: PlatformProduct) {
     if (controls.value.disabled) return
@@ -69,14 +69,16 @@ export function useAdminProductManagement() {
   watch(products, reconcileEditors)
 
   async function refreshProducts() {
-    if (disposed.value) return
-    try {
-      const result = await resource.refresh()
-      if (result?.status === 'error') throw result.error
-      if (!disposed.value && result?.status === 'success') reconcileEditors()
-    } catch (error: unknown) {
-      if (!disposed.value) toast.add({ title: parseFetchError(error, t('common.feedback.loadFailed')), color: 'error' })
-    }
+    const effects = lifecycle.capture()
+    await effects.execute({
+      request: async () => {
+        const result = await resource.refresh()
+        if (result?.status === 'error') throw result.error
+        return result
+      },
+      accept: (result) => { if (result?.status === 'success') reconcileEditors() },
+      reject: (error) => { toast.add({ title: parseFetchError(error, t('common.feedback.loadFailed')), color: 'error' }) }
+    }).catch(() => false)
   }
   async function refresh() {
     if (!controls.value.refreshDisabled) await refreshProducts()
@@ -86,44 +88,34 @@ export function useAdminProductManagement() {
     if (controls.value.disabled) return false
     const id = kind === 'product' ? editingProduct.value?.id : editingVersion.value?.id
     if (!id) return false
-    active.value = kind
-    try {
-      await $fetch(`/api/admin/v1/${kind === 'product' ? 'products' : 'versions'}/${id}`, { method: 'PATCH', body })
-      if (disposed.value) return false
-      toast.add({ title: t(kind === 'product' ? 'admin.apis.routing.feedback.productUpdated' : 'admin.apis.routing.feedback.versionUpdated'), color: 'success' })
-      if (kind === 'product') modalOpen.value = false
-      else versionModalOpen.value = false
-      await refreshProducts()
-      return !disposed.value
-    } catch (error: unknown) {
-      if (!disposed.value) toast.add({ title: parseFetchError(error, t('admin.apis.routing.feedback.updateFailed')), color: 'error' })
-      return false
-    } finally {
-      active.value = null
-    }
+    return lifecycle.run(kind, operation => operation.execute({
+      request: () => $fetch(`/api/admin/v1/${kind === 'product' ? 'products' : 'versions'}/${id}`, { method: 'PATCH', body }),
+      accept: async () => {
+        toast.add({ title: t(kind === 'product' ? 'admin.apis.routing.feedback.productUpdated' : 'admin.apis.routing.feedback.versionUpdated'), color: 'success' })
+        if (kind === 'product') modalOpen.value = false
+        else versionModalOpen.value = false
+        await refreshProducts()
+      },
+      reject: (error) => { toast.add({ title: parseFetchError(error, t('admin.apis.routing.feedback.updateFailed')), color: 'error' }) }
+    })).catch(() => false)
   }
 
   async function remove(product: PlatformProduct, version?: PlatformApiVersion) {
     if (controls.value.disabled) return false
     const id = version?.id ?? product.id
-    active.value = 'delete'
-    try {
-      return await confirm({
-        title: t(version ? 'admin.apis.routing.deleteVersion.title' : 'admin.apis.routing.deleteProduct.title', version ? { version: version.version } : { name: product.name }),
-        description: t(version ? 'admin.apis.routing.deleteVersion.description' : 'admin.apis.routing.deleteProduct.description'),
-        confirmColor: 'error',
-        mutate: () => $fetch(`/api/admin/v1/${version ? 'versions' : 'products'}/${id}`, { method: 'DELETE' }),
-        onError: (error) => { toast.add({ title: parseFetchError(error, t('common.feedback.deleteFailed')), color: 'error' }) },
-        onSuccess: async () => {
-          toast.add({ title: t('common.feedback.deleted'), color: 'success' })
-          if (!version && editingProduct.value?.id === id) modalOpen.value = false
-          if (version ? editingVersion.value?.id === id : versionProduct.value?.id === id) versionModalOpen.value = false
-          await refreshProducts()
-        }
-      })
-    } finally {
-      active.value = null
-    }
+    return confirm({
+      title: t(version ? 'admin.apis.routing.deleteVersion.title' : 'admin.apis.routing.deleteProduct.title', version ? { version: version.version } : { name: product.name }),
+      description: t(version ? 'admin.apis.routing.deleteVersion.description' : 'admin.apis.routing.deleteProduct.description'),
+      confirmColor: 'error',
+      mutate: () => $fetch(`/api/admin/v1/${version ? 'versions' : 'products'}/${id}`, { method: 'DELETE' }),
+      onError: (error) => { toast.add({ title: parseFetchError(error, t('common.feedback.deleteFailed')), color: 'error' }) },
+      onSuccess: async () => {
+        toast.add({ title: t('common.feedback.deleted'), color: 'success' })
+        if (!version && editingProduct.value?.id === id) modalOpen.value = false
+        if (version ? editingVersion.value?.id === id : versionProduct.value?.id === id) versionModalOpen.value = false
+        await refreshProducts()
+      }
+    })
   }
 
   return {
