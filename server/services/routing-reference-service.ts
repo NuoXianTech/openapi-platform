@@ -15,11 +15,6 @@ async function activePayload(
 }
 
 export const routingReferenceService = {
-  async hasRoute(routeId: string, transaction?: DatabaseTransaction): Promise<boolean> {
-    const payload = await activePayload(transaction)
-    return payload?.routes.some(route => route.id === routeId) ?? false
-  },
-
   async hasProduct(productId: string, transaction?: DatabaseTransaction): Promise<boolean> {
     const payload = await activePayload(transaction)
     return payload?.routes.some(route => route.productId === productId) ?? false

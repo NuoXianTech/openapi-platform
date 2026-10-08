@@ -49,6 +49,9 @@ const { dynamicGatewayService } = await import(
 const { endpointRoutes } = await import(
   '~~/server/services/platform-endpoint/routes'
 )
+const { platformEndpointService } = await import(
+  '~~/server/services/platform-endpoint-service'
+)
 const { platformServiceControlService } = await import(
   '~~/server/services/platform-service-control-service'
 )
@@ -99,8 +102,7 @@ const routeIds = {
   ip: '',
   limitedYiyan: '',
   bodyRejected: '',
-  contract: '',
-  lifecycle: ''
+  contract: ''
 }
 
 beforeAll(async () => {
@@ -256,15 +258,6 @@ beforeAll(async () => {
     isStatistics: false,
     maxResponseBytes: 2 * 1024 * 1024
   })
-  routeIds.lifecycle = await createRoute({
-    apiVersionId: versionId,
-    upstreamServiceId: upstream.id,
-    name: 'Route 生命周期验收',
-    pathPattern: '/v1/yiyan-lifecycle',
-    upstreamPathTemplate: '/v1/yiyan',
-    isStatistics: false
-  })
-
   const paidUser = (await database.insert(schema.users).values({
     username: 'gateway-paid-user',
     email: 'gateway-paid@example.test',
@@ -903,7 +896,7 @@ describe('Platform to Node API Service acceptance', () => {
       response.end('hidden response')
     })
     const redirectPort = await listen(redirectServer)
-    let routeId: string | null = null
+    let upstreamId: string | null = null
 
     try {
       const upstream = await platformUpstreamService.create({
@@ -916,8 +909,9 @@ describe('Platform to Node API Service acceptance', () => {
           weight: 1
         }]
       })
+      upstreamId = upstream.id
       await markTestTargetsVerified(upstream.id)
-      routeId = await createRoute({
+      await createRoute({
         apiVersionId: officialVersionId,
         upstreamServiceId: upstream.id,
         name: 'Redirect boundary acceptance',
@@ -940,7 +934,7 @@ describe('Platform to Node API Service acceptance', () => {
       await response.arrayBuffer()
     } finally {
       await routingRevisionService.activate(initialRevisionId)
-      if (routeId) await endpointRoutes.remove(routeId)
+      if (upstreamId) await platformUpstreamService.removeAndPublish(upstreamId, null)
       await closeServer(redirectServer)
     }
   })
@@ -960,7 +954,7 @@ describe('Platform to Node API Service acceptance', () => {
       response.end(`target-${index}`)
     }))
     const ports = await Promise.all(servers.map(listen))
-    let routeId: string | null = null
+    let upstreamId: string | null = null
 
     try {
       const upstream = await platformUpstreamService.create({
@@ -973,8 +967,9 @@ describe('Platform to Node API Service acceptance', () => {
           weight: 1
         }))
       })
+      upstreamId = upstream.id
       await markTestTargetsVerified(upstream.id)
-      routeId = await createRoute({
+      await createRoute({
         apiVersionId: officialVersionId,
         upstreamServiceId: upstream.id,
         name: 'Gateway failover acceptance',
@@ -997,7 +992,7 @@ describe('Platform to Node API Service acceptance', () => {
       expect(requestCounts[failedTarget === 0 ? 1 : 0]).toBe(2)
     } finally {
       await routingRevisionService.activate(initialRevisionId)
-      if (routeId) await endpointRoutes.remove(routeId)
+      if (upstreamId) await platformUpstreamService.removeAndPublish(upstreamId, null)
       await Promise.all(servers.map(closeServer))
     }
   })
@@ -1011,7 +1006,7 @@ describe('Platform to Node API Service acceptance', () => {
       response.end('write was not accepted')
     }))
     const ports = await Promise.all(servers.map(listen))
-    let routeId: string | null = null
+    let upstreamId: string | null = null
 
     try {
       const upstream = await platformUpstreamService.create({
@@ -1024,8 +1019,9 @@ describe('Platform to Node API Service acceptance', () => {
           weight: 1
         }))
       })
+      upstreamId = upstream.id
       await markTestTargetsVerified(upstream.id)
-      routeId = await createRoute({
+      await createRoute({
         apiVersionId: officialVersionId,
         upstreamServiceId: upstream.id,
         name: 'Gateway write replay acceptance',
@@ -1047,7 +1043,7 @@ describe('Platform to Node API Service acceptance', () => {
       expect(requests).toBe(1)
     } finally {
       await routingRevisionService.activate(initialRevisionId)
-      if (routeId) await endpointRoutes.remove(routeId)
+      if (upstreamId) await platformUpstreamService.removeAndPublish(upstreamId, null)
       await Promise.all(servers.map(closeServer))
     }
   })
@@ -1073,7 +1069,7 @@ describe('Platform to Node API Service acceptance', () => {
       response.end()
     })
     const streamPort = await listen(streamServer)
-    const routeIds: string[] = []
+    let upstreamId: string | null = null
 
     try {
       const upstream = await platformUpstreamService.create({
@@ -1086,8 +1082,9 @@ describe('Platform to Node API Service acceptance', () => {
           weight: 1
         }]
       })
+      upstreamId = upstream.id
       await markTestTargetsVerified(upstream.id)
-      const requestRouteId = await createRoute({
+      await createRoute({
         apiVersionId: officialVersionId,
         upstreamServiceId: upstream.id,
         name: 'Chunked request limit acceptance',
@@ -1097,7 +1094,6 @@ describe('Platform to Node API Service acceptance', () => {
         isStatistics: true,
         maxRequestBytes: 8
       })
-      routeIds.push(requestRouteId)
       const responseRouteId = await createRoute({
         apiVersionId: officialVersionId,
         upstreamServiceId: upstream.id,
@@ -1109,7 +1105,6 @@ describe('Platform to Node API Service acceptance', () => {
         creditsCost: 2,
         maxResponseBytes: 8
       })
-      routeIds.push(responseRouteId)
       const user = await queryOne<{ id: number }>(
         `insert into users (
           username, email, password_hash, credits, is_active
@@ -1170,7 +1165,7 @@ describe('Platform to Node API Service acceptance', () => {
       )).toEqual({ count: 0 })
     } finally {
       await routingRevisionService.activate(initialRevisionId)
-      await Promise.all(routeIds.map(routeId => endpointRoutes.remove(routeId)))
+      if (upstreamId) await platformUpstreamService.removeAndPublish(upstreamId, null)
       await closeServer(streamServer)
     }
   })
@@ -1285,57 +1280,75 @@ describe('Platform to Node API Service acceptance', () => {
     })
   })
 
-  it('requires an unpublished Route before soft delete and can roll back historical Revisions', async () => {
+  it('requires applied unpublication before deleting an Upstream and can roll back its historical Revision', async () => {
     const oldPath = '/v1/yiyan-lifecycle'
     const newPath = '/v1/yiyan-lifecycle-updated'
+    const upstream = await platformUpstreamService.create({
+      slug: 'lifecycle-service', name: 'Lifecycle Service', serviceToken,
+      loadBalancing: 'round_robin', targets: [{ baseUrl: serviceBaseURL, weight: 1 }]
+    })
+    let removed = false
+    try {
+      await platformServiceControlService.discover(upstream.id)
+      // A custom public path is a Gateway fixture; deletion and unpublication
+      // below use the same complete interfaces as management requests.
+      const routeId = await createRoute({
+        apiVersionId: officialVersionId, upstreamServiceId: upstream.id,
+        name: 'Route lifecycle acceptance', pathPattern: oldPath,
+        upstreamPathTemplate: '/v1/yiyan', isStatistics: false
+      })
+      await routingRevisionService.publish(null)
 
-    const initial = await fetch(`${gatewayBaseURL}${oldPath}?type=a&id=a1`)
-    expect(initial.status).toBe(200)
-    await initial.arrayBuffer()
+      const initial = await fetch(`${gatewayBaseURL}${oldPath}?type=a&id=a1`)
+      expect(initial.status).toBe(200)
+      await initial.arrayBuffer()
 
-    await endpointRoutes.update(routeIds.lifecycle, lifecycleRouteInput(newPath))
+      await endpointRoutes.update(routeId, { pathPattern: newPath })
 
-    const beforePublishOld = await fetch(`${gatewayBaseURL}${oldPath}?type=a&id=a1`)
-    const beforePublishNew = await fetch(`${gatewayBaseURL}${newPath}?type=a&id=a1`)
-    expect(beforePublishOld.status).toBe(200)
-    expect(beforePublishNew.status).toBe(404)
-    await beforePublishOld.arrayBuffer()
-    await beforePublishNew.arrayBuffer()
+      const beforePublishOld = await fetch(`${gatewayBaseURL}${oldPath}?type=a&id=a1`)
+      const beforePublishNew = await fetch(`${gatewayBaseURL}${newPath}?type=a&id=a1`)
+      expect(beforePublishOld.status).toBe(200)
+      expect(beforePublishNew.status).toBe(404)
+      await beforePublishOld.arrayBuffer()
+      await beforePublishNew.arrayBuffer()
 
-    const updatedRevision = await routingRevisionService.publish(null)
-    const afterPublishOld = await fetch(`${gatewayBaseURL}${oldPath}?type=a&id=a1`)
-    const afterPublishNew = await fetch(`${gatewayBaseURL}${newPath}?type=a&id=a1`)
-    expect(afterPublishOld.status).toBe(404)
-    expect(afterPublishNew.status).toBe(200)
-    await afterPublishOld.arrayBuffer()
-    await afterPublishNew.arrayBuffer()
+      const updatedRevision = await routingRevisionService.publish(null)
+      const afterPublishOld = await fetch(`${gatewayBaseURL}${oldPath}?type=a&id=a1`)
+      const afterPublishNew = await fetch(`${gatewayBaseURL}${newPath}?type=a&id=a1`)
+      expect(afterPublishOld.status).toBe(404)
+      expect(afterPublishNew.status).toBe(200)
+      await afterPublishOld.arrayBuffer()
+      await afterPublishNew.arrayBuffer()
 
-    await expect(endpointRoutes.remove(routeIds.lifecycle))
-      .rejects.toMatchObject({ data: { code: 'ROUTE_STILL_PUBLISHED' } })
-    await endpointRoutes.update(
-      routeIds.lifecycle,
-      { state: 'disabled' }
-    )
-    const beforeDisablePublish = await fetch(
-      `${gatewayBaseURL}${newPath}?type=a&id=a1`
-    )
-    expect(beforeDisablePublish.status).toBe(200)
-    await beforeDisablePublish.arrayBuffer()
+      await expect(platformUpstreamService.removeAndPublish(upstream.id, null))
+        .rejects.toMatchObject({ data: { code: 'UPSTREAM_STILL_PUBLISHED' } })
+      await platformEndpointService.update(routeId, { enabled: false }, null, { publishRouting: false })
+      const beforeDisablePublish = await fetch(`${gatewayBaseURL}${newPath}?type=a&id=a1`)
+      expect(beforeDisablePublish.status).toBe(200)
+      await beforeDisablePublish.arrayBuffer()
+      await expect(platformUpstreamService.removeAndPublish(upstream.id, null))
+        .rejects.toMatchObject({ data: { code: 'UPSTREAM_STILL_PUBLISHED' } })
 
-    await routingRevisionService.publish(null)
-    const afterDisablePublish = await fetch(
-      `${gatewayBaseURL}${newPath}?type=a&id=a1`
-    )
-    expect(afterDisablePublish.status).toBe(404)
-    await afterDisablePublish.arrayBuffer()
-    await endpointRoutes.remove(routeIds.lifecycle)
+      await routingRevisionService.publish(null)
+      const afterDisablePublish = await fetch(`${gatewayBaseURL}${newPath}?type=a&id=a1`)
+      expect(afterDisablePublish.status).toBe(404)
+      await afterDisablePublish.arrayBuffer()
+      const result = await platformUpstreamService.removeAndPublish(upstream.id, null)
+      removed = true
+      expect(result.upstream).toMatchObject({ status: 'disabled', deletedAt: expect.any(Date) })
+      expect(await queryOne<{ state: string, deleted: boolean }>(
+        'select state, deleted_at is not null as deleted from api_routes where id = $1', [routeId]
+      )).toEqual({ state: 'disabled', deleted: true })
 
-    await routingRevisionService.activate(updatedRevision.id)
-    const rolledBack = await fetch(`${gatewayBaseURL}${newPath}?type=a&id=a1`)
-    expect(rolledBack.status).toBe(200)
-    await rolledBack.arrayBuffer()
-
-    await routingRevisionService.activate(initialRevisionId)
+      await routingRevisionService.activate(updatedRevision.id)
+      const rolledBack = await fetch(`${gatewayBaseURL}${newPath}?type=a&id=a1`)
+      expect(rolledBack.status).toBe(200)
+      await rolledBack.arrayBuffer()
+      expect((await platformUpstreamService.findById(upstream.id))?.deletedAt).not.toBeNull()
+    } finally {
+      await routingRevisionService.activate(initialRevisionId)
+      if (!removed) await platformUpstreamService.removeAndPublish(upstream.id, null)
+    }
   })
 
   it('rejects missing and invalid API keys before calling a paid Service route', async () => {
@@ -1703,29 +1716,6 @@ async function markTestTargetsVerified(upstreamServiceId: string) {
       upstreamServiceId
     ]
   )
-}
-
-function lifecycleRouteInput(pathPattern: string) {
-  return {
-    apiVersionId: officialVersionId,
-    name: 'Route 生命周期验收',
-    hosts: [],
-    method: 'GET' as const,
-    pathPattern,
-    upstreamServiceId: officialUpstreamId,
-    upstreamPathTemplate: '/v1/yiyan',
-    isApiKey: false,
-    isStatistics: false,
-    creditsCost: 0,
-    rateLimitPerSecond: 0,
-    rateLimitPerMinute: 0,
-    rateLimitPerHour: 0,
-    rateLimitPerDay: 0,
-    timeoutMs: 5_000,
-    maxRequestBytes: 0,
-    maxResponseBytes: 512 * 1024,
-    state: 'active' as const
-  }
 }
 
 interface PublicEnvelope<T = unknown> {

@@ -16,7 +16,6 @@ import {
   validateUpstreamPathTemplate
 } from '~~/server/utils/route-pattern'
 import { firstRow } from '~~/server/utils/row'
-import { routingReferenceService } from '~~/server/services/routing-reference-service'
 import type { HttpMethod, RouteBinding, RouteMutationInput } from '~~/server/types/platform-publication'
 import type { PlatformEndpointPublicationPatch } from '#shared/types/platform'
 
@@ -292,31 +291,5 @@ export const endpointRoutes = {
       }
       throw error
     }
-  },
-
-  async remove(id: string, options: RouteMutationOptions = {}) {
-    const executor = options.transaction ?? db
-    const existing = firstRow(await executor.select().from(apiRoutes)
-      .where(and(eq(apiRoutes.id, id), isNull(apiRoutes.deletedAt)))
-      .limit(1))
-    if (!existing) {
-      throw createApplicationError({ statusCode: 404, message: 'route not found', data: { code: 'ROUTE_NOT_FOUND' } })
-    }
-    if (await routingReferenceService.hasRoute(id, options.transaction)) {
-      throw createApplicationError({
-        statusCode: 409,
-        message: 'disable and publish the route before deleting it',
-        data: { code: 'ROUTE_STILL_PUBLISHED' }
-      })
-    }
-    const now = new Date()
-    const removed = firstRow(await executor.update(apiRoutes)
-      .set({ state: 'disabled', deletedAt: now, updatedAt: now })
-      .where(and(eq(apiRoutes.id, id), isNull(apiRoutes.deletedAt)))
-      .returning())
-    if (!removed) {
-      throw createApplicationError({ statusCode: 404, message: 'route not found', data: { code: 'ROUTE_NOT_FOUND' } })
-    }
-    return removed
   }
 }

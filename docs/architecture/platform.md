@@ -61,11 +61,18 @@ Product / Version 复用和支撑 Route 联动是该模块的内部规则。目�
 活动快照中的 Route；发布优先复用期望状态为 active 的 Route；支撑 Route 优先匹配
 所属 Version。这些场景的选择顺序有意保持不同。
 
-Route 写入是 Endpoint 的内部实现，位于 `server/services/platform-endpoint/routes.ts`。
+Route 创建与治理写入是 Endpoint 的内部实现，位于 `server/services/platform-endpoint/routes.ts`。
 协调流程只传变化字段，当前 Route 的读取、未提交字段保留、创建默认值和支撑 Route 的
 匿名／零积分／零限流规则由内部写入统一处理。设置入口只接受治理字段，不能通过额外字段
 修改契约身份；省略或 undefined 保留当前值，显式 false、0 和空数组仍表示更新。
 管理调用和行为测试以 Endpoint 入口为主，内部 Route 操作仅供协调及快照测试夹具使用。
+
+Upstream 的完整删除由 `platform-upstream-service.ts` 的 `removeAndPublish` 负责。
+其私有 implementation 在发布事务中锁定 Upstream 与连接、检查当前运行快照引用，
+统一软删除该 Upstream 下的普通和支撑 Route，再软删除 Upstream；发布失败整体回滚。
+Route 不提供独立删除入口，接口下线仍通过 Endpoint 保存并应用；删除行为测试与管理调用
+使用同一个 interface。集成测试为可删除场景创建独立 Upstream，并通过完整删除入口清理。
+Product / Version、历史 Revision、调用与计费记录保留，不随 Upstream 物理删除。
 
 通用事务与运行快照发布由 `routing-revision-service.ts` 完整负责。
 领域变更通过 `applyPlatformMutation` 在其拥有的事务内执行；独立发布和历史激活复用
