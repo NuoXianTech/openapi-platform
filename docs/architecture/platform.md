@@ -319,6 +319,12 @@ Target 状态共用一次读取范围及一次探测集合。详情不会为补�
 发现流程保留有界并发、契约分组、当前契约优先与提交时上下文校验；OpenAPI 文档仍在选定
 兼容契约分组后，仅从该分组的选定 Target 读取。
 
+契约分组为发现 module 的私有 implementation，不单独暴露测试入口。分组规则通过
+`platformServiceControlService.discover` 的完整 interface 验证：使用本地 HTTP Target adapter
+与 PGlite，同时核对当前契约优先、首次发现的多数分组与确定性平局选择、OpenAPI 来源、
+配置 Schema、Target 接纳结果和返回视图。选定文档指纹错误时保留已提交契约，不回退到
+不兼容分组；单 Target 契约读取仍保留独立职责。
+
 管理台通过 `app/composables/admin/use-admin-service-control.ts` 协调发现、Token 更新、
 配置保存与同步。该模块持有控制视图、刷新和反馈，统一输出操作准入状态，并与 Target 操作互斥。
 每次操作绑定发起时的 Service 上下文；切换 Service 或卸载后，旧响应不能覆盖当前反馈、清空新 Token 草稿或解除新操作的占用。

@@ -87,7 +87,7 @@ function descriptionContractFingerprint(description: ServiceDescription): string
     .digest('hex')
 }
 
-export function selectCompatibleTargets<
+function selectCompatibleTargets<
   TTarget extends { targetId: string, description: ServiceDescription }
 >(
   targets: TTarget[],
