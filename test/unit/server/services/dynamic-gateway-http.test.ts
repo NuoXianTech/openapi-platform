@@ -3,8 +3,7 @@ import { createApp, eventHandler, toNodeListener, type H3Event } from 'h3'
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { gatewayCallService } from '~~/server/services/dynamic-gateway-call-service'
 import { gatewayTargetHealth } from '~~/server/services/gateway-target-health'
-import { resetGatewayTargetHealth } from '~~/server/services/dynamic-gateway-transport'
-import type { ResolvedDynamicRoute } from '~~/server/services/routing-runtime-service'
+import { createGatewayMatch } from '../../../helpers/gateway-match'
 
 const mocks = vi.hoisted(() => ({
   authorize: vi.fn(), resolve: vi.fn(), mark: vi.fn(), release: vi.fn(),
@@ -27,67 +26,29 @@ vi.mock('~~/server/services/upstream-service-token-service', () => ({ upstreamSe
 vi.mock('~~/server/utils/redis', () => ({ getRedisClient: () => null, getRedisConfig: () => ({ keyPrefix: 'test:' }) }))
 const { dynamicGatewayService } = await import('~~/server/services/dynamic-gateway-service')
 const { closeSafeFetchTransports } = await import('~~/server/utils/safe-fetch')
-const match: ResolvedDynamicRoute = {
-  revisionId: '00000000-0000-4000-8000-000000000002',
-  params: {},
-  route: {
-    id: '00000000-0000-4000-8000-000000000003',
-    productId: '00000000-0000-4000-8000-000000000004',
-    productSlug: 'stream',
-    productVisibility: 'public',
-    productLifecycle: 'active',
-    versionId: '00000000-0000-4000-8000-000000000005',
-    version: 'v1',
-    versionState: 'published',
-    name: 'Stream',
-    hosts: [],
-    method: 'GET',
-    pathPattern: '/v1/stream',
-    normalizedShape: '/v1/stream',
-    upstreamServiceId: '00000000-0000-4000-8000-000000000006',
-    upstreamPathTemplate: '/v1/stream',
-    isApiKey: true,
-    isStatistics: true,
-    creditsCost: 2,
-    rateLimitPerSecond: 0,
-    rateLimitPerMinute: 0,
-    rateLimitPerHour: 0,
-    rateLimitPerDay: 0,
-    timeoutMs: 5_000,
-    maxRequestBytes: 0,
-    maxResponseBytes: 1024,
-    catalogStatus: 'automatic',
-    sensitiveQueryParameters: [],
-    isSupportRoute: false
-  },
-  upstream: {
-    id: '00000000-0000-4000-8000-000000000006',
-    loadBalancing: 'round_robin',
-    targets: [{
-      id: '00000000-0000-4000-8000-000000000007',
-      baseUrl: 'http://127.0.0.1:8080',
-      weight: 1
-    }]
-  }
-}
-
+const match = createGatewayMatch()
 
 let lastEvent: H3Event
 let upstreamHandler: (request: IncomingMessage, response: ServerResponse) => void
 const upstream = createServer((req, res) => upstreamHandler(req, res))
 await new Promise<void>(resolve => upstream.listen(0, '127.0.0.1', resolve))
-match.upstream.targets[0]!.baseUrl = `http://127.0.0.1:${(upstream.address() as { port: number }).port}`
-const originalMatch = structuredClone(match)
+const upstreamBaseUrl = `http://127.0.0.1:${(upstream.address() as { port: number }).port}`
 const app = createApp()
 app.use(eventHandler(async event => (await dynamicGatewayService.tryHandle(event)).response))
 const gateway = createServer(toNodeListener(app))
 await new Promise<void>(resolve => gateway.listen(0, '127.0.0.1', resolve))
 const url = `http://127.0.0.1:${(gateway.address() as { port: number }).port}/v1/stream`
 
+function setTargets(weights: number[]) {
+  match.upstream.targets = weights.map((weight, index) => ({
+    id: `${match.upstream.id}-${index}`, baseUrl: `${upstreamBaseUrl}/target-${index}`, weight
+  }))
+}
+
 beforeEach(() => {
-  resetGatewayTargetHealth()
   vi.clearAllMocks()
-  Object.assign(match, structuredClone(originalMatch))
+  Object.assign(match, createGatewayMatch())
+  match.upstream.targets[0]!.baseUrl = upstreamBaseUrl
   mocks.resolve.mockResolvedValue({ match, allowedMethods: ['GET', 'HEAD'] })
   mocks.token.mockResolvedValue('review-service-token')
   mocks.mark.mockImplementation(() => {
@@ -176,6 +137,104 @@ describe('gateway over HTTP', () => {
   })
 
   it.each([
+    { policy: 'round_robin' as const, weights: [1, 1, 1], expected: [0, 1, 2, 0] },
+    { policy: 'weighted' as const, weights: [3, 1], expected: [0, 0, 0, 1, 0, 0, 0, 1] }
+  ])('routes real requests with $policy selection', async ({ policy, weights, expected }) => {
+    setTargets(weights)
+    match.upstream.loadBalancing = policy
+    upstreamHandler = (req, res) => { res.end(req.url) }
+    const responses: string[] = []
+    for (const _ of expected) responses.push(await (await fetch(url)).text())
+    expect(responses).toEqual(expected.map(index => `/target-${index}/v1/stream`))
+  })
+
+  it('keeps the Target base path and public query while removing every API key spelling', async () => {
+    match.upstream.targets[0]!.baseUrl = upstreamBaseUrl + '/base/'
+    match.route.upstreamPathTemplate = '/v1/player'
+    upstreamHandler = (req, res) => { res.end(req.url) }
+    const response = await fetch(url + '?apikey=secret&API_KEY=second&id=42')
+    expect(response.status).toBe(200)
+    expect(await response.text()).toBe('/base/v1/player?id=42')
+  })
+
+  it.each(['/../admin', '/%2e%2e/admin'])('rejects upstream path %s before it can escape the Target base path', async (path) => {
+    vi.spyOn(console, 'error').mockImplementation(() => undefined)
+    match.upstream.targets[0]!.baseUrl = upstreamBaseUrl + '/service'
+    match.route.upstreamPathTemplate = path
+    const received = vi.fn()
+    upstreamHandler = received
+    const response = await fetch(url)
+    expect(response.status).toBe(503)
+    expect(await response.json()).toMatchObject({ code: 'GATEWAY_UNAVAILABLE' })
+    expect(received).not.toHaveBeenCalled()
+  })
+
+  it.each([true, false])('interprets an upstream 401 with explicit Service rejection: %s', async (serviceRejection) => {
+    upstreamHandler = (_req, res) => {
+      res.statusCode = 401
+      res.setHeader('content-type', 'application/json')
+      res.setHeader('x-openapi-error-code', 'UNAUTHORIZED')
+      if (serviceRejection) res.setHeader('www-authenticate', 'Service realm="openapi-service"')
+      res.end(JSON.stringify({ code: 'UNAUTHORIZED' }))
+    }
+    const response = await fetch(url)
+    expect(response.status).toBe(serviceRejection ? 502 : 401)
+    const body = await response.json()
+    if (serviceRejection) expect(body).toMatchObject({ code: 'UPSTREAM_AUTH_FAILED' })
+    else expect(body).toEqual({ code: 'UNAUTHORIZED' })
+    expect(mocks.mark).not.toHaveBeenCalled()
+    expect(mocks.release).toHaveBeenCalledOnce()
+  })
+
+  it.each(['GET', 'HEAD', 'POST'])('retries a 503 only when %s can safely be replayed', async (method) => {
+    setTargets([1, 1])
+    const received: string[] = []
+    upstreamHandler = (req, res) => {
+      received.push(req.url!)
+      res.statusCode = req.url!.startsWith('/target-0') ? 503 : 200
+      res.end('result')
+    }
+    const response = await fetch(url, { method })
+    await response.text()
+    expect(response.status).toBe(method === 'POST' ? 503 : 200)
+    expect(received).toEqual(method === 'POST'
+      ? ['/target-0/v1/stream'] : ['/target-0/v1/stream', '/target-1/v1/stream'])
+  })
+
+  it.each(['status', 'network'])('ejects after repeated %s failures and returns to rotation after recovery', async (failure) => {
+    setTargets([1, 1])
+    let recovered = false
+    const received: string[] = []
+    upstreamHandler = (req, res) => {
+      received.push(req.url!)
+      if (req.url!.startsWith('/target-0') && !recovered) {
+        if (failure === 'network') { res.destroy(); return }
+        res.statusCode = 503
+      }
+      res.end(req.url)
+    }
+    for (let request = 0; request < 5; request += 1) {
+      expect(await (await fetch(url)).text()).toBe('/target-1/v1/stream')
+    }
+    // A single failure keeps Target 0 in rotation; the second ejects it.
+    expect(received).toEqual([
+      '/target-0/v1/stream', '/target-1/v1/stream', '/target-1/v1/stream',
+      '/target-0/v1/stream', '/target-1/v1/stream', '/target-1/v1/stream', '/target-1/v1/stream'
+    ])
+    recovered = true
+    vi.spyOn(Date, 'now').mockReturnValue(Date.now() + 15_001)
+    expect(await (await fetch(url)).text()).toBe('/target-1/v1/stream')
+    expect(await (await fetch(url)).text()).toBe('/target-0/v1/stream')
+    // Successful recovery clears its strikes: a new single failure must not eject it.
+    recovered = false
+    expect(await (await fetch(url)).text()).toBe('/target-1/v1/stream')
+    expect(await (await fetch(url)).text()).toBe('/target-1/v1/stream')
+    recovered = true
+    expect(await (await fetch(url)).text()).toBe('/target-1/v1/stream')
+    expect(await (await fetch(url)).text()).toBe('/target-0/v1/stream')
+  })
+
+  it.each([
     ['POST', ['GET', 'HEAD'], 405],
     ['OPTIONS', ['GET', 'HEAD'], 204],
     ['POST', [], 404],
@@ -200,7 +259,7 @@ describe('gateway over HTTP', () => {
     expect(mocks.authorize).not.toHaveBeenCalled()
   })
 
-  it.each(['deadline', 'disconnect'] as const)('cleans up a timed-out first Target and a streaming replacement on %s', async (ending) => {
+  it.each(['success', 'deadline', 'disconnect'] as const)('cleans up a timed-out first Target and a streaming replacement on %s', async (ending) => {
     match.route.timeoutMs = 2_700
     const baseUrl = match.upstream.targets[0]!.baseUrl
     match.upstream.targets = [
@@ -209,23 +268,31 @@ describe('gateway over HTTP', () => {
     ]
     const requests: string[] = []
     const closed = new Set<string>()
+    let replacement: ServerResponse | undefined
     upstreamHandler = (req, res) => {
       const path = req.url!
       requests.push(path)
       res.once('close', () => closed.add(path))
-      if (path.startsWith('/replacement')) res.write('paid-prefix')
+      if (path.startsWith('/replacement')) { replacement = res; res.write('paid-prefix') }
     }
     const health = vi.spyOn(gatewayTargetHealth, 'report')
     const controller = new AbortController()
     const pending = fetch(url, { signal: controller.signal })
-    const result = pending.then(response => response.json(), () => null)
+    const result = pending.then(response => response.text(), () => null)
     await vi.waitFor(() => expect(requests).toHaveLength(2), { timeout: 4_000 })
     if (ending === 'disconnect') controller.abort()
+    if (ending === 'success') replacement!.end('-complete')
     const body = await result
-    if (ending === 'deadline') expect(body).toMatchObject({ code: 'UPSTREAM_TIMEOUT' })
+    if (ending === 'deadline') expect(JSON.parse(body!)).toMatchObject({ code: 'UPSTREAM_TIMEOUT' })
+    if (ending === 'success') expect(body).toBe('paid-prefix-complete')
     await vi.waitFor(() => expect(closed.size).toBe(2))
-    await vi.waitFor(() => expect(mocks.release).toHaveBeenCalledOnce())
-    expect(mocks.mark).not.toHaveBeenCalled()
+    if (ending === 'success') {
+      expect(mocks.mark).toHaveBeenCalledOnce()
+      expect(mocks.release).not.toHaveBeenCalled()
+    } else {
+      await vi.waitFor(() => expect(mocks.release).toHaveBeenCalledOnce())
+      expect(mocks.mark).not.toHaveBeenCalled()
+    }
     expect(health.mock.calls.filter(([, healthy]) => !healthy)).toHaveLength(1)
     expect(lastEvent.node.req.listenerCount('aborted')).toBe(0)
   }, 6_000)

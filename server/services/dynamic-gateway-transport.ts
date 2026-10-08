@@ -17,7 +17,7 @@ const RETRYABLE_UPSTREAM_STATUSES = new Set([502, 503, 504])
 const MIN_ATTEMPT_TIMEOUT_MS = 2_000
 const MAX_TARGET_COUNTERS = 10_000
 const targetCounters = new Map<string, number>()
-export type GatewayTarget = ResolvedDynamicRoute['upstream']['targets'][number]
+type GatewayTarget = ResolvedDynamicRoute['upstream']['targets'][number]
 
 function availableTargets(match: ResolvedDynamicRoute): GatewayTarget[] {
   const targets = match.upstream.targets
@@ -35,7 +35,7 @@ function availableTargets(match: ResolvedDynamicRoute): GatewayTarget[] {
   return available.length > 0 ? available : targets
 }
 
-export function orderedGatewayTargets(
+function orderedGatewayTargets(
   match: ResolvedDynamicRoute
 ): GatewayTarget[] {
   const targets = availableTargets(match)
@@ -77,12 +77,7 @@ async function orderedGatewayTargetsAsync(match: ResolvedDynamicRoute): Promise<
   return orderedGatewayTargets(match)
 }
 
-export function resetGatewayTargetHealth(): void {
-  gatewayTargetHealth.clear()
-  targetCounters.clear()
-}
-
-export function buildGatewayTargetUrl(
+function buildGatewayTargetUrl(
   baseUrl: string,
   upstreamPath: string,
   search: string
@@ -127,7 +122,7 @@ function isServiceTokenRejection(response: Response): boolean {
       .startsWith('service ') === true
 }
 
-export function createGatewayProxyFetch(input: {
+function createGatewayProxyFetch(input: {
   match: ResolvedDynamicRoute
   targets: GatewayTarget[]
   upstreamPath: string
