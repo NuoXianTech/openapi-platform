@@ -140,3 +140,15 @@ useSeoMeta({
     </Suspense>
   </div>
 </template>
+
+<style scoped>
+@media (width >= 640px) {
+  .home-page :deep(.home-hero__stage),
+  .home-page :deep(.popular-apis),
+  .home-page :deep(.api-onboarding__layout),
+  .home-page :deep(.site-footer .site-footer__inner) {
+    width: calc(100% - 96px);
+    max-width: 1080px;
+  }
+}
+</style>

@@ -5,6 +5,7 @@
       "catalog": "API catalog",
       "getStarted": "Get started",
       "language": "Change language",
+      "currentLanguage": "{language}, change language",
       "openMenu": "Open navigation menu",
       "closeMenu": "Close navigation menu"
     },

@@ -9,6 +9,10 @@ body:has(.public-page) {
   background: var(--ui-bg);
 }
 
+:root:not(.dark) .home-page {
+  --ui-bg: #ffffff;
+}
+
 .public-page .site-footer .site-footer__inner {
   width: calc(100% - 48px);
   max-width: 1180px;

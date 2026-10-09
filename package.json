@@ -22,6 +22,7 @@
   },
   "dependencies": {
     "@electric-sql/pglite": "0.5.8",
+    "@iconify-json/flag": "^1.2.12",
     "@iconify-json/lucide": "^1.2.137",
     "@iconify-json/mdi": "^1.2.3",
     "@internationalized/date": "3.12.4",

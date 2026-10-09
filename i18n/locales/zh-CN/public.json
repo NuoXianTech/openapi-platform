@@ -5,6 +5,7 @@
       "catalog": "接口目录",
       "getStarted": "开始使用",
       "language": "切换语言",
+      "currentLanguage": "{language}，切换语言",
       "openMenu": "打开导航菜单",
       "closeMenu": "关闭导航菜单"
     },

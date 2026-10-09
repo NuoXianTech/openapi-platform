@@ -104,7 +104,6 @@ onBeforeUnmount(() => clearTimeout(sampleTimer))
 
 <template>
   <section class="home-hero" aria-labelledby="home-hero-title">
-    <div class="home-hero__mesh" aria-hidden="true" />
     <div class="home-hero__stage">
       <div class="home-hero__content">
         <div v-if="formattedUptime || showCallCount" class="home-hero__summary">
@@ -202,29 +201,13 @@ onBeforeUnmount(() => clearTimeout(sampleTimer))
 
 .home-hero__stage {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(420px, 500px);
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   align-items: center;
   width: calc(100% - 48px);
   max-width: 1180px;
   margin-inline: auto;
-  gap: 80px;
+  gap: 48px;
   padding-block: var(--design-space-section);
-}
-
-.home-hero__mesh {
-  position: absolute;
-  z-index: -1;
-  inset: 0 -5% -20%;
-  pointer-events: none;
-  opacity: 0.7;
-  background:
-    radial-gradient(ellipse at 4% 62%, #00dfd84d, transparent 44%),
-    radial-gradient(ellipse at 28% 78%, #007cf045, transparent 42%),
-    radial-gradient(ellipse at 55% 58%, #7928ca40, transparent 42%),
-    radial-gradient(ellipse at 78% 64%, #ff008033, transparent 40%),
-    radial-gradient(ellipse at 100% 78%, #f9cb2857, transparent 38%);
-  filter: blur(36px);
-  mask-image: linear-gradient(transparent, #000 26%, #000 70%, transparent);
 }
 
 .home-hero__content {

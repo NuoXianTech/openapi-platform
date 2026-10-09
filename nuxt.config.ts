@@ -201,7 +201,7 @@ export default defineNuxtConfig({
 
   icon: {
     serverBundle: {
-      collections: ['lucide', 'mdi']
+      collections: ['lucide', 'mdi', 'flag']
     },
   },
 })

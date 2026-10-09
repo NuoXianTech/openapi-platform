@@ -28,17 +28,26 @@ const dashboardLabel = computed(() => user.value?.role === 'admin'
   ? t('public.home.adminDashboard')
   : t('public.home.userDashboard'))
 
+const languageFlags: Record<SupportedLocale, string> = {
+  'zh-CN': 'i-flag-cn-4x3',
+  'en-US': 'i-flag-us-4x3'
+}
+
 const languages = computed(() => locales.value.flatMap((item) => {
   const code = typeof item === 'string' ? item : item.code
   if (!isSupportedLocale(code)) return []
-  return [{ code, label: typeof item === 'string' ? item : item.name || item.code }]
+  return [{ code, label: typeof item === 'string' ? item : item.name || item.code, flag: languageFlags[code] }]
 }))
+
+const currentLanguageLabel = computed(() => languages.value.find(item => item.code === locale.value)?.label ?? locale.value)
 
 const languageItems = computed<DropdownMenuItem[]>(() => languages.value.map(item => ({
   label: item.label,
+  flag: item.flag,
+  type: 'checkbox',
+  checked: item.code === locale.value,
   active: item.code === locale.value,
   disabled: isChangingLocale.value,
-  trailingIcon: item.code === locale.value ? 'i-mdi-check' : undefined,
   onSelect: () => void handleLocaleChange(item.code)
 })))
 
@@ -146,13 +155,15 @@ async function handleLocaleChange(nextLocale: SupportedLocale): Promise<void> {
                   color="neutral"
                   variant="ghost"
                   size="sm"
-                  square
-                  icon="i-mdi-translate"
+                  :label="currentLanguageLabel"
                   :loading="isChangingLocale"
                   :disabled="isChangingLocale"
-                  :aria-label="t('public.navigation.language')"
-                  class="site-header__tool"
+                  :aria-label="t('public.navigation.currentLanguage', { language: currentLanguageLabel })"
+                  class="site-header__language"
                 />
+                <template #item-leading="{ item }">
+                  <UIcon :name="item.flag" mode="svg" aria-hidden="true" class="site-header__language-flag" />
+                </template>
               </UDropdownMenu>
             </div>
 
@@ -173,6 +184,7 @@ async function handleLocaleChange(nextLocale: SupportedLocale): Promise<void> {
                 :class="{ 'is-active': locale === language.code }"
                 @click="handleLocaleChange(language.code)"
               >
+                <UIcon :name="language.flag" mode="svg" aria-hidden="true" class="site-header__language-flag" />
                 {{ language.label }}
               </UButton>
             </div>
@@ -262,10 +274,11 @@ async function handleLocaleChange(nextLocale: SupportedLocale): Promise<void> {
 
 <style scoped>
 .site-header {
+  --site-header-height: 56px;
+
   position: sticky;
   top: 0;
   z-index: 40;
-  border-bottom: 1px solid var(--ui-border);
   background: var(--ui-bg);
 }
 
@@ -274,7 +287,7 @@ async function handleLocaleChange(nextLocale: SupportedLocale): Promise<void> {
   grid-template-columns: minmax(0, 1fr) auto;
   width: calc(100% - 32px);
   max-width: 1180px;
-  min-height: 64px;
+  min-height: var(--site-header-height);
   margin-inline: auto;
   align-items: center;
   column-gap: 16px;
@@ -282,7 +295,7 @@ async function handleLocaleChange(nextLocale: SupportedLocale): Promise<void> {
 
 .site-header__brand {
   min-width: 0;
-  min-height: 64px;
+  min-height: var(--site-header-height);
 }
 
 .site-header__brand :deep(.site-brand__mark) {
@@ -309,7 +322,7 @@ async function handleLocaleChange(nextLocale: SupportedLocale): Promise<void> {
 .site-header__panel {
   display: none;
   grid-column: 1 / -1;
-  max-height: calc(100dvh - 65px);
+  max-height: calc(100dvh - var(--site-header-height));
   overflow-y: auto;
   overscroll-behavior: contain;
   padding: 8px 4px 16px;
@@ -393,6 +406,7 @@ async function handleLocaleChange(nextLocale: SupportedLocale): Promise<void> {
 .site-header__tool[data-state="open"],
 .site-header__language:hover,
 .site-header__language:active,
+.site-header__language[data-state="open"],
 .site-header__language.is-active {
   color: var(--ui-text-highlighted);
   background: transparent;
@@ -421,6 +435,13 @@ async function handleLocaleChange(nextLocale: SupportedLocale): Promise<void> {
   font-size: 14px;
   font-weight: 500;
   line-height: 20px;
+  white-space: nowrap;
+}
+
+.site-header__language-flag {
+  width: 22px;
+  height: 16px;
+  flex-shrink: 0;
 }
 
 .site-header__account {
@@ -531,15 +552,14 @@ async function handleLocaleChange(nextLocale: SupportedLocale): Promise<void> {
     flex: 0 0 auto;
     margin-inline-start: auto;
     align-items: center;
-    gap: 12px;
+    gap: 8px;
   }
 
   .site-header__utilities {
     justify-content: start;
     gap: 4px;
-    padding: 0 12px 0 0;
+    padding: 0;
     border-block: 0;
-    border-inline-end: 1px solid var(--ui-border);
   }
 
   .site-header__language-dropdown { display: block; }
