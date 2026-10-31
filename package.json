@@ -34,7 +34,7 @@
     "drizzle-orm": "^0.45.3",
     "h3": "1.15.11",
     "ioredis": "5.11.1",
-    "nodemailer": "^10.0.10",
+    "nodemailer": "^10.1.4",
     "nuxt": "^4.5.2",
     "postgres": "^3.4.9",
     "tailwindcss": "^4.3.3",
